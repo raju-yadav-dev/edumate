@@ -1,0 +1,92 @@
+.register-page{
+
+    width:100%;
+
+    min-height:100vh;
+
+    display:flex;
+
+    justify-content:center;
+
+    align-items:center;
+
+    background:#F8FAFC;
+
+}
+
+.register-card{
+
+    width:500px;
+
+    background:white;
+
+    padding:50px;
+
+    border-radius:20px;
+
+    box-shadow:0 10px 40px rgba(0,0,0,.1);
+
+}
+
+.register-card h1{
+
+    text-align:center;
+
+    color:#2563EB;
+
+    margin-bottom:10px;
+
+}
+
+.register-card p{
+
+    text-align:center;
+
+    margin-bottom:30px;
+
+    color:#64748B;
+
+}
+
+.register-card form{
+
+    display:flex;
+
+    flex-direction:column;
+
+    gap:18px;
+
+}
+
+.register-card input,
+.register-card select{
+
+    padding:15px;
+
+    border:1px solid #d1d5db;
+
+    border-radius:10px;
+
+    outline:none;
+
+    font-size:16px;
+
+}
+
+.register-card button{
+
+    padding:16px;
+
+    background:#2563EB;
+
+    color:white;
+
+    border:none;
+
+    border-radius:10px;
+
+    cursor:pointer;
+
+    font-size:18px;
+
+}

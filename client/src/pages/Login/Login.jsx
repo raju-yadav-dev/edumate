@@ -1,0 +1,52 @@
+import "./Login.css";
+
+function Login() {
+
+    return (
+
+        <div className="login-page">
+
+            <div className="login-card">
+
+                <h1>EduMate</h1>
+
+                <p>Sign in to continue</p>
+
+                <form>
+
+                    <input
+                        type="email"
+                        placeholder="Email Address"
+                    />
+
+                    <input
+                        type="password"
+                        placeholder="Password"
+                    />
+
+                    <button>
+                        Login
+                    </button>
+
+                </form>
+
+                <div className="login-links">
+
+                    <a href="#">Forgot Password?</a>
+
+                    <p>
+                        Don't have an account?
+                        <a href="#"> Register</a>
+                    </p>
+
+                </div>
+
+            </div>
+
+        </div>
+
+    );
+
+}
+
+export default Login;
