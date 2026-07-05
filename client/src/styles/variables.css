@@ -1,0 +1,214 @@
+/* =======================================================
+   EduMate Design System v2
+   Light Theme (Default)
+======================================================= */
+
+:root{
+
+    /* Brand */
+
+    --primary:#6F7CFF;
+    --primary-hover:#566EF0;
+
+    --secondary:#A9DFFF;
+
+    --accent:#C89CFF;
+
+    --success:#22C55E;
+
+    --warning:#F59E0B;
+
+    --danger:#EF4444;
+
+
+    /* Background */
+
+    --bg:#F8F7FF;
+
+    --ambient-glow:
+        radial-gradient(circle at top left,
+            rgba(111,124,255,.20),
+            transparent 34%),
+        radial-gradient(circle at top right,
+            rgba(209,155,255,.16),
+            transparent 32%),
+        radial-gradient(circle at bottom left,
+            rgba(183,217,255,.16),
+            transparent 40%),
+        linear-gradient(180deg,
+            rgba(255,255,255,.92),
+            rgba(255,255,255,0));
+
+    --surface:rgba(255,255,255,.42);
+
+    --card:rgba(255,255,255,.30);
+
+
+    /* Text */
+
+    --text:#111827;
+
+    --text-light:#475569;
+
+    --on-primary:#081019;
+
+    --heading:#0F172A;
+
+
+    /* Border */
+
+    --border:rgba(255,255,255,.65);
+
+
+    /* Glass */
+
+    --glass:rgba(255,255,255,.34);
+
+    --glass-border:rgba(255,255,255,.94);
+
+
+    /* Shadow */
+
+    --shadow:0 26px 66px rgba(15,23,42,.16);
+
+    --shadow-hover:0 38px 96px rgba(15,23,42,.24);
+
+    --neon-shadow:0 0 24px rgba(111,124,255,.34);
+
+
+    /* Radius */
+
+    --radius-xs:8px;
+
+    --radius-sm:12px;
+
+    --radius-md:18px;
+
+    --radius-lg:24px;
+
+    --radius-xl:32px;
+
+    --radius-round:999px;
+
+
+    /* Transition */
+
+    --transition:.35s ease;
+
+
+    /* Blur */
+
+    --blur:18px;
+
+}
+
+
+/* =======================================================
+   DARK THEME
+======================================================= */
+
+[data-theme="dark"]{
+
+    /* Brand */
+
+    --primary:#C8FF49;
+
+    --primary-hover:#EDFF9B;
+
+    --secondary:#34EEFF;
+
+    --accent:#6C63FF;
+
+    --success:#8DFF3E;
+
+    --warning:#FBBF24;
+
+    --danger:#F87171;
+
+
+    /* Background */
+
+    --bg:#05070B;
+
+    --ambient-glow:
+        radial-gradient(circle at top left,
+            rgba(200,255,73,.22),
+            transparent 30%),
+        radial-gradient(circle at top right,
+            rgba(52,238,255,.16),
+            transparent 28%),
+        radial-gradient(circle at bottom left,
+            rgba(108,99,255,.12),
+            transparent 42%),
+        linear-gradient(180deg,
+            rgba(5,7,11,.10),
+            rgba(5,7,11,.72));
+
+    --surface:rgba(11,16,22,.88);
+
+    --card:rgba(14,20,30,.92);
+
+
+    /* Text */
+
+    --text:#FFFFFF;
+
+    --text-light:#C9D3DF;
+
+    --on-primary:#081019;
+
+    --heading:#FFFFFF;
+
+
+    /* Border */
+
+    --border:rgba(141,255,62,.15);
+
+
+    /* Glass */
+
+    --glass:rgba(10,17,26,.88);
+
+    --glass-border:rgba(200,255,73,.30);
+
+
+    /* Shadow */
+
+    --shadow:
+        0 0 0 1px rgba(200,255,73,.10),
+        0 0 34px rgba(200,255,73,.24),
+        0 22px 60px rgba(0,0,0,.52);
+
+    --shadow-hover:
+        0 0 0 1px rgba(200,255,73,.18),
+        0 0 48px rgba(200,255,73,.34),
+        0 28px 72px rgba(0,0,0,.56);
+
+    --neon-shadow:0 0 28px rgba(200,255,73,.34);
+
+
+    /* Radius */
+
+    --radius-xs:8px;
+
+    --radius-sm:12px;
+
+    --radius-md:18px;
+
+    --radius-lg:24px;
+
+    --radius-xl:32px;
+
+    --radius-round:999px;
+
+
+    /* Transition */
+
+    --transition:.35s ease;
+
+
+    /* Blur */
+
+    --blur:18px;
+
+}

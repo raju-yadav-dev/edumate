@@ -1,0 +1,1002 @@
+/* =======================================================
+   THEME TOGGLE 
+======================================================= */
+
+.theme-toggle{
+
+    position:relative;
+
+    width:82px;
+
+    height:42px;
+
+    border:none;
+
+    border-radius:999px;
+
+    cursor:pointer;
+
+    overflow:hidden;
+
+    display:flex;
+
+    align-items:center;
+
+    justify-content:flex-start;
+
+    transition:.45s ease;
+
+}
+
+/* =======================================================
+   LIGHT
+======================================================= */
+
+.theme-toggle.light{
+
+    background:linear-gradient(
+        135deg,
+        #F9FCFF,
+        #E7F2FF
+    );
+
+    border:1px solid rgba(255,255,255,.8);
+
+    box-shadow:
+        inset 0 2px 8px rgba(255,255,255,.9),
+        0 10px 20px rgba(0,0,0,.08);
+
+}
+
+/* =======================================================
+   DARK
+======================================================= */
+
+.theme-toggle.dark{
+
+    background:linear-gradient(
+        135deg,
+        #0B0F15,
+        #18202A
+    );
+
+    border:1px solid rgba(141,255,62,.18);
+
+    box-shadow:
+        inset 0 0 12px rgba(141,255,62,.08),
+        0 0 20px rgba(141,255,62,.15);
+
+}
+
+/* =======================================================
+   THUMB
+======================================================= */
+
+.toggle-thumb{
+
+    position:absolute;
+
+    top:4px;
+
+    left:4px;
+
+    width:34px;
+
+    height:34px;
+
+    border-radius:50%;
+
+    display:flex;
+
+    justify-content:center;
+
+    align-items:center;
+
+    transition:
+        transform .45s cubic-bezier(.68,-0.55,.27,1.55),
+        background .35s ease,
+        box-shadow .35s ease;
+
+    z-index:5;
+
+}
+
+/* =======================================================
+   LIGHT THUMB
+======================================================= */
+
+.theme-toggle.light .toggle-thumb{
+
+    background:white;
+
+    box-shadow:
+        0 4px 12px rgba(0,0,0,.12);
+
+}
+
+/* =======================================================
+   DARK THUMB
+======================================================= */
+
+.theme-toggle.dark .toggle-thumb{
+
+    transform:translateX(40px);
+
+    background:#121922;
+
+    box-shadow:
+        0 0 18px rgba(141,255,62,.25);
+
+}
+
+/* =======================================================
+   SUN & MOON CONTAINER
+======================================================= */
+
+.sun,
+.moon{
+
+    position:absolute;
+
+    width:100%;
+
+    height:100%;
+
+    display:flex;
+
+    justify-content:center;
+
+    align-items:center;
+
+    transition:
+        opacity .35s ease,
+        transform .35s ease;
+
+}
+
+/* =======================================================
+   VISIBILITY
+======================================================= */
+
+.theme-toggle.light .sun{
+
+    opacity:1;
+
+    transform:scale(1);
+
+}
+
+.theme-toggle.light .moon{
+
+    opacity:0;
+
+    transform:scale(.5);
+
+}
+
+.theme-toggle.dark .sun{
+
+    opacity:0;
+
+    transform:scale(.5);
+
+}
+
+.theme-toggle.dark .moon{
+
+    opacity:1;
+
+    transform:scale(1);
+
+}
+
+/* =======================================================
+   STARS
+======================================================= */
+
+.star{
+
+    position:absolute;
+
+    width:2px;
+
+    height:2px;
+
+    background:#A8FF60;
+
+    border-radius:50%;
+
+    opacity:0;
+
+}
+
+.theme-toggle.dark .star{
+
+    opacity:1;
+
+}
+
+/* =======================================================
+   CLOUD
+======================================================= */
+
+.cloud{
+
+    position:absolute;
+
+    right:8px;
+
+    top:17px;
+
+    width:18px;
+
+    height:6px;
+
+    background:white;
+
+    border-radius:999px;
+
+    opacity:.75;
+
+    transition:.35s ease;
+
+}
+
+.cloud::before{
+
+    content:"";
+
+    position:absolute;
+
+    width:9px;
+
+    height:9px;
+
+    left:1px;
+
+    top:-4px;
+
+    background:white;
+
+    border-radius:50%;
+
+}
+
+.cloud::after{
+
+    content:"";
+
+    position:absolute;
+
+    width:11px;
+
+    height:11px;
+
+    right:1px;
+
+    top:-6px;
+
+    background:white;
+
+    border-radius:50%;
+
+}
+
+.theme-toggle.dark .cloud{
+
+    opacity:0;
+
+}
+
+/* =======================================================
+   HOVER
+======================================================= */
+
+.theme-toggle:hover{
+
+    transform:scale(1.05);
+
+}
+
+/* =======================================================
+   SUN
+======================================================= */
+
+.sun-core{
+
+    width:16px;
+
+    height:16px;
+
+    border-radius:50%;
+
+    background:radial-gradient(circle,#FFE16B,#FFC400);
+
+    box-shadow:
+        0 0 10px rgba(255,212,71,.8),
+        0 0 20px rgba(255,212,71,.45);
+
+    position:relative;
+
+    z-index:2;
+
+}
+
+/* ========================= */
+
+.ray{
+
+    position:absolute;
+
+    width:2px;
+
+    height:8px;
+
+    background:#FFD447;
+
+    border-radius:999px;
+
+    left:50%;
+
+    top:50%;
+
+    margin-left:-1px;
+
+    transform-origin:center -9px;
+
+    animation:rotateSun 12s linear infinite;
+
+}
+
+/* ========================= */
+
+.r1{
+
+    transform:
+        translate(-50%,-50%)
+        rotate(0deg);
+
+}
+
+.r2{
+
+    transform:
+        translate(-50%,-50%)
+        rotate(45deg);
+
+}
+
+.r3{
+
+    transform:
+        translate(-50%,-50%)
+        rotate(90deg);
+
+}
+
+.r4{
+
+    transform:
+        translate(-50%,-50%)
+        rotate(135deg);
+
+}
+
+.r5{
+
+    transform:
+        translate(-50%,-50%)
+        rotate(180deg);
+
+}
+
+.r6{
+
+    transform:
+        translate(-50%,-50%)
+        rotate(225deg);
+
+}
+
+.r7{
+
+    transform:
+        translate(-50%,-50%)
+        rotate(270deg);
+
+}
+
+.r8{
+
+    transform:
+        translate(-50%,-50%)
+        rotate(315deg);
+
+}
+
+/* =======================================================
+   MOON
+======================================================= */
+
+.moon::before{
+
+    content:"";
+
+    width:18px;
+
+    height:18px;
+
+    border-radius:50%;
+
+    background:#A8FF60;
+
+    display:block;
+
+    box-shadow:
+        0 0 12px rgba(141,255,62,.45),
+        0 0 22px rgba(141,255,62,.25);
+
+}
+
+/* ========================= */
+
+.moon-cut{
+
+    position:absolute;
+
+    width:18px;
+
+    height:18px;
+
+    border-radius:50%;
+
+    background:#141B24;
+
+    transform:
+        translate(5px,-2px);
+
+}
+
+/* =======================================================
+   ICON TRANSITIONS
+======================================================= */
+
+.theme-toggle.light .sun{
+
+    animation:
+
+        popIn .45s ease;
+
+}
+
+.theme-toggle.dark .moon{
+
+    animation:
+
+        popIn .45s ease;
+
+}
+
+/* =======================================================
+   ANIMATIONS
+======================================================= */
+
+@keyframes rotateSun{
+
+    from{
+
+        transform:
+            translate(-50%,-50%)
+            rotate(0deg);
+
+    }
+
+    to{
+
+        transform:
+            translate(-50%,-50%)
+            rotate(360deg);
+
+    }
+
+}
+
+/* ========================= */
+
+@keyframes popIn{
+
+    0%{
+
+        transform:scale(.5);
+
+        opacity:0;
+
+    }
+
+    70%{
+
+        transform:scale(1.15);
+
+    }
+
+    100%{
+
+        transform:scale(1);
+
+        opacity:1;
+
+    }
+
+}
+/* =======================================================
+   STARS
+======================================================= */
+
+.star{
+
+    box-shadow:
+        0 0 6px rgba(168,255,96,.9),
+        0 0 12px rgba(168,255,96,.5);
+
+    animation:twinkle 2.5s infinite ease-in-out;
+
+}
+
+.s1{
+
+    top:9px;
+
+    left:16px;
+
+    animation-delay:0s;
+
+}
+
+.s2{
+
+    top:30px;
+
+    left:28px;
+
+    animation-delay:.7s;
+
+}
+
+.s3{
+
+    top:8px;
+
+    right:18px;
+
+    animation-delay:1.3s;
+
+}
+
+.s4{
+
+    bottom:8px;
+
+    right:30px;
+
+    animation-delay:2s;
+
+}
+
+/* =======================================================
+   CLOUD
+======================================================= */
+
+.cloud{
+
+    animation:cloudFloat 5s ease-in-out infinite;
+
+    box-shadow:
+
+        0 2px 8px rgba(255,255,255,.5);
+
+}
+
+.theme-toggle.dark .cloud{
+
+    opacity:0;
+
+    transform:translateX(10px);
+
+}
+
+.theme-toggle.light .cloud{
+
+    opacity:.9;
+
+    transform:translateX(0);
+
+}
+
+/* =======================================================
+   TRACK SHINE
+======================================================= */
+
+.theme-toggle::before{
+
+    content:"";
+
+    position:absolute;
+
+    top:0;
+
+    left:-120%;
+
+    width:55%;
+
+    height:100%;
+
+    background:linear-gradient(
+
+        120deg,
+
+        transparent,
+
+        rgba(255,255,255,.45),
+
+        transparent
+
+    );
+
+    transition:.8s;
+
+}
+
+.theme-toggle:hover::before{
+
+    left:130%;
+
+}
+
+/* =======================================================
+   DARK GLOW
+======================================================= */
+
+.theme-toggle.dark:hover{
+
+    box-shadow:
+
+        0 0 10px rgba(168,255,96,.20),
+
+        0 0 25px rgba(168,255,96,.25),
+
+        0 0 40px rgba(168,255,96,.15);
+
+}
+
+/* =======================================================
+   LIGHT SHADOW
+======================================================= */
+
+.theme-toggle.light:hover{
+
+    box-shadow:
+
+        0 10px 25px rgba(0,0,0,.12),
+
+        inset 0 2px 10px rgba(255,255,255,.9);
+
+}
+
+/* =======================================================
+   THUMB HOVER
+======================================================= */
+
+.theme-toggle:hover .toggle-thumb{
+
+    transform:scale(1.05);
+
+}
+
+.theme-toggle.dark:hover .toggle-thumb{
+
+    transform:
+
+        translateX(40px)
+
+        scale(1.05);
+
+}
+
+/* =======================================================
+   ANIMATIONS
+======================================================= */
+
+@keyframes twinkle{
+
+    0%{
+
+        opacity:.2;
+
+        transform:scale(.8);
+
+    }
+
+    50%{
+
+        opacity:1;
+
+        transform:scale(1.7);
+
+    }
+
+    100%{
+
+        opacity:.2;
+
+        transform:scale(.8);
+
+    }
+
+}
+
+@keyframes cloudFloat{
+
+    0%{
+
+        transform:translateX(0);
+
+    }
+
+    50%{
+
+        transform:translateX(-3px);
+
+    }
+
+    100%{
+
+        transform:translateX(0);
+
+    }
+
+}
+
+/* ---------- Thumb Glow ---------- */
+
+.theme-toggle.light .toggle-thumb{
+
+    background:linear-gradient(
+        135deg,
+        #FFFFFF,
+        #F3F7FF
+    );
+
+}
+
+.theme-toggle.dark .toggle-thumb{
+
+    background:linear-gradient(
+        135deg,
+        #18212C,
+        #0D1219
+    );
+
+}
+
+/* ---------- Glass Reflection ---------- */
+
+.toggle-thumb::before{
+
+    content:"";
+
+    position:absolute;
+
+    top:3px;
+
+    left:5px;
+
+    width:14px;
+
+    height:6px;
+
+    border-radius:999px;
+
+    background:rgba(255,255,255,.55);
+
+    filter:blur(1px);
+
+}
+
+/* ---------- Moon Glow ---------- */
+
+.theme-toggle.dark .moon::before{
+
+    animation:moonGlow 3s ease-in-out infinite;
+
+}
+
+/* ---------- Sun Glow ---------- */
+
+.theme-toggle.light .sun-core{
+
+    animation:sunPulse 2.5s ease-in-out infinite;
+
+}
+
+/* ---------- Hover ---------- */
+
+.theme-toggle:hover{
+
+    transform:scale(1.08);
+
+}
+
+.theme-toggle:active{
+
+    transform:scale(.95);
+
+}
+
+/* ---------- Track Glow ---------- */
+
+.theme-toggle.dark{
+
+    transition:
+
+        background .35s ease,
+
+        box-shadow .35s ease,
+
+        transform .25s ease;
+
+}
+
+.theme-toggle.light{
+
+    transition:
+
+        background .35s ease,
+
+        box-shadow .35s ease,
+
+        transform .25s ease;
+
+}
+
+/* ---------- Focus ---------- */
+
+.theme-toggle:focus-visible{
+
+    outline:none;
+
+    box-shadow:
+
+        0 0 0 3px rgba(37,99,235,.35);
+
+}
+
+[data-theme="dark"] .theme-toggle:focus-visible{
+
+    box-shadow:
+
+        0 0 0 3px rgba(141,255,62,.35);
+
+}
+
+/* ---------- Responsive ---------- */
+
+@media(max-width:768px){
+
+    .theme-toggle{
+
+        width:72px;
+
+        height:38px;
+
+    }
+
+    .toggle-thumb{
+
+        width:30px;
+
+        height:30px;
+
+    }
+
+    .theme-toggle.dark .toggle-thumb{
+
+        transform:translateX(34px);
+
+    }
+
+    .sun-core{
+
+        width:14px;
+
+        height:14px;
+
+    }
+
+    .moon::before{
+
+        width:16px;
+
+        height:16px;
+
+    }
+
+    .moon-cut{
+
+        width:16px;
+
+        height:16px;
+
+    }
+
+}
+
+/* ---------- Animations ---------- */
+
+@keyframes sunPulse{
+
+    0%{
+
+        box-shadow:
+
+            0 0 8px rgba(255,212,71,.45);
+
+    }
+
+    50%{
+
+        box-shadow:
+
+            0 0 20px rgba(255,212,71,.85);
+
+    }
+
+    100%{
+
+        box-shadow:
+
+            0 0 8px rgba(255,212,71,.45);
+
+    }
+
+}
+
+@keyframes moonGlow{
+
+    0%{
+
+        box-shadow:
+
+            0 0 10px rgba(141,255,62,.35);
+
+    }
+
+    50%{
+
+        box-shadow:
+
+            0 0 22px rgba(141,255,62,.75);
+
+    }
+
+    100%{
+
+        box-shadow:
+
+            0 0 10px rgba(141,255,62,.35);
+
+    }
+
+}
+
+/* ---------- Smooth Rendering ---------- */
+
+.theme-toggle,
+.toggle-thumb,
+.sun,
+.moon,
+.star,
+.cloud{
+
+    will-change:transform,opacity;
+
+}

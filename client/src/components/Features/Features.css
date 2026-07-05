@@ -1,18 +1,18 @@
 .features{
     padding:100px 80px;
-    background:#ffffff;
+    background:var(--glass);
 }
 
 .features h2{
     text-align:center;
     font-size:42px;
-    color:#0F172A;
+    color:var(--heading);
 }
 
 .section-text{
     text-align:center;
     margin-top:20px;
-    color:#64748B;
+    color:var(--text-light);
     font-size:18px;
 }
 
@@ -29,13 +29,14 @@
 
 .feature-card{
 
-    background:#F8FAFC;
+    background:var(--glass);
 
     padding:30px;
 
     border-radius:15px;
 
-    box-shadow:0 8px 20px rgba(0,0,0,.08);
+    border:1px solid var(--glass-border);
+    box-shadow:var(--shadow);
 
     transition:.3s;
 }
@@ -44,19 +45,19 @@
 
     transform:translateY(-10px);
 
-    box-shadow:0 15px 30px rgba(37,99,235,.15);
+    box-shadow:var(--shadow-hover);
 }
 
 .feature-card h3{
 
     margin-bottom:15px;
 
-    color:#2563EB;
+    color:var(--primary);
 }
 
 .feature-card p{
 
-    color:#64748B;
+    color:var(--text-light);
 
     line-height:1.7;
 }

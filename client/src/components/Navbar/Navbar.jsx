@@ -1,7 +1,11 @@
 import "./Navbar.css";
 
+import ThemeToggle from "../ThemeToggle/ThemeToggle";
+
 function Navbar() {
+
     return (
+
         <nav className="navbar">
 
             <div className="logo">
@@ -24,6 +28,8 @@ function Navbar() {
 
             <div className="nav-buttons">
 
+                <ThemeToggle />
+
                 <button className="login-btn">
                     Login
                 </button>
@@ -31,7 +37,9 @@ function Navbar() {
             </div>
 
         </nav>
+
     );
+
 }
 
 export default Navbar;

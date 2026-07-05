@@ -2,7 +2,14 @@
 
     padding:100px 80px;
 
-    background: linear-gradient(135deg,#2563EB,#1D4ED8);
+    background:var(--glass);
+    border:1px solid var(--glass-border);
+    backdrop-filter:blur(calc(var(--blur) + 6px));
+    -webkit-backdrop-filter:blur(calc(var(--blur) + 6px));
+
+    border-radius:36px;
+    margin:0;
+    box-shadow:var(--shadow-hover);
 
 }
 
@@ -10,7 +17,7 @@
 
     text-align:center;
 
-    color:white;
+    color:var(--heading);
 
     margin-bottom:70px;
 
@@ -28,7 +35,8 @@
 
     font-size:18px;
 
-    opacity:.9;
+    color:var(--text-light);
+    opacity:1;
 
 }
 
@@ -44,11 +52,11 @@
 
 .stat-card {
 
-    background: rgba(255,255,255,.12);
+    background: var(--glass);
 
     backdrop-filter: blur(15px);
 
-    border: 1px solid rgba(255,255,255,.2);
+    border: 1px solid var(--glass-border);
 
     border-radius: 20px;
 
@@ -56,7 +64,7 @@
 
     text-align: center;
 
-    color: white;
+    color: var(--text);
 
     transition: .4s;
 
@@ -68,7 +76,8 @@
 
     transform: translateY(-15px) scale(1.03);
 
-    background: rgba(255,255,255,.2);
+    background: rgba(255,255,255,.42);
+    box-shadow:var(--shadow-hover);
 
 }
 
@@ -83,5 +92,7 @@
 .stat-card p{
 
     font-size:18px;
+
+    color:var(--text-light);
 
 }

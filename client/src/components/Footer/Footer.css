@@ -1,6 +1,8 @@
 .footer{
 
-    background:#0F172A;
+    background:
+        radial-gradient(circle at top left, rgba(141,255,62,.14), transparent 30%),
+        linear-gradient(180deg, #091018 0%, #05070B 100%);
 
     color:white;
 
@@ -20,7 +22,7 @@
 
 .footer-section h2{
 
-    color:#38BDF8;
+    color:var(--primary);
 
     margin-bottom:20px;
 
@@ -34,7 +36,7 @@
 
 .footer-section p{
 
-    color:#CBD5E1;
+    color:#C7D2FE;
 
     line-height:1.8;
 
@@ -50,7 +52,7 @@
 
     margin-bottom:15px;
 
-    color:#CBD5E1;
+    color:#C7D2FE;
 
     cursor:pointer;
 
@@ -60,13 +62,13 @@
 
 .footer-section ul li:hover{
 
-    color:white;
+    color:var(--primary);
 
 }
 
 .footer-section a{
 
-    color:#CBD5E1;
+    color:#C7D2FE;
 
     text-decoration:none;
 
@@ -74,7 +76,7 @@
 
 .footer-section a:hover{
 
-    color:white;
+    color:var(--primary);
 
 }
 
@@ -106,7 +108,7 @@ hr{
 
     border:none;
 
-    border-top:1px solid rgba(255,255,255,.2);
+    border-top:1px solid rgba(141,255,62,.16);
 
 }
 
