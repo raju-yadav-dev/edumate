@@ -2,7 +2,7 @@ import "./Contact.css";
 
 function Contact() {
     return (
-        <section className="contact">
+        <section id="contact" className="contact">
 
             <div className="contact-info">
 
@@ -13,27 +13,18 @@ function Contact() {
                 </p>
 
                 <div className="info-box">
-
                     <h3>📍 Address</h3>
-
                     <p>Brainware University, Barasat, West Bengal</p>
-
                 </div>
 
                 <div className="info-box">
-
                     <h3>📧 Email</h3>
-
                     <p>support@edumate.com</p>
-
                 </div>
 
                 <div className="info-box">
-
                     <h3>📞 Phone</h3>
-
                     <p>+91 98765 43210</p>
-
                 </div>
 
             </div>
@@ -42,20 +33,11 @@ function Contact() {
 
                 <form>
 
-                    <input
-                        type="text"
-                        placeholder="Full Name"
-                    />
+                    <input type="text" placeholder="Full Name" />
 
-                    <input
-                        type="email"
-                        placeholder="Email Address"
-                    />
+                    <input type="email" placeholder="Email Address" />
 
-                    <input
-                        type="text"
-                        placeholder="Subject"
-                    />
+                    <input type="text" placeholder="Subject" />
 
                     <textarea
                         rows="6"

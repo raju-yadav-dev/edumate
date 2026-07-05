@@ -34,10 +34,7 @@
             transparent 32%),
         radial-gradient(circle at bottom left,
             rgba(183,217,255,.16),
-            transparent 40%),
-        linear-gradient(180deg,
-            rgba(255,255,255,.92),
-            rgba(255,255,255,0));
+            transparent 40%);
 
     --surface:rgba(255,255,255,.42);
 
@@ -139,10 +136,7 @@
             transparent 28%),
         radial-gradient(circle at bottom left,
             rgba(108,99,255,.12),
-            transparent 42%),
-        linear-gradient(180deg,
-            rgba(5,7,11,.10),
-            rgba(5,7,11,.72));
+            transparent 42%);
 
     --surface:rgba(11,16,22,.88);
 
