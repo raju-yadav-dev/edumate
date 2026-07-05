@@ -1,92 +1,85 @@
 .register-page{
 
-    width:100%;
-
     min-height:100vh;
 
     display:flex;
-
     justify-content:center;
-
     align-items:center;
 
-    background:#F8FAFC;
+    background:var(--background);
 
 }
+
 
 .register-card{
 
-    width:500px;
-
-    background:white;
+    width:450px;
 
     padding:50px;
 
-    border-radius:20px;
+    border-radius:30px;
 
-    box-shadow:0 10px 40px rgba(0,0,0,.1);
+    background:var(--glass);
+
+    border:1px solid var(--glass-border);
+
+    backdrop-filter:blur(var(--blur));
+
+    box-shadow:var(--shadow);
+
+    text-align:center;
 
 }
+
 
 .register-card h1{
 
-    text-align:center;
+    color:var(--primary);
 
-    color:#2563EB;
-
-    margin-bottom:10px;
+    text-shadow:var(--neon-shadow);
 
 }
+
 
 .register-card p{
 
-    text-align:center;
-
-    margin-bottom:30px;
-
-    color:#64748B;
+    color:var(--text-light);
 
 }
 
-.register-card form{
-
-    display:flex;
-
-    flex-direction:column;
-
-    gap:18px;
-
-}
 
 .register-card input,
 .register-card select{
 
-    padding:15px;
+    height:55px;
 
-    border:1px solid #d1d5db;
+    padding:0 18px;
 
-    border-radius:10px;
+    border-radius:12px;
 
-    outline:none;
+    background:var(--glass);
 
-    font-size:16px;
+    border:1px solid var(--glass-border);
+
+    color:var(--text);
 
 }
 
+
 .register-card button{
 
-    padding:16px;
-
-    background:#2563EB;
-
-    color:white;
+    height:55px;
 
     border:none;
 
-    border-radius:10px;
+    border-radius:12px;
 
-    cursor:pointer;
+    background:linear-gradient(
+        135deg,
+        var(--primary),
+        var(--secondary)
+    );
 
-    font-size:18px;
+    color:var(--on-primary);
 
 }

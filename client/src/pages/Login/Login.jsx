@@ -1,5 +1,7 @@
 import "./Login.css";
 
+import { Link } from "react-router-dom";
+
 function Login() {
 
     return (
@@ -32,11 +34,17 @@ function Login() {
 
                 <div className="login-links">
 
-                    <a href="#">Forgot Password?</a>
+                    <Link to="/forgot-password">
+                        Forgot Password?
+                    </Link>
 
                     <p>
                         Don't have an account?
-                        <a href="#"> Register</a>
+
+                        <Link to="/register">
+                            Register
+                        </Link>
+
                     </p>
 
                 </div>
