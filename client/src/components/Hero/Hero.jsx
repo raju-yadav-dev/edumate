@@ -1,5 +1,4 @@
 import "./Hero.css";
-import heroImg from "../../assets/hero.png";
 import Button from "../Button/Button";
 
 function Hero() {
@@ -35,9 +34,53 @@ function Hero() {
 
             </div>
 
-            <div className="hero-image">
+            <div className="hero-visual" aria-hidden="true">
 
-                <img src={heroImg} alt="EduMate Hero" />
+                <div className="floating-orb orb-one"></div>
+                <div className="floating-orb orb-two"></div>
+
+                <div className="chat-pill chat-pill-top">
+                    View Detailed Bounce Analysis
+                </div>
+
+                <div className="chat-card chat-card-summary">
+                    <div className="chat-avatar">AI</div>
+                    <div className="chat-card-body">
+                        <p>
+                            Based on recent data, the spike in traffic is primarily
+                            from increased referrals from social media and organic search.
+                        </p>
+
+                        <div className="mini-file-card">
+                            <div className="mini-file-icon">∎</div>
+                            <div>
+                                <strong>Sample File</strong>
+                                <span>Downloads · 500 KB</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="chat-pill chat-pill-bottom">
+                    Can you export this as a CSV?
+                </div>
+
+                <div className="chat-status-row">
+                    <div className="chat-avatar">AI</div>
+                    <span>Analyzing data, please wait...</span>
+                </div>
+
+                <div className="chat-card chat-card-input">
+                    <div className="chat-chip-row">
+                        <span>Create in-depth analysis</span>
+                        <span>Identify actionable tasks</span>
+                    </div>
+
+                    <div className="chat-input-shell">
+                        <span>Ask, write or search for anything...</span>
+                        <button type="button" aria-label="Send message">→</button>
+                    </div>
+                </div>
 
             </div>
 

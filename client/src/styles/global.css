@@ -26,8 +26,8 @@ body,
 body{
 
     background-color:var(--bg);
-    background-image:var(--ambient-glow);
-    background-attachment:fixed;
+    /* background-image:var(--ambient-glow);
+    background-attachment:fixed; */
 
     color:var(--text);
 
