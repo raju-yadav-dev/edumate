@@ -1,6 +1,12 @@
 import "./Register.css";
 
+import { useState } from "react";
+import { FaEye, FaEyeSlash } from "react-icons/fa";
+
 function Register() {
+
+    const [showPassword, setShowPassword] = useState(false);
+    const [showConfirm, setShowConfirm] = useState(false);
 
     return (
 
@@ -12,35 +18,89 @@ function Register() {
 
                 <p>Join EduMate</p>
 
+
                 <form>
+
 
                     <input
                         type="text"
                         placeholder="Full Name"
                     />
 
+
                     <input
                         type="email"
                         placeholder="Email Address"
                     />
 
-                    <input
-                        type="password"
-                        placeholder="Password"
-                    />
 
-                    <input
-                        type="password"
-                        placeholder="Confirm Password"
-                    />
+                    <div className="password-box">
 
-                    <select>
+                        <input
 
-                        <option>Student</option>
+                            type={showPassword ? "text" : "password"}
 
-                        <option>Teacher</option>
+                            placeholder="Password"
 
-                    </select>
+                        />
+
+                        <span
+                            onClick={() =>
+                                setShowPassword(!showPassword)
+                            }
+                        >
+
+                            {
+                                showPassword 
+                                ? <FaEyeSlash /> 
+                                : <FaEye />
+                            }
+
+                        </span>
+
+                    </div>
+
+
+                    <div className="password-box">
+
+                        <input
+
+                            type={showConfirm ? "text" : "password"}
+
+                            placeholder="Confirm Password"
+
+                        />
+
+
+                        <span
+                            onClick={() =>
+                                setShowConfirm(!showConfirm)
+                            }
+                        >
+
+                            {
+                                showConfirm 
+                                ? <FaEyeSlash /> 
+                                : <FaEye />
+                            }
+
+                        </span>
+
+
+                    </div>
+
+
+                   <div className="custom-select">
+
+                         <select>
+
+                            <option>Student</option>
+
+                            <option>Teacher</option>
+
+                        </select>
+
+                    </div>
 
                     <button>
 
@@ -48,7 +108,9 @@ function Register() {
 
                     </button>
 
+
                 </form>
+
 
             </div>
 
@@ -57,5 +119,6 @@ function Register() {
     );
 
 }
+
 
 export default Register;

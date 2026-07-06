@@ -108,3 +108,65 @@
     color:var(--primary);
 
 }
+/* PASSWORD EYE */
+
+.login-password-box{
+
+    width:100%;
+
+    height:55px;
+
+    position:relative;
+
+}
+
+
+.login-password-box input{
+
+    width:100%;
+
+    height:100%;
+
+    padding-right:55px;
+
+}
+
+
+.login-password-box span{
+
+    position:absolute;
+
+    right:18px;
+
+    top:50%;
+
+    transform:translateY(-50%);
+
+    color:var(--primary);
+
+    font-size:18px;
+
+    cursor:pointer;
+
+}
+
+
+
+/* MOVE FORGOT PASSWORD DOWN */
+
+.login-links{
+
+    margin-top:25px;
+
+}
+
+
+.login-links > a{
+
+    display:block;
+
+    margin-top:15px;
+
+    margin-bottom:25px;
+
+}
