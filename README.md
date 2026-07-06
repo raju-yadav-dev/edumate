@@ -380,3 +380,9 @@ GitHub: https://github.com/raju-yadav-dev
 BCA Student • Aspiring Full Stack Developer
 
 GitHub: https://github.com/baishnabi-shaw-dev
+
+# 🔍 Content Researcher
+
+**Perona Chaudhari**
+
+GitHub: https://github.com----
