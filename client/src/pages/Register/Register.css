@@ -252,3 +252,128 @@
 
     background-size:14px;
 }
+
+/* ALL INPUT */
+
+.register-card input{
+
+    width:100%;
+
+    height:55px;
+
+    padding:0 18px;
+
+    border-radius:14px;
+
+    border:1px solid var(--glass-border);
+
+    background:var(--glass);
+
+    color:var(--text);
+
+    outline:none;
+
+    font-size:16px;
+
+    box-sizing:border-box;
+
+}
+
+
+/* ONLY LIGHT THEME BLACK BORDER */
+
+[data-theme="light"] .register-card input{
+
+     border:0.5px solid #464646;
+
+}
+
+
+[data-theme="light"] .password-box input{
+
+     border:0.5px solid #464646;
+
+}
+
+
+[data-theme="light"] .register-card select{
+
+     border:0.5px solid #464646;
+
+}
+
+
+
+/* PASSWORD FIELD */
+
+.password-box{
+
+    width:100%;
+
+    height:55px;
+
+    position:relative;
+
+}
+
+
+.password-box input{
+
+    width:100%;
+
+    height:100%;
+
+    padding-right:55px;
+
+}
+
+
+.password-box span{
+
+    position:absolute;
+
+    right:18px;
+
+    top:50%;
+
+    transform:translateY(-50%);
+
+    color:var(--primary);
+
+    font-size:18px;
+
+    cursor:pointer;
+
+}
+
+
+
+/* SELECT */
+
+.register-card select{
+
+    width:100%;
+
+    height:55px;
+
+    padding-left:18px;
+
+    padding-right:55px;
+
+    border-radius:14px;
+
+    border:1px solid var(--glass-border);
+
+    background-color:var(--glass);
+
+    color:var(--text);
+
+    font-size:16px;
+
+    outline:none;
+
+    cursor:pointer;
+
+    box-sizing:border-box;
+
+}
