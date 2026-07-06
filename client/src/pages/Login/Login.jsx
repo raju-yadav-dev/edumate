@@ -7,6 +7,7 @@ import { useState } from "react";
 import { FaEye, FaEyeSlash } from "react-icons/fa";
 
 import { loginUser } from "../../services/authService";
+import useAuth from "../../hooks/useAuth";
 
 
 function Login() {
@@ -19,6 +20,7 @@ function Login() {
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(false);
     const navigate = useNavigate();
+    const { login } = useAuth();
 
     const handleSubmit = async (event) => {
         event.preventDefault();
@@ -29,6 +31,9 @@ function Login() {
 
         try {
             const response = await loginUser({ email, password });
+            if (response.data) {
+                login(response.data);
+            }
             setMessage(response.message || "Login successful.");
             navigate("/");
         } catch (authError) {

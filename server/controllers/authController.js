@@ -72,7 +72,9 @@ const registerUser = async (req, res) => {
 
                 email: user.email,
 
-                role: user.role
+                role: user.role,
+
+                avatar: user.avatar
 
             }
 
@@ -161,7 +163,9 @@ const loginUser = async (req, res) => {
 
                 email: user.email,
 
-                role: user.role
+                role: user.role,
+
+                avatar: user.avatar
 
             }
 

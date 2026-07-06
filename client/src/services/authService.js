@@ -1,4 +1,5 @@
 const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api/auth";
+const USER_API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api/users";
 
 async function request(path, options = {}) {
 	const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -37,4 +38,22 @@ export async function forgotPassword(data) {
 		method: "POST",
 		body: JSON.stringify(data)
 	});
+}
+
+export async function updateProfileAvatar(userId, file) {
+	const formData = new FormData();
+	formData.append("avatar", file);
+
+	const response = await fetch(`${USER_API_BASE_URL}/${userId}/avatar`, {
+		method: "PUT",
+		body: formData
+	});
+
+	const payload = await response.json().catch(() => ({}));
+
+	if (!response.ok) {
+		throw new Error(payload.message || "Unable to update profile photo.");
+	}
+
+	return payload;
 }
