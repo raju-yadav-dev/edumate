@@ -373,4 +373,16 @@ This project is licensed under the MIT License.
 
 BCA Student • Aspiring Full Stack Developer
 
-GitHub: https://github.com/YOUR_USERNAME
+GitHub: https://github.com/raju-yadav-dev
+
+**Baishnabi Shaw**
+
+BCA Student • Aspiring Full Stack Developer
+
+GitHub: https://github.com/baishnabi-shaw-dev
+
+# 🔍 Content Researcher
+
+**Perona Chaudhari**
+
+GitHub: https://github.com----
