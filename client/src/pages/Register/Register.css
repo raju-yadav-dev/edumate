@@ -239,6 +239,26 @@
     box-shadow:var(--shadow-hover);
 
 }
+
+.register-message{
+
+    margin:0;
+
+    font-size:14px;
+
+}
+
+.register-message.success{
+
+    color:#90ee90;
+
+}
+
+.register-message.error{
+
+    color:#ff8a8a;
+
+}
 .register-card select{
 
     appearance:none;

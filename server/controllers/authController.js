@@ -16,9 +16,9 @@ const registerUser = async (req, res) => {
             institution
         } = req.body;
 
-        // Check required fields
+        const normalizedEmail = email?.toLowerCase().trim();
 
-        if (!fullName || !email || !password) {
+        if (!fullName || !normalizedEmail || !password) {
 
             return res.status(400).json({
 
@@ -30,9 +30,7 @@ const registerUser = async (req, res) => {
 
         }
 
-        // Check existing user
-
-        const existingUser = await User.findOne({ email });
+        const existingUser = await User.findOne({ email: normalizedEmail });
 
         if (existingUser) {
 
@@ -46,13 +44,11 @@ const registerUser = async (req, res) => {
 
         }
 
-        // Create User
-
         const user = await User.create({
 
             fullName,
 
-            email,
+            email: normalizedEmail,
 
             password,
 
@@ -100,14 +96,6 @@ const registerUser = async (req, res) => {
 
 };
 
-module.exports = {
-
-    registerUser,
-    loginUser
-
-};
-
-
 // ==============================
 // Login User
 // ==============================
@@ -117,10 +105,9 @@ const loginUser = async (req, res) => {
     try {
 
         const { email, password } = req.body;
+        const normalizedEmail = email?.toLowerCase().trim();
 
-        // Check required fields
-
-        if (!email || !password) {
+        if (!normalizedEmail || !password) {
 
             return res.status(400).json({
 
@@ -132,9 +119,7 @@ const loginUser = async (req, res) => {
 
         }
 
-        // Find user
-
-        const user = await User.findOne({ email });
+        const user = await User.findOne({ email: normalizedEmail });
 
         if (!user) {
 
@@ -147,8 +132,6 @@ const loginUser = async (req, res) => {
             });
 
         }
-
-        // Compare password
 
         const isMatch = await user.comparePassword(password);
 
@@ -168,7 +151,19 @@ const loginUser = async (req, res) => {
 
             success: true,
 
-            message: "Login Successful"
+            message: "Login Successful",
+
+            data: {
+
+                id: user._id,
+
+                fullName: user.fullName,
+
+                email: user.email,
+
+                role: user.role
+
+            }
 
         });
 
@@ -187,5 +182,83 @@ const loginUser = async (req, res) => {
         });
 
     }
+
+};
+
+// ==============================
+// Reset Password
+// ==============================
+
+const forgotPassword = async (req, res) => {
+
+    try {
+
+        const {
+            email,
+            newPassword
+        } = req.body;
+
+        const normalizedEmail = email?.toLowerCase().trim();
+
+        if (!normalizedEmail || !newPassword) {
+
+            return res.status(400).json({
+
+                success: false,
+
+                message: "Email and new password are required."
+
+            });
+
+        }
+
+        const user = await User.findOne({ email: normalizedEmail });
+
+        if (!user) {
+
+            return res.status(404).json({
+
+                success: false,
+
+                message: "No account found for this email address."
+
+            });
+
+        }
+
+        user.password = newPassword;
+        await user.save();
+
+        res.status(200).json({
+
+            success: true,
+
+            message: "Password updated successfully."
+
+        });
+
+    }
+
+    catch (error) {
+
+        console.error(error);
+
+        res.status(500).json({
+
+            success: false,
+
+            message: "Internal Server Error"
+
+        });
+
+    }
+
+};
+
+module.exports = {
+
+    registerUser,
+    loginUser,
+    forgotPassword
 
 };

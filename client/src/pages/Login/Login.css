@@ -170,3 +170,23 @@
     margin-bottom:25px;
 
 }
+
+.login-message{
+
+    margin:0;
+
+    font-size:14px;
+
+}
+
+.login-message.success{
+
+    color:#90ee90;
+
+}
+
+.login-message.error{
+
+    color:#ff8a8a;
+
+}

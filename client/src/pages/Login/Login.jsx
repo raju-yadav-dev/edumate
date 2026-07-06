@@ -1,16 +1,42 @@
 import "./Login.css";
 
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 import { useState } from "react";
 
 import { FaEye, FaEyeSlash } from "react-icons/fa";
+
+import { loginUser } from "../../services/authService";
 
 
 function Login() {
 
 
     const [showPassword, setShowPassword] = useState(false);
+    const [email, setEmail] = useState("");
+    const [password, setPassword] = useState("");
+    const [message, setMessage] = useState("");
+    const [error, setError] = useState("");
+    const [loading, setLoading] = useState(false);
+    const navigate = useNavigate();
+
+    const handleSubmit = async (event) => {
+        event.preventDefault();
+
+        setMessage("");
+        setError("");
+        setLoading(true);
+
+        try {
+            const response = await loginUser({ email, password });
+            setMessage(response.message || "Login successful.");
+            navigate("/");
+        } catch (authError) {
+            setError(authError.message || "Unable to sign in.");
+        } finally {
+            setLoading(false);
+        }
+    };
 
 
     return (
@@ -29,7 +55,7 @@ function Login() {
                 </p>
 
 
-                <form>
+                <form onSubmit={handleSubmit}>
 
 
                     <input
@@ -37,6 +63,10 @@ function Login() {
                         type="email"
 
                         placeholder="Email Address"
+
+                        value={email}
+
+                        onChange={(event) => setEmail(event.target.value)}
 
                     />
 
@@ -50,6 +80,10 @@ function Login() {
                             type={showPassword ? "text" : "password"}
 
                             placeholder="Password"
+
+                            value={password}
+
+                            onChange={(event) => setPassword(event.target.value)}
 
                         />
 
@@ -74,11 +108,14 @@ function Login() {
 
 
 
-                    <button>
+                    <button type="submit" disabled={loading}>
 
-                        Login
+                        {loading ? "Signing in..." : "Login"}
 
                     </button>
+
+                    {message ? <p className="login-message success">{message}</p> : null}
+                    {error ? <p className="login-message error">{error}</p> : null}
 
 
                 </form>
