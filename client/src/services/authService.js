@@ -1,5 +1,6 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api/auth";
-const USER_API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api/users";
+const API_ROOT = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api/v1";
+const API_BASE_URL = import.meta.env.VITE_AUTH_API_URL || import.meta.env.VITE_API_URL || `${API_ROOT}/auth`;
+const USER_API_BASE_URL = import.meta.env.VITE_USER_API_URL || `${API_ROOT}/users`;
 
 async function request(path, options = {}) {
 	const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -13,7 +14,8 @@ async function request(path, options = {}) {
 	const payload = await response.json().catch(() => ({}));
 
 	if (!response.ok) {
-		throw new Error(payload.message || "Request failed.");
+		const validationDetails = Array.isArray(payload.errors) ? ` ${payload.errors.join(" ")}` : "";
+		throw new Error(`${payload.message || "Request failed."}${validationDetails}`);
 	}
 
 	return payload;
@@ -43,16 +45,21 @@ export async function forgotPassword(data) {
 export async function updateProfileAvatar(userId, file) {
 	const formData = new FormData();
 	formData.append("avatar", file);
+	const token = localStorage.getItem("edumate-access-token");
 
 	const response = await fetch(`${USER_API_BASE_URL}/${userId}/avatar`, {
 		method: "PUT",
+		headers: token ? {
+			Authorization: `Bearer ${token}`
+		} : {},
 		body: formData
 	});
 
 	const payload = await response.json().catch(() => ({}));
 
 	if (!response.ok) {
-		throw new Error(payload.message || "Unable to update profile photo.");
+		const validationDetails = Array.isArray(payload.errors) ? ` ${payload.errors.join(" ")}` : "";
+		throw new Error(`${payload.message || "Unable to update profile photo."}${validationDetails}`);
 	}
 
 	return payload;

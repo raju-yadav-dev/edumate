@@ -1,5 +1,7 @@
 const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
+const { USER_ROLES } = require("../constants/roles");
+const { ACCOUNT_STATUS } = require("../constants/accountStatus");
 
 const userSchema = new mongoose.Schema(
     {
@@ -25,8 +27,16 @@ const userSchema = new mongoose.Schema(
 
         role: {
             type: String,
-            enum: ["student", "teacher", "admin"],
-            default: "student",
+            enum: Object.values(USER_ROLES),
+            default: USER_ROLES.STUDENT,
+            index: true,
+        },
+
+        status: {
+            type: String,
+            enum: Object.values(ACCOUNT_STATUS),
+            default: ACCOUNT_STATUS.ACTIVE,
+            index: true,
         },
 
         institution: {
@@ -38,11 +48,42 @@ const userSchema = new mongoose.Schema(
             type: String,
             default: "",
         },
+
+        department: {
+            type: String,
+            default: "",
+            trim: true,
+        },
+
+        lastLoginAt: {
+            type: Date,
+            default: null,
+        },
+
+        passwordChangedAt: {
+            type: Date,
+            default: null,
+        },
+
+        createdBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "User",
+            default: null,
+        },
+
+        updatedBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "User",
+            default: null,
+        },
     },
     {
         timestamps: true,
     }
 );
+
+userSchema.index({ email: 1 }, { unique: true });
+userSchema.index({ institution: 1, role: 1, status: 1 });
 
 // ==============================
 // Hash Password Before Saving
@@ -55,6 +96,7 @@ userSchema.pre("save", async function () {
     }
 
     this.password = await bcrypt.hash(this.password, 10);
+    this.passwordChangedAt = new Date();
 
 });
 

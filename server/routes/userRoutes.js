@@ -3,8 +3,12 @@ const express = require("express");
 const router = express.Router();
 
 const upload = require("../middleware/uploadMiddleware");
-const { updateProfileAvatar } = require("../controllers/userController");
+const authenticate = require("../middleware/authMiddleware");
+const authorizeRoles = require("../middleware/roleMiddleware");
+const { deleteUser, listUsers, updateProfileAvatar } = require("../controllers/userController");
 
-router.put("/:userId/avatar", upload.single("avatar"), updateProfileAvatar);
+router.get("/", authenticate, authorizeRoles("admin", "super_admin"), listUsers);
+router.put("/:userId/avatar", authenticate, upload.single("avatar"), updateProfileAvatar);
+router.delete("/:userId", authenticate, authorizeRoles("admin", "super_admin"), deleteUser);
 
 module.exports = router;

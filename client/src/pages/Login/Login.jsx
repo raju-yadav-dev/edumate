@@ -32,7 +32,7 @@ function Login() {
         try {
             const response = await loginUser({ email, password });
             if (response.data) {
-                login(response.data);
+                login(response.data, response.metadata?.accessToken);
             }
             setMessage(response.message || "Login successful.");
             navigate("/");

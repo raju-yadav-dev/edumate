@@ -3,6 +3,7 @@ import { createContext, useEffect, useState } from "react";
 export const AuthContext = createContext();
 
 const STORAGE_KEY = "edumate-user";
+const TOKEN_KEY = "edumate-access-token";
 
 function readStoredUser() {
     const storedUser = localStorage.getItem(STORAGE_KEY);
@@ -21,6 +22,7 @@ function readStoredUser() {
 function AuthProvider({ children }) {
 
     const [user, setUser] = useState(() => readStoredUser());
+    const [accessToken, setAccessToken] = useState(() => localStorage.getItem(TOKEN_KEY));
 
     useEffect(() => {
         if (user) {
@@ -30,12 +32,22 @@ function AuthProvider({ children }) {
         }
     }, [user]);
 
-    const login = (userData) => {
+    useEffect(() => {
+        if (accessToken) {
+            localStorage.setItem(TOKEN_KEY, accessToken);
+        } else {
+            localStorage.removeItem(TOKEN_KEY);
+        }
+    }, [accessToken]);
+
+    const login = (userData, token) => {
         setUser(userData);
+        setAccessToken(token || null);
     };
 
     const logout = () => {
         setUser(null);
+        setAccessToken(null);
     };
 
     const updateAvatar = (avatar) => {
@@ -58,7 +70,8 @@ function AuthProvider({ children }) {
                 login,
                 logout,
                 updateAvatar,
-                isAuthenticated: Boolean(user)
+                accessToken,
+                isAuthenticated: Boolean(user && accessToken)
             }}
         >
             {children}

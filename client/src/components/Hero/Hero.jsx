@@ -1,7 +1,23 @@
 import "./Hero.css";
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import Button from "../Button/Button";
 
 function Hero() {
+    const [heroPrompt, setHeroPrompt] = useState("");
+    const navigate = useNavigate();
+
+    const openChat = (prompt = "") => {
+        const trimmedPrompt = prompt.trim();
+
+        navigate(trimmedPrompt ? `/chat?q=${encodeURIComponent(trimmedPrompt)}` : "/chat");
+    };
+
+    const handlePromptSubmit = (event) => {
+        event.preventDefault();
+        openChat(heroPrompt);
+    };
+
     return (
         <section id="home" className="hero-section">
 
@@ -23,6 +39,7 @@ function Hero() {
                     <Button
                         text="Get Started"
                         type="primary-btn"
+                        onClick={() => openChat()}
                     />
 
                     <Button
@@ -76,10 +93,21 @@ function Hero() {
                         <span>Identify actionable tasks</span>
                     </div>
 
-                    <div className="chat-input-shell">
-                        <span>Ask, write or search for anything...</span>
-                        <button type="button" aria-label="Send message">→</button>
-                    </div>
+                    <form className="chat-input-shell" onSubmit={handlePromptSubmit}>
+                        <input
+                            type="text"
+                            value={heroPrompt}
+                            onChange={(event) => setHeroPrompt(event.target.value)}
+                            onFocus={() => {
+                                if (!heroPrompt) {
+                                    setHeroPrompt("What is the fee structure of the college?");
+                                }
+                            }}
+                            placeholder="Ask, write or search for anything..."
+                            aria-label="Ask EduMate"
+                        />
+                        <button type="submit" aria-label="Send message">→</button>
+                    </form>
                 </div>
 
             </div>

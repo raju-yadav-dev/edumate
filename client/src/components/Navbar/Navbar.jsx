@@ -1,52 +1,82 @@
 import "./Navbar.css";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Link, useNavigate } from "react-router-dom";
 import ThemeToggle from "../ThemeToggle/ThemeToggle";
-import { Camera, LogOut, UserCircle2 } from "lucide-react";
+import { LogOut, User } from "lucide-react";
 
 import useAuth from "../../hooks/useAuth";
-import { updateProfileAvatar } from "../../services/authService";
 
 function Navbar() {
 
-    const { user, isAuthenticated, logout, updateAvatar } = useAuth();
-    const fileInputRef = useRef(null);
-    const [uploading, setUploading] = useState(false);
+    const { user, isAuthenticated, logout } = useAuth();
+    const menuRef = useRef(null);
+    const closeTimerRef = useRef(null);
+    const [menuOpen, setMenuOpen] = useState(false);
     const navigate = useNavigate();
 
-    const handleAvatarClick = () => {
-        fileInputRef.current?.click();
+    const openMenu = () => {
+        if (closeTimerRef.current) {
+            clearTimeout(closeTimerRef.current);
+            closeTimerRef.current = null;
+        }
+
+        setMenuOpen(true);
     };
 
-    const handleFileChange = async (event) => {
-        const file = event.target.files?.[0];
-
-        if (!file || !user?.id) {
-            return;
+    const closeMenu = () => {
+        if (closeTimerRef.current) {
+            clearTimeout(closeTimerRef.current);
         }
 
-        setUploading(true);
+        closeTimerRef.current = setTimeout(() => {
+            setMenuOpen(false);
+            closeTimerRef.current = null;
+        }, 150);
+    };
 
-        try {
-            const response = await updateProfileAvatar(user.id, file);
+    useEffect(() => {
+        const handlePointerDown = (event) => {
+            if (menuRef.current && !menuRef.current.contains(event.target)) {
+                if (closeTimerRef.current) {
+                    clearTimeout(closeTimerRef.current);
+                    closeTimerRef.current = null;
+                }
 
-            if (response.data?.avatar) {
-                updateAvatar(response.data.avatar);
+                setMenuOpen(false);
             }
-        } finally {
-            setUploading(false);
-            event.target.value = "";
+        };
+
+        document.addEventListener("mousedown", handlePointerDown);
+
+        return () => {
+            document.removeEventListener("mousedown", handlePointerDown);
+        };
+    }, []);
+
+    const handleProfileClick = () => {
+        if (closeTimerRef.current) {
+            clearTimeout(closeTimerRef.current);
+            closeTimerRef.current = null;
         }
+
+        setMenuOpen(false);
+        navigate("/profile");
     };
 
     const handleLogout = () => {
+        if (closeTimerRef.current) {
+            clearTimeout(closeTimerRef.current);
+            closeTimerRef.current = null;
+        }
+
+        setMenuOpen(false);
         logout();
         navigate("/login");
     };
 
-    const avatarInitial = user?.fullName?.charAt(0)?.toUpperCase() || "U";
+    const avatarInitial = user?.fullName?.trim()?.charAt(0)?.toUpperCase() || "U";
 
     return (
 
@@ -85,32 +115,57 @@ function Navbar() {
                 <ThemeToggle />
 
                 {isAuthenticated ? (
-                    <div className="profile-actions">
-                        <button className="profile-button" type="button" onClick={handleAvatarClick} disabled={uploading}>
+                    <div
+                        className="profile-actions"
+                        ref={menuRef}
+                        onMouseEnter={openMenu}
+                        onMouseLeave={closeMenu}
+                        onFocus={openMenu}
+                        onBlur={(event) => {
+                            if (menuRef.current && !menuRef.current.contains(event.relatedTarget)) {
+                                if (closeTimerRef.current) {
+                                    clearTimeout(closeTimerRef.current);
+                                    closeTimerRef.current = null;
+                                }
+
+                                setMenuOpen(false);
+                            }
+                        }}
+                    >
+                        <Link
+                            className="profile-button"
+                            to="/profile"
+                            aria-label="Open profile page"
+                            onClick={() => setMenuOpen(false)}
+                        >
                             {user?.avatar ? (
                                 <img className="profile-avatar" src={user.avatar} alt="Profile" />
                             ) : (
                                 <div className="profile-avatar profile-avatar-placeholder">
-                                    <UserCircle2 size={26} />
                                     <span>{avatarInitial}</span>
                                 </div>
                             )}
-                            <span className="profile-upload-badge">
-                                <Camera size={14} />
-                            </span>
-                        </button>
+                        </Link>
 
-                        <input
-                            ref={fileInputRef}
-                            type="file"
-                            accept="image/*"
-                            className="profile-file-input"
-                            onChange={handleFileChange}
-                        />
+                        {menuOpen ? (
+                            <div
+                                className="profile-dropdown"
+                                role="menu"
+                                aria-label="Profile menu"
+                                onMouseEnter={openMenu}
+                                onMouseLeave={closeMenu}
+                            >
+                                <button className="profile-dropdown-item" type="button" onClick={handleProfileClick}>
+                                    <User size={16} />
+                                    <span>Profile</span>
+                                </button>
 
-                        <button className="logout-btn" type="button" onClick={handleLogout}>
-                            <LogOut size={18} />
-                        </button>
+                                <button className="profile-dropdown-item" type="button" onClick={handleLogout}>
+                                    <LogOut size={16} />
+                                    <span>Logout</span>
+                                </button>
+                            </div>
+                        ) : null}
                     </div>
                 ) : (
                     <Link to="/login">

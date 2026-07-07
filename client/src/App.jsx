@@ -6,6 +6,9 @@ import Home from "./pages/Home/Home";
 import Login from "./pages/Login/Login";
 import Register from "./pages/Register/Register";
 import ForgotPassword from "./pages/ForgotPassword/ForgotPassword";
+import Profile from "./pages/Profile/Profile";
+import Chat from "./pages/Chat/Chat";
+import Admin from "./pages/Admin/Admin";
 
 function App() {
 
@@ -21,6 +24,11 @@ function App() {
                 />
 
                 <Route
+                    path="/chat"
+                    element={<Chat />}
+                />
+
+                <Route
                     path="/login"
                     element={<Login />}
                 />
@@ -32,6 +40,21 @@ function App() {
                 <Route
                     path="/forgot-password"
                     element={<ForgotPassword />}
+                />
+
+                <Route
+                    path="/profile"
+                    element={<Profile />}
+                />
+
+                <Route
+                    path="/admin"
+                    element={<Admin />}
+                />
+
+                <Route
+                    path="/admin/panel"
+                    element={<Admin />}
                 />
 
             </Routes>

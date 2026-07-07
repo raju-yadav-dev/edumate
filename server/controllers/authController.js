@@ -1,268 +1,141 @@
-const User = require("../models/User");
+const authService = require("../services/authService");
+const { sendSuccess } = require("../utils/response");
+const asyncHandler = require("../utils/asyncHandler");
 
 // ==============================
 // Register User
 // ==============================
 
-const registerUser = async (req, res) => {
+const registerUser = asyncHandler(async (req, res) => {
 
-    try {
+    const authPayload = await authService.register(req.body);
 
-        const {
-            fullName,
-            email,
-            password,
-            role,
-            institution
-        } = req.body;
-
-        const normalizedEmail = email?.toLowerCase().trim();
-
-        if (!fullName || !normalizedEmail || !password) {
-
-            return res.status(400).json({
-
-                success: false,
-
-                message: "Please fill all required fields."
-
-            });
-
+    return sendSuccess(
+        res,
+        201,
+        "Registration successful.",
+        authPayload.user,
+        {
+            accessToken: authPayload.accessToken
         }
+    );
 
-        const existingUser = await User.findOne({ email: normalizedEmail });
-
-        if (existingUser) {
-
-            return res.status(400).json({
-
-                success: false,
-
-                message: "User already exists."
-
-            });
-
-        }
-
-        const user = await User.create({
-
-            fullName,
-
-            email: normalizedEmail,
-
-            password,
-
-            role,
-
-            institution
-
-        });
-
-        res.status(201).json({
-
-            success: true,
-
-            message: "Registration Successful",
-
-            data: {
-
-                id: user._id,
-
-                fullName: user.fullName,
-
-                email: user.email,
-
-                role: user.role,
-
-                avatar: user.avatar
-
-            }
-
-        });
-
-    }
-
-    catch (error) {
-
-        console.error(error);
-
-        res.status(500).json({
-
-            success: false,
-
-            message: "Internal Server Error"
-
-        });
-
-    }
-
-};
+});
 
 // ==============================
 // Login User
 // ==============================
 
-const loginUser = async (req, res) => {
+const loginUser = asyncHandler(async (req, res) => {
 
-    try {
+    const authPayload = await authService.login(req.body);
 
-        const { email, password } = req.body;
-        const normalizedEmail = email?.toLowerCase().trim();
-
-        if (!normalizedEmail || !password) {
-
-            return res.status(400).json({
-
-                success: false,
-
-                message: "Email and Password are required."
-
-            });
-
+    return sendSuccess(
+        res,
+        200,
+        "Login successful.",
+        authPayload.user,
+        {
+            accessToken: authPayload.accessToken
         }
+    );
 
-        const user = await User.findOne({ email: normalizedEmail });
-
-        if (!user) {
-
-            return res.status(401).json({
-
-                success: false,
-
-                message: "Invalid Email or Password."
-
-            });
-
-        }
-
-        const isMatch = await user.comparePassword(password);
-
-        if (!isMatch) {
-
-            return res.status(401).json({
-
-                success: false,
-
-                message: "Invalid Email or Password."
-
-            });
-
-        }
-
-        res.status(200).json({
-
-            success: true,
-
-            message: "Login Successful",
-
-            data: {
-
-                id: user._id,
-
-                fullName: user.fullName,
-
-                email: user.email,
-
-                role: user.role,
-
-                avatar: user.avatar
-
-            }
-
-        });
-
-    }
-
-    catch (error) {
-
-        console.error(error);
-
-        res.status(500).json({
-
-            success: false,
-
-            message: "Internal Server Error"
-
-        });
-
-    }
-
-};
+});
 
 // ==============================
 // Reset Password
 // ==============================
 
-const forgotPassword = async (req, res) => {
+const forgotPassword = asyncHandler(async (req, res) => {
 
-    try {
+    await authService.resetPassword(req.body);
 
-        const {
-            email,
-            newPassword
-        } = req.body;
+    return sendSuccess(res, 200, "Password updated successfully.");
 
-        const normalizedEmail = email?.toLowerCase().trim();
+});
 
-        if (!normalizedEmail || !newPassword) {
+const getProfile = asyncHandler(async (req, res) => {
 
-            return res.status(400).json({
+    return sendSuccess(
+        res,
+        200,
+        "Profile retrieved successfully.",
+        authService.sanitizeUser(req.user)
+    );
 
-                success: false,
+});
 
-                message: "Email and new password are required."
+const changePassword = asyncHandler(async (req, res) => {
 
-            });
+    await authService.changePassword({
+        userId: req.user._id,
+        currentPassword: req.body.currentPassword,
+        newPassword: req.body.newPassword
+    });
 
+    return sendSuccess(res, 200, "Password changed successfully.");
+
+});
+
+const logoutUser = asyncHandler(async (req, res) => {
+
+    return sendSuccess(res, 200, "Logout successful.");
+
+});
+
+const getAdminStatus = asyncHandler(async (req, res) => {
+
+    const adminExists = await authService.hasAdminAccount();
+
+    return sendSuccess(res, 200, "Admin status retrieved.", {
+        adminExists,
+        signupOpen: !adminExists
+    });
+
+});
+
+const bootstrapAdmin = asyncHandler(async (req, res) => {
+
+    const authPayload = await authService.bootstrapAdmin(req.body);
+
+    return sendSuccess(
+        res,
+        201,
+        "Admin account created successfully.",
+        authPayload.user,
+        {
+            accessToken: authPayload.accessToken
         }
+    );
 
-        const user = await User.findOne({ email: normalizedEmail });
+});
 
-        if (!user) {
+const adminLogin = asyncHandler(async (req, res) => {
 
-            return res.status(404).json({
+    const authPayload = await authService.adminLogin(req.body);
 
-                success: false,
-
-                message: "No account found for this email address."
-
-            });
-
+    return sendSuccess(
+        res,
+        200,
+        "Admin login successful.",
+        authPayload.user,
+        {
+            accessToken: authPayload.accessToken
         }
+    );
 
-        user.password = newPassword;
-        await user.save();
-
-        res.status(200).json({
-
-            success: true,
-
-            message: "Password updated successfully."
-
-        });
-
-    }
-
-    catch (error) {
-
-        console.error(error);
-
-        res.status(500).json({
-
-            success: false,
-
-            message: "Internal Server Error"
-
-        });
-
-    }
-
-};
+});
 
 module.exports = {
 
     registerUser,
     loginUser,
-    forgotPassword
+    forgotPassword,
+    getProfile,
+    changePassword,
+    logoutUser,
+    getAdminStatus,
+    bootstrapAdmin,
+    adminLogin
 
 };
