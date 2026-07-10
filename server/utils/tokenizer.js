@@ -2,17 +2,27 @@ const jwt = require("jsonwebtoken");
 
 const ACCESS_TOKEN_EXPIRES_IN = process.env.JWT_ACCESS_TOKEN_EXPIRES_IN || "7d";
 
-const generateAccessToken = (user) => {
-    if (!process.env.JWT_SECRET) {
+const getJwtSecret = () => {
+    const secret = process.env.JWT_SECRET || process.env.JWT_ACCESS_TOKEN_SECRET;
+
+    if (secret) {
+        return secret;
+    }
+
+    if (process.env.NODE_ENV === "production") {
         throw new Error("JWT_SECRET is not configured.");
     }
 
+    return "edumate-development-secret";
+};
+
+const generateAccessToken = (user) => {
     return jwt.sign(
         {
             id: user._id.toString(),
             role: user.role
         },
-        process.env.JWT_SECRET,
+        getJwtSecret(),
         {
             expiresIn: ACCESS_TOKEN_EXPIRES_IN
         }
@@ -20,11 +30,7 @@ const generateAccessToken = (user) => {
 };
 
 const verifyAccessToken = (token) => {
-    if (!process.env.JWT_SECRET) {
-        throw new Error("JWT_SECRET is not configured.");
-    }
-
-    return jwt.verify(token, process.env.JWT_SECRET);
+    return jwt.verify(token, getJwtSecret());
 };
 
 module.exports = {

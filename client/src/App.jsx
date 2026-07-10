@@ -8,7 +8,8 @@ import Register from "./pages/Register/Register";
 import ForgotPassword from "./pages/ForgotPassword/ForgotPassword";
 import Profile from "./pages/Profile/Profile";
 import Chat from "./pages/Chat/Chat";
-import Admin from "./pages/Admin/Admin";
+import AdminLogin from "./pages/Admin/Login/AdminLogin";
+import AdminConsole from "./pages/Admin/Console/AdminConsole";
 
 function App() {
 
@@ -49,12 +50,12 @@ function App() {
 
                 <Route
                     path="/admin"
-                    element={<Admin />}
+                    element={<AdminLogin />}
                 />
 
                 <Route
                     path="/admin/panel"
-                    element={<Admin />}
+                    element={<AdminConsole />}
                 />
 
             </Routes>

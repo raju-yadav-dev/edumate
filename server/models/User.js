@@ -82,7 +82,6 @@ const userSchema = new mongoose.Schema(
     }
 );
 
-userSchema.index({ email: 1 }, { unique: true });
 userSchema.index({ institution: 1, role: 1, status: 1 });
 
 // ==============================
