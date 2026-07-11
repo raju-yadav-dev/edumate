@@ -1,4 +1,7 @@
-const API_ROOT = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api/v1";
+import { getApiRootUrl } from "./apiConfig";
+import { getAdminAccessToken } from "./adminSession";
+
+const API_ROOT = getApiRootUrl();
 const AUTH_API_BASE_URL = `${API_ROOT}/auth`;
 const DOCUMENT_API_BASE_URL = `${API_ROOT}/documents`;
 const ADMIN_API_BASE_URL = `${API_ROOT}/admin`;
@@ -44,7 +47,7 @@ export async function loginAdmin(data) {
 }
 
 export async function uploadAdminDocument({ file, category, institution, department, notes }) {
-    const token = localStorage.getItem("edumate-access-token");
+    const token = getAdminAccessToken();
     const formData = new FormData();
 
     formData.append("document", file);
@@ -65,7 +68,7 @@ export async function uploadAdminDocument({ file, category, institution, departm
 }
 
 export async function listAdminDocuments({ search = "", category = "" } = {}) {
-    const token = localStorage.getItem("edumate-access-token");
+    const token = getAdminAccessToken();
     const params = new URLSearchParams();
 
     if (search) {
@@ -86,7 +89,7 @@ export async function listAdminDocuments({ search = "", category = "" } = {}) {
 }
 
 export async function deleteAdminDocument(documentId) {
-    const token = localStorage.getItem("edumate-access-token");
+    const token = getAdminAccessToken();
 
     const response = await fetch(`${DOCUMENT_API_BASE_URL}/${documentId}`, {
         method: "DELETE",
@@ -99,7 +102,7 @@ export async function deleteAdminDocument(documentId) {
 }
 
 export async function listAdminUsers({ search = "", role = "" } = {}) {
-    const token = localStorage.getItem("edumate-access-token");
+    const token = getAdminAccessToken();
     const params = new URLSearchParams();
 
     if (search) {
@@ -120,7 +123,7 @@ export async function listAdminUsers({ search = "", role = "" } = {}) {
 }
 
 export async function deleteAdminUser(userId) {
-    const token = localStorage.getItem("edumate-access-token");
+    const token = getAdminAccessToken();
 
     const response = await fetch(`${API_ROOT}/users/${userId}`, {
         method: "DELETE",
@@ -132,8 +135,20 @@ export async function deleteAdminUser(userId) {
     return parseResponse(response, "Unable to delete user.");
 }
 
+export async function getAdminStorageStats() {
+    const token = getAdminAccessToken();
+
+    const response = await fetch(`${ADMIN_API_BASE_URL}/storage-stats`, {
+        headers: token ? {
+            Authorization: `Bearer ${token}`
+        } : {}
+    });
+
+    return parseResponse(response, "Unable to load storage stats.");
+}
+
 export async function saveProviderApiKeys({ groqApiKey, openRouteServiceKey }) {
-    const token = localStorage.getItem("edumate-access-token");
+    const token = getAdminAccessToken();
     const groqApiKeys = String(groqApiKey || "")
         .split(",")
         .map((key) => key.trim())

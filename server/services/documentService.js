@@ -20,6 +20,12 @@ const DOCUMENT_CATEGORIES = Object.freeze([
     "examination",
     "events",
     "notices",
+    "forms",
+    "previous_years",
+    "documents",
+    "archives",
+    "policies",
+    "reports",
     "gallery",
     "contact",
     "others"

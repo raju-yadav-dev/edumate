@@ -1,12 +1,18 @@
 import "./Admin.css";
 import "../Login/Login.css";
+import "./AdminTheme.css";
 
 import {
+    Activity,
+    Bell,
+    ChevronDown,
     Database,
     Download,
     Eye as PreviewEye,
+    Filter,
     FileText,
     Folder,
+    GraduationCap,
     Home,
     KeyRound,
     LayoutGrid,
@@ -16,7 +22,9 @@ import {
     Plus,
     RefreshCcw,
     Search,
+    Settings,
     Shield,
+    Sun,
     Trash2,
     UploadCloud,
     Users
@@ -26,11 +34,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { FaEye, FaEyeSlash } from "react-icons/fa";
 
-import useAuth from "../../hooks/useAuth";
+import useAdminAuth from "../../hooks/useAdminAuth";
 
 import {
     deleteAdminDocument,
     deleteAdminUser,
+    getAdminStorageStats,
     loginAdmin,
     listAdminDocuments,
     listAdminUsers,
@@ -44,7 +53,9 @@ const DEFAULT_FOLDERS = [
     { label: "Forms", value: "forms" },
     { label: "Previous Years", value: "previous_years" },
     { label: "Documents", value: "documents" },
-    { label: "Archives", value: "archives" }
+    { label: "Archives", value: "archives" },
+    { label: "Policies", value: "policies" },
+    { label: "Reports", value: "reports" }
 ];
 
 const STORAGE_LIMIT = 10 * 1024 * 1024 * 1024;
@@ -90,7 +101,12 @@ const getDocumentUrl = (file) => file.url || file.fileUrl || file.storageUrl || 
 const slugifyFolder = (label) => label.toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
 
 function Admin({ mode = "auto" }) {
-    const { user, accessToken, login } = useAuth();
+    const {
+        adminUser,
+        loginAdmin: setAdminSession,
+        logoutAdmin,
+        isAdminAuthenticated
+    } = useAdminAuth();
     const [activeSection, setActiveSection] = useState("files");
     const [activeFolder, setActiveFolder] = useState("admissions");
     const [folders, setFolders] = useState(DEFAULT_FOLDERS);
@@ -100,11 +116,11 @@ function Admin({ mode = "auto" }) {
     const [userSearch, setUserSearch] = useState("");
     const [roleFilter, setRoleFilter] = useState("");
     const [viewMode, setViewMode] = useState("list");
-    const [openMenuId, setOpenMenuId] = useState("");
     const [busy, setBusy] = useState(false);
     const [savingKeys, setSavingKeys] = useState(false);
     const [notice, setNotice] = useState("");
     const [error, setError] = useState("");
+    const [storageStats, setStorageStats] = useState(null);
     const [selectedDocument, setSelectedDocument] = useState(null);
     const [authLoading, setAuthLoading] = useState(false);
     const [authError, setAuthError] = useState("");
@@ -120,10 +136,23 @@ function Admin({ mode = "auto" }) {
         department: "",
         notes: ""
     });
+    const [isDropActive, setIsDropActive] = useState(false);
     const adminEmailRef = useRef(null);
     const adminPasswordRef = useRef(null);
 
-    const isAdminUser = Boolean(accessToken && user && ["admin", "super_admin"].includes(user.role));
+    const documentCounts = useMemo(() => {
+        if (storageStats?.categoryCounts) {
+            return folders.reduce((counts, folder) => {
+                counts[folder.value] = storageStats.categoryCounts[folder.value]?.count || 0;
+                return counts;
+            }, {});
+        }
+
+        return folders.reduce((counts, folder) => {
+            counts[folder.value] = documents.filter((file) => file.category === folder.value).length;
+            return counts;
+        }, {});
+    }, [documents, folders, storageStats]);
 
     useEffect(() => {
         const storedFolders = window.localStorage.getItem("edumate-admin-folders");
@@ -146,17 +175,6 @@ function Admin({ mode = "auto" }) {
     }, []);
 
     useEffect(() => {
-        const handlePointerDown = (event) => {
-            if (!event.target.closest(".more-actions")) {
-                setOpenMenuId("");
-            }
-        };
-
-        document.addEventListener("mousedown", handlePointerDown);
-        return () => document.removeEventListener("mousedown", handlePointerDown);
-    }, []);
-
-    useEffect(() => {
         if (activeSection === "files") {
             loadDocuments();
         }
@@ -165,6 +183,12 @@ function Admin({ mode = "auto" }) {
             loadUsers();
         }
     }, [activeSection, activeFolder]);
+
+    useEffect(() => {
+        if (isAdminAuthenticated) {
+            loadStorageStats();
+        }
+    }, [isAdminAuthenticated]);
 
     useEffect(() => {
         if (activeSection !== "files") {
@@ -190,13 +214,94 @@ function Admin({ mode = "auto" }) {
         return () => window.clearTimeout(timer);
     }, [userSearch, roleFilter]);
 
-    const usedStorage = useMemo(() => {
+    const visibleFolderStorage = useMemo(() => {
         return documents.reduce((total, file) => total + Number(file.fileSize || file.size || 0), 0);
     }, [documents]);
 
+    const storageLimit = storageStats?.limitBytes || STORAGE_LIMIT;
+    const usedStorage = storageStats?.usedBytes ?? visibleFolderStorage;
+    const availableStorage = storageStats?.availableBytes ?? Math.max(storageLimit - usedStorage, 0);
+    const documentStorage = storageStats?.documentBytes ?? visibleFolderStorage;
+    const userStorage = storageStats?.userBytes || 0;
+    const adminStorage = storageStats?.adminBytes || 0;
+    const explorerRecordStorage = storageStats?.explorerRecordBytes || 0;
     const usedGB = (usedStorage / (1024 * 1024 * 1024)).toFixed(1);
-    const storagePercent = Math.min((usedStorage / STORAGE_LIMIT) * 100, 100);
+    const storagePercent = Math.min((usedStorage / storageLimit) * 100, 100);
     const activeFolderLabel = folders.find((folder) => folder.value === activeFolder)?.label || "Admissions";
+
+    const stats = [
+        {
+            label: "Total Folders",
+            value: folders.length,
+            note: "All directories",
+            tone: "gold",
+            Icon: Folder
+        },
+        {
+            label: "Total Files",
+            value: storageStats?.documentCount ?? documents.length,
+            note: "Across all folders",
+            tone: "blue",
+            Icon: FileText
+        },
+        {
+            label: "Total Size",
+            value: formatBytes(usedStorage),
+            note: "Storage used",
+            tone: "violet",
+            Icon: Database
+        },
+        {
+            label: "Users",
+            value: (storageStats?.userCount || 0) + (storageStats?.adminCount || 0) || users.length,
+            note: "Active users",
+            tone: "rose",
+            Icon: Users
+        },
+        {
+            label: "API Usage",
+            value: `${Math.max(Math.round(storagePercent), 0)}%`,
+            note: "Storage used",
+            tone: "cyan",
+            Icon: KeyRound
+        },
+        {
+            label: "Last Backup",
+            value: "2h ago",
+            note: "All systems normal",
+            tone: "emerald",
+            Icon: Shield
+        }
+    ];
+
+    function handleUploadFile(file) {
+        if (!file) {
+            return;
+        }
+
+        setUpload((current) => ({
+            ...current,
+            category: activeFolder,
+            file
+        }));
+    }
+
+    function handleUploadDragOver(event) {
+        event.preventDefault();
+        setIsDropActive(true);
+    }
+
+    function handleUploadDragLeave() {
+        setIsDropActive(false);
+    }
+
+    function handleUploadDrop(event) {
+        event.preventDefault();
+        setIsDropActive(false);
+
+        const file = event.dataTransfer.files?.[0];
+        handleUploadFile(file);
+    }
 
     async function handleAdminLogin(event) {
         event.preventDefault();
@@ -214,7 +319,10 @@ function Admin({ mode = "auto" }) {
             setAuthError("");
 
             const response = await loginAdmin({ email, password });
-            login(response.data, response.metadata?.accessToken);
+
+            if (response.data) {
+                setAdminSession(response.data, response.metadata?.accessToken);
+            }
         } catch (loginError) {
             setAuthError(loginError.message || "Unable to sign in as admin.");
         } finally {
@@ -256,7 +364,18 @@ function Admin({ mode = "auto" }) {
         }
     }
 
+    async function loadStorageStats() {
+        try {
+            const response = await getAdminStorageStats();
+            setStorageStats(response.data || null);
+        } catch (statsError) {
+            setError(statsError.message || "Unable to load storage stats.");
+        }
+    }
+
     async function refreshSection() {
+        await loadStorageStats();
+
         if (activeSection === "files") {
             await loadDocuments();
             return;
@@ -288,6 +407,7 @@ function Admin({ mode = "auto" }) {
                 notes: ""
             });
             await loadDocuments();
+            await loadStorageStats();
         } catch (uploadError) {
             setError(uploadError.message || "Unable to upload file.");
         } finally {
@@ -306,6 +426,7 @@ function Admin({ mode = "auto" }) {
             await deleteAdminDocument(id);
             setNotice("Document deleted.");
             await loadDocuments();
+            await loadStorageStats();
         } catch (deleteError) {
             setError(deleteError.message || "Unable to delete document.");
         } finally {
@@ -324,6 +445,7 @@ function Admin({ mode = "auto" }) {
             await deleteAdminUser(id);
             setNotice("User deleted.");
             await loadUsers();
+            await loadStorageStats();
         } catch (deleteError) {
             setError(deleteError.message || "Unable to delete user.");
         } finally {
@@ -411,14 +533,7 @@ function Admin({ mode = "auto" }) {
         setError("");
     }
 
-    const stats = [
-        { label: "Folders", value: folders.length },
-        { label: "Files", value: documents.length },
-        { label: "Users", value: users.length },
-        { label: "Usage", value: `${storagePercent.toFixed(0)}%` }
-    ];
-
-    const shouldShowLogin = mode === "login" || !isAdminUser;
+    const shouldShowLogin = mode === "login" || !isAdminAuthenticated;
 
     if (shouldShowLogin) {
         return (
@@ -429,7 +544,7 @@ function Admin({ mode = "auto" }) {
                     <p>Admin access only</p>
 
                     <form onSubmit={handleAdminLogin}>
-                        <input ref={adminEmailRef} type="email" placeholder="Admin email" defaultValue={user?.email || ""} />
+                        <input ref={adminEmailRef} type="email" placeholder="Admin email" defaultValue={adminUser?.email || ""} />
 
                         <div className="login-password-box admin-password-box">
                             <input
@@ -458,13 +573,17 @@ function Admin({ mode = "auto" }) {
         <div className="admin-page">
             <aside className="admin-left">
                 <div className="admin-brand">
-                    <span>ADMIN ACCESS</span>
-                    <strong>EduMate</strong>
+                    <div className="brand-mark">
+                        <GraduationCap size={28} />
+                        <strong>EduMate</strong>
+                    </div>
+                    <span>ADMIN CONSOLE</span>
                 </div>
 
+                <p className="nav-section-label">Main menu</p>
                 <nav className="admin-nav">
                     <button type="button" className={activeSection === "files" ? "active" : ""} onClick={() => setActiveSection("files")}>
-                        <FileText />
+                        <Folder />
                         File manager
                     </button>
                     <button type="button" className={activeSection === "users" ? "active" : ""} onClick={() => setActiveSection("users")}>
@@ -481,24 +600,66 @@ function Admin({ mode = "auto" }) {
                     </button>
                 </nav>
 
+                <p className="nav-section-label">System</p>
+                <nav className="admin-nav admin-system-nav">
+                    <button type="button" onClick={loadStorageStats}>
+                        <Activity />
+                        Storage Overview
+                    </button>
+                    <button type="button" onClick={refreshSection}>
+                        <List />
+                        Activity Logs
+                    </button>
+                    <button type="button" onClick={() => setActiveSection("keys")}>
+                        <Settings />
+                        Settings
+                    </button>
+                </nav>
+
                 <div className="storage-box">
                     <h4>Storage Overview</h4>
 
                     <div
                         className="storage-circle"
                         style={{
-                            background: `conic-gradient(var(--primary) ${storagePercent}%, rgba(255,255,255,.06) 0)`
+                            background: `conic-gradient(var(--admin-gold) ${storagePercent}%, rgba(255,255,255,.06) 0)`
                         }}
                     >
                         <div className="storage-inner">
                             <h2>{usedGB} GB</h2>
-                            <p>of 10 GB used</p>
+                            <p>of {formatBytes(storageLimit)} used</p>
                         </div>
                     </div>
 
                     <strong>{storagePercent.toFixed(0)}% Used</strong>
 
-                    <button type="button" className="back-site" onClick={() => window.location.assign("/")}>
+                    <div className="storage-breakdown">
+                        <span>
+                            <small>Documents / explorer</small>
+                            <b>{formatBytes(documentStorage + explorerRecordStorage)}</b>
+                        </span>
+                        <span>
+                            <small>User data</small>
+                            <b>{formatBytes(userStorage)}</b>
+                        </span>
+                        <span>
+                            <small>Admin data</small>
+                            <b>{formatBytes(adminStorage)}</b>
+                        </span>
+                        <span>
+                            <small>Available</small>
+                            <b>{formatBytes(availableStorage)}</b>
+                        </span>
+                    </div>
+
+                    <button
+                        type="button"
+                        className="back-site"
+                        onClick={() => {
+                            logoutAdmin();
+                            window.location.assign("/");
+                        }}
+                    >
                         <LogOut size={16} />
                         Back to site
                     </button>
@@ -512,8 +673,28 @@ function Admin({ mode = "auto" }) {
                         <p>Manage documents, API setup, and knowledge data.</p>
                     </div>
 
-                    <div className="header-actions">
-                        <button type="button" onClick={refreshSection} disabled={busy || savingKeys}>
+                    <div className="admin-topbar">
+                        <div className="global-search">
+                            <Search size={17} />
+                            <input placeholder="Search anything..." value={search} onChange={(event) => setSearch(event.target.value)} />
+                            <Search size={17} />
+                        </div>
+                        <button type="button" className="utility-button" aria-label="Theme settings">
+                            <Sun size={18} />
+                        </button>
+                        <button type="button" className="utility-button notification-button" aria-label="Notifications">
+                            <Bell size={18} />
+                            <span>3</span>
+                        </button>
+                        <div className="admin-profile">
+                            <div className="profile-avatar">AD</div>
+                            <div>
+                                <strong>{adminUser?.fullName || "Admin"}</strong>
+                                <span>{adminUser?.role === "super_admin" ? "Super Admin" : "Admin"}</span>
+                            </div>
+                            <ChevronDown size={16} />
+                        </div>
+                        <button type="button" className="refresh-pill" onClick={refreshSection} disabled={busy || savingKeys}>
                             <RefreshCcw size={16} />
                             Refresh
                         </button>
@@ -522,9 +703,15 @@ function Admin({ mode = "auto" }) {
 
                 <div className="admin-banner-row">
                     {stats.map((item) => (
-                        <div className="stat-chip" key={item.label}>
-                            <span>{item.label}</span>
-                            <strong>{item.value}</strong>
+                        <div className={`stat-chip tone-${item.tone}`} key={item.label}>
+                            <div className="stat-icon">
+                                <item.Icon size={20} />
+                            </div>
+                            <div className="stat-copy">
+                                <span>{item.label}</span>
+                                <strong>{item.value}</strong>
+                                <small>{item.note}</small>
+                            </div>
                         </div>
                     ))}
                 </div>
@@ -552,27 +739,27 @@ function Admin({ mode = "auto" }) {
                                     >
                                         <Folder />
                                         <span>{folder.label}</span>
+                                        <strong>{documentCounts[folder.value] || 0}</strong>
                                     </button>
                                 ))}
                             </div>
 
                             <form className="upload-area" onSubmit={submitUpload}>
-                                <label className="upload-dropzone">
+                                <label
+                                    className={isDropActive ? "upload-dropzone active" : "upload-dropzone"}
+                                    onDragOver={handleUploadDragOver}
+                                    onDragLeave={handleUploadDragLeave}
+                                    onDrop={handleUploadDrop}
+                                >
                                     <UploadCloud />
                                     <span>
-                                        <strong>Upload file</strong>
-                                        <small>PDF, docs, or images</small>
+                                        <strong>Select Files</strong>
+                                        <small>{upload.file ? upload.file.name : "PDF, docs, or images"}</small>
                                     </span>
                                     <input
                                         hidden
                                         type="file"
-                                        onChange={(event) =>
-                                            setUpload((current) => ({
-                                                ...current,
-                                                category: activeFolder,
-                                                file: event.target.files?.[0] || null
-                                            }))
-                                        }
+                                        onChange={(event) => handleUploadFile(event.target.files?.[0] || null)}
                                     />
                                 </label>
 
@@ -598,7 +785,7 @@ function Admin({ mode = "auto" }) {
                                 </div>
 
                                 <button type="submit" className="upload-submit" disabled={busy}>
-                                    Upload
+                                    Upload File
                                 </button>
                             </form>
                         </section>
@@ -640,78 +827,63 @@ function Admin({ mode = "auto" }) {
                                     >
                                         <LayoutGrid size={16} />
                                     </button>
-                                    <button type="button" className="icon-button" onClick={handleReset} aria-label="Reset filters">
-                                        <Shield size={16} />
+                                    <button
+                                        type="button"
+                                        className={viewMode === "compact" ? "icon-button active" : "icon-button"}
+                                        onClick={() => setViewMode("compact")}
+                                        aria-label="Compact view"
+                                    >
+                                        <Filter size={16} />
                                     </button>
                                 </div>
                             </div>
 
-                            <div className={viewMode === "grid" ? "table grid-mode" : "table"}>
-                                <div className="table-head">
-                                    <span>Name</span>
-                                    <span>Type</span>
-                                    <span>Size</span>
-                                    <span>Modified</span>
-                                    <span>Actions</span>
-                                </div>
+                            <div className={`table ${viewMode}-mode`}>
+                                {viewMode !== "grid" ? (
+                                    <div className="table-head">
+                                        <span>Name</span>
+                                        <span>Type</span>
+                                        <span>Size</span>
+                                        <span>Modified</span>
+                                        <span>Actions</span>
+                                    </div>
+                                ) : null}
 
-                                {documents.map((file) => {
-                                    const isOpen = openMenuId === file._id;
-
-                                    return (
-                                        <div className="file-row" key={file._id}>
+                                <div className="file-rows">
+                                    {documents.map((file) => (
+                                        <article className="file-row" key={file._id}>
                                             <button type="button" className="row-main" onClick={() => setSelectedDocument(file)}>
                                                 <FileText className="pdf" />
                                                 <div>
                                                     <strong>{file.originalName}</strong>
-                                                    <span>{file.category}</span>
+                                                    <span>in {file.category}</span>
                                                 </div>
                                             </button>
                                             <span>{String(file.mimeType || "PDF").includes("pdf") ? "PDF" : "File"}</span>
                                             <span>{formatBytes(file.fileSize || file.size)}</span>
                                             <span>{formatDate(file.updatedAt || file.createdAt)}</span>
                                             <span className="actions">
-                                                <button type="button" className="icon-button" onClick={() => handleOpenDocument(file)}>
+                                                <button type="button" className="icon-button" onClick={() => handleOpenDocument(file)} aria-label="Preview file">
                                                     <PreviewEye size={16} />
                                                 </button>
-                                                <button type="button" className="icon-button" onClick={() => handleDownload(file)}>
+                                                <button type="button" className="icon-button" onClick={() => handleDownload(file)} aria-label="Download file">
                                                     <Download size={16} />
                                                 </button>
-                                                <div className="more-actions">
-                                                    <button
-                                                        type="button"
-                                                        className={isOpen ? "icon-button active" : "icon-button"}
-                                                        onClick={() => setOpenMenuId(isOpen ? "" : file._id)}
-                                                        aria-label="More actions"
-                                                    >
-                                                        <MoreVertical size={16} />
-                                                    </button>
-                                                    {isOpen ? (
-                                                        <div className="dropdown-menu">
-                                                            <button type="button" onClick={() => setSelectedDocument(file)}>
-                                                                <PreviewEye size={14} />
-                                                                Preview
-                                                            </button>
-                                                            <button type="button" onClick={() => handleDownload(file)}>
-                                                                <Download size={14} />
-                                                                Download
-                                                            </button>
-                                                            <button type="button" className="danger" onClick={() => removeDocument(file._id)}>
-                                                                <Trash2 size={14} />
-                                                                Delete
-                                                            </button>
-                                                        </div>
-                                                    ) : null}
-                                                </div>
+                                                <button type="button" className="icon-button" onClick={() => removeDocument(file._id)} aria-label="Delete file">
+                                                    <MoreVertical size={16} />
+                                                </button>
                                             </span>
-                                        </div>
-                                    );
-                                })}
+                                        </article>
+                                    ))}
+                                </div>
                             </div>
 
                             <div className="table-footer">
-                                <span>{documents.length} files</span>
-                                <span>Total size: {formatBytes(usedStorage)}</span>
+                                <span>Showing 1 to {documents.length} of {documents.length} files</span>
+                                <button type="button" onClick={handleReset}>
+                                    Reset filters
+                                </button>
+                                <span>Total size: {formatBytes(visibleFolderStorage)}</span>
                             </div>
                         </section>
                     </div>

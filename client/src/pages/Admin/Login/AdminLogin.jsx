@@ -2,15 +2,14 @@ import "./AdminLogin.css";
 
 import { Navigate } from "react-router-dom";
 
-import useAuth from "../../../hooks/useAuth";
+import useAdminAuth from "../../../hooks/useAdminAuth";
 
 import Admin from "../Admin";
 
 function AdminLogin() {
-    const { user, accessToken } = useAuth();
-    const isAdminUser = Boolean(accessToken && user && ["admin", "super_admin"].includes(user.role));
+    const { isAdminAuthenticated } = useAdminAuth();
 
-    if (isAdminUser) {
+    if (isAdminAuthenticated) {
         return <Navigate to="/admin/panel" replace />;
     }
 

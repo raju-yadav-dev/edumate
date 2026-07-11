@@ -1,4 +1,6 @@
-const API_ROOT = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api/v1";
+import { getApiRootUrl } from "./apiConfig";
+
+const API_ROOT = getApiRootUrl();
 const CHAT_API_BASE_URL = `${API_ROOT}/chat`;
 
 export async function askEduMate({ question, conversationId }) {
