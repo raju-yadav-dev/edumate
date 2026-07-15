@@ -1,6 +1,5 @@
-import { createContext, useEffect, useState } from "react";
-
-export const AuthContext = createContext();
+import { useEffect, useState } from "react";
+import { AuthContext } from "./contexts";
 
 const STORAGE_KEY = "edumate-user";
 const TOKEN_KEY = "edumate-access-token";

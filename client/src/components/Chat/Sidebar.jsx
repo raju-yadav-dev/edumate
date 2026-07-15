@@ -1,4 +1,4 @@
-import { FiArchive, FiChevronLeft, FiChevronRight, FiEdit3, FiFolder, FiLogOut, FiPlus, FiSearch, FiSettings, FiTrash2, FiPin } from "react-icons/fi";
+import { FiArchive, FiChevronLeft, FiChevronRight, FiEdit3, FiFolder, FiLogOut, FiPlus, FiSearch, FiSettings, FiTrash2, FiMapPin } from "react-icons/fi";
 import { LiaPaperclipSolid } from "react-icons/lia";
 
 import { Link } from "react-router-dom";
@@ -87,7 +87,7 @@ function Sidebar({
                                     >
                                         <button type="button" className="edu-chat-thread-select" onClick={() => onSelectThread(thread.id)}>
                                             <span className="edu-chat-thread-title-row">
-                                                {thread.pinned ? <FiPin /> : null}
+                                                {thread.pinned ? <FiMapPin /> : null}
                                                 <strong>{thread.title}</strong>
                                             </span>
                                             <span className="edu-chat-thread-preview">{thread.preview}</span>
@@ -99,7 +99,7 @@ function Sidebar({
 
                                         <div className="edu-chat-thread-actions">
                                             <button type="button" onClick={() => onPinThread(thread.id)} aria-label={`Pin ${thread.title}`}>
-                                                <FiPin />
+                                                <FiMapPin />
                                             </button>
                                             <button type="button" onClick={() => onRenameThread(thread.id)} aria-label={`Rename ${thread.title}`}>
                                                 <FiEdit3 />

@@ -30,7 +30,7 @@ import {
     Users
 } from "lucide-react";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 
 import { FaEye, FaEyeSlash } from "react-icons/fa";
 
@@ -107,9 +107,23 @@ function Admin({ mode = "auto" }) {
         logoutAdmin,
         isAdminAuthenticated
     } = useAdminAuth();
+    const initialFolders = (() => {
+        try {
+            const stored = window?.localStorage?.getItem("edumate-admin-folders");
+            if (!stored) return DEFAULT_FOLDERS;
+            const parsed = JSON.parse(stored);
+            if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+            return DEFAULT_FOLDERS;
+        } catch {
+            return DEFAULT_FOLDERS;
+        }
+    })();
+
+    const initialActive = initialFolders[0]?.value || "admissions";
+
     const [activeSection, setActiveSection] = useState("files");
-    const [activeFolder, setActiveFolder] = useState("admissions");
-    const [folders, setFolders] = useState(DEFAULT_FOLDERS);
+    const [activeFolder, setActiveFolder] = useState(initialActive);
+    const [folders, setFolders] = useState(initialFolders);
     const [documents, setDocuments] = useState([]);
     const [users, setUsers] = useState([]);
     const [search, setSearch] = useState("");
@@ -130,7 +144,7 @@ function Admin({ mode = "auto" }) {
         openRouteServiceKey: ""
     });
     const [upload, setUpload] = useState({
-        category: "admissions",
+        category: initialActive,
         file: null,
         institution: "",
         department: "",
@@ -154,41 +168,75 @@ function Admin({ mode = "auto" }) {
         }, {});
     }, [documents, folders, storageStats]);
 
+    // keep folders persisted whenever they change
     useEffect(() => {
-        const storedFolders = window.localStorage.getItem("edumate-admin-folders");
+        try {
+            window.localStorage.setItem("edumate-admin-folders", JSON.stringify(folders));
+        } catch {
+            // ignore
+        }
+    }, [folders]);
 
-        if (!storedFolders) {
-            return;
+    const loadDocuments = useCallback(async () => {
+        try {
+            setBusy(true);
+            setError("");
+            const response = await listAdminDocuments({
+                search,
+                category: activeFolder
+            });
+
+            setDocuments(response.data || []);
+        } catch (fetchError) {
+            setError(fetchError.message || "Unable to load files.");
+        } finally {
+            setBusy(false);
+        }
+    }, [search, activeFolder]);
+
+    const loadUsers = useCallback(async () => {
+        try {
+            setBusy(true);
+            setError("");
+            const response = await listAdminUsers({
+                search: userSearch,
+                role: roleFilter
+            });
+
+            setUsers(response.data || []);
+        } catch (fetchError) {
+            setError(fetchError.message || "Unable to load users.");
+        } finally {
+            setBusy(false);
+        }
+    }, [userSearch, roleFilter]);
+
+    useEffect(() => {
+        // calling loaders from effect is intentional (data fetch)
+        if (activeSection === "files") {
+            void Promise.resolve().then(() => loadDocuments());
         }
 
-        try {
-            const parsed = JSON.parse(storedFolders);
+        if (activeSection === "users") {
+            void Promise.resolve().then(() => loadUsers());
+        }
+    }, [activeSection, loadDocuments, loadUsers]);
 
-            if (Array.isArray(parsed) && parsed.length > 0) {
-                setFolders(parsed);
-                setActiveFolder(parsed[0].value);
-                setUpload((current) => ({ ...current, category: parsed[0].value }));
-            }
-        } catch {
-            window.localStorage.removeItem("edumate-admin-folders");
+    const loadStorageStats = useCallback(async () => {
+        try {
+            const response = await getAdminStorageStats();
+            setStorageStats(response.data || null);
+        } catch (statsError) {
+            setError(statsError.message || "Unable to load storage stats.");
         }
     }, []);
 
     useEffect(() => {
-        if (activeSection === "files") {
-            loadDocuments();
-        }
-
-        if (activeSection === "users") {
-            loadUsers();
-        }
-    }, [activeSection, activeFolder]);
-
-    useEffect(() => {
+        // fetching storage stats when auth ready
         if (isAdminAuthenticated) {
-            loadStorageStats();
+            void Promise.resolve().then(() => loadStorageStats());
         }
-    }, [isAdminAuthenticated]);
+    }, [isAdminAuthenticated, loadStorageStats]);
 
     useEffect(() => {
         if (activeSection !== "files") {
@@ -200,7 +248,7 @@ function Admin({ mode = "auto" }) {
         }, 250);
 
         return () => window.clearTimeout(timer);
-    }, [search]);
+    }, [search, activeSection, loadDocuments]);
 
     useEffect(() => {
         if (activeSection !== "users") {
@@ -212,7 +260,7 @@ function Admin({ mode = "auto" }) {
         }, 250);
 
         return () => window.clearTimeout(timer);
-    }, [userSearch, roleFilter]);
+    }, [userSearch, roleFilter, activeSection, loadUsers]);
 
     const visibleFolderStorage = useMemo(() => {
         return documents.reduce((total, file) => total + Number(file.fileSize || file.size || 0), 0);
@@ -330,48 +378,7 @@ function Admin({ mode = "auto" }) {
         }
     }
 
-    async function loadDocuments() {
-        try {
-            setBusy(true);
-            setError("");
-            const response = await listAdminDocuments({
-                search,
-                category: activeFolder
-            });
-
-            setDocuments(response.data || []);
-        } catch (fetchError) {
-            setError(fetchError.message || "Unable to load files.");
-        } finally {
-            setBusy(false);
-        }
-    }
-
-    async function loadUsers() {
-        try {
-            setBusy(true);
-            setError("");
-            const response = await listAdminUsers({
-                search: userSearch,
-                role: roleFilter
-            });
-
-            setUsers(response.data || []);
-        } catch (fetchError) {
-            setError(fetchError.message || "Unable to load users.");
-        } finally {
-            setBusy(false);
-        }
-    }
-
-    async function loadStorageStats() {
-        try {
-            const response = await getAdminStorageStats();
-            setStorageStats(response.data || null);
-        } catch (statsError) {
-            setError(statsError.message || "Unable to load storage stats.");
-        }
-    }
+    
 
     async function refreshSection() {
         await loadStorageStats();

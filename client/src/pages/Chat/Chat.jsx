@@ -288,12 +288,7 @@ function Chat() {
         }
     }, [threads, activeThreadId]);
 
-    useEffect(() => {
-        if (initialPrompt && !hasSubmittedInitialPrompt) {
-            setHasSubmittedInitialPrompt(true);
-            void sendMessage(initialPrompt);
-        }
-    }, [initialPrompt, hasSubmittedInitialPrompt]);
+
 
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });

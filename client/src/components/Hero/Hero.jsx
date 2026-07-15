@@ -56,13 +56,13 @@ function Hero() {
                 <div className="floating-orb orb-one"></div>
                 <div className="floating-orb orb-two"></div>
 
-                <div className="chat-pill chat-pill-top">
+                <div className="edu-chat-pill edu-chat-pill-top">
                     View Detailed Bounce Analysis
                 </div>
 
-                <div className="chat-card chat-card-summary">
-                    <div className="chat-avatar">AI</div>
-                    <div className="chat-card-body">
+                <div className="edu-chat-card edu-chat-card-summary">
+                    <div className="edu-chat-avatar">AI</div>
+                    <div className="edu-chat-card-body">
                         <p>
                             Based on recent data, the spike in traffic is primarily
                             from increased referrals from social media and organic search.
@@ -78,22 +78,22 @@ function Hero() {
                     </div>
                 </div>
 
-                <div className="chat-pill chat-pill-bottom">
+                <div className="edu-chat-pill edu-chat-pill-bottom">
                     Can you export this as a CSV?
                 </div>
 
-                <div className="chat-status-row">
-                    <div className="chat-avatar">AI</div>
+                <div className="edu-chat-status-row">
+                    <div className="edu-chat-avatar">AI</div>
                     <span>Analyzing data, please wait...</span>
                 </div>
 
-                <div className="chat-card chat-card-input">
-                    <div className="chat-chip-row">
+                <div className="edu-chat-card edu-chat-card-input">
+                    <div className="edu-chat-chip-row">
                         <span>Create in-depth analysis</span>
                         <span>Identify actionable tasks</span>
                     </div>
 
-                    <form className="chat-input-shell" onSubmit={handlePromptSubmit}>
+                    <form className="edu-chat-input-shell" onSubmit={handlePromptSubmit}>
                         <input
                             type="text"
                             value={heroPrompt}

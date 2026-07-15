@@ -1,4 +1,4 @@
-import { FiAward, FiBookOpen, FiBriefcase, FiBus, FiCalendar, FiCheckCircle, FiClock, FiCompass, FiFileText, FiHome, FiMap, FiMonitor, FiPieChart, FiShield, FiUsers, FiVideo } from "react-icons/fi";
+import { FiAward, FiBookOpen, FiBriefcase, FiTruck, FiCalendar, FiCheckCircle, FiClock, FiCompass, FiFileText, FiHome, FiMap, FiMonitor, FiPieChart, FiShield, FiUsers, FiVideo } from "react-icons/fi";
 
 const iconMap = {
     admission: FiBookOpen,
@@ -6,7 +6,7 @@ const iconMap = {
     fees: FiPieChart,
     placement: FiBriefcase,
     scholarship: FiAward,
-    transport: FiBus,
+    transport: FiTruck,
     faculty: FiUsers,
     departments: FiMonitor,
     library: FiFileText,

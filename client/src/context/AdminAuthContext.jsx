@@ -1,5 +1,4 @@
-import { createContext, useEffect, useState } from "react";
-
+import { useEffect, useState } from "react";
 import {
 	clearAdminSession,
 	getAdminAccessToken,
@@ -7,8 +6,7 @@ import {
 	isAdminSession,
 	saveAdminSession
 } from "../services/adminSession";
-
-export const AdminAuthContext = createContext();
+import { AdminAuthContext } from "./contexts";
 
 function AdminAuthProvider({ children }) {
 	const [adminUser, setAdminUser] = useState(() => getAdminUser());
