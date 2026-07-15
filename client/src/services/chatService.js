@@ -3,11 +3,12 @@ import { getApiRootUrl } from "./apiConfig";
 const API_ROOT = getApiRootUrl();
 const CHAT_API_BASE_URL = `${API_ROOT}/chat`;
 
-export async function askEduMate({ question, conversationId }) {
+export async function askEduMate({ question, conversationId, signal }) {
     const token = localStorage.getItem("edumate-access-token");
 
     const response = await fetch(`${CHAT_API_BASE_URL}/ask`, {
         method: "POST",
+        signal,
         headers: {
             "Content-Type": "application/json",
             ...(token ? { Authorization: `Bearer ${token}` } : {})

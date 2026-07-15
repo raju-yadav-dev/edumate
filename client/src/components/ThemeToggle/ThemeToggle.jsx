@@ -10,9 +10,10 @@ function ThemeToggle() {
     return (
 
         <button
+            type="button"
             className={`theme-toggle ${theme}`}
             onClick={toggleTheme}
-            aria-label="Toggle Theme"
+            aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
         >
 
             <div className="toggle-thumb">
