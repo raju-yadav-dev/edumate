@@ -13,13 +13,14 @@ function TopBar({
     onMessageSearchChange
 }) {
     const avatarInitial = user?.fullName?.trim()?.charAt(0)?.toUpperCase() || "R";
+    const normalizedStatus = String(connectionStatus || "").toLowerCase();
 
     return (
         <header className="edu-chat-topbar">
             <div className="edu-chat-topbar-copy">
                 <div className="edu-chat-topbar-kicker">
                     <span className="edu-chat-section-label">{institutionName}</span>
-                    <span className={`edu-chat-status-pill ${connectionStatus === "online" ? "is-online" : "is-offline"}`}>
+                    <span className={`edu-chat-status-pill ${normalizedStatus === "online" ? "is-online" : "is-offline"}`}>
                         <FiCheckCircle />
                         {connectionStatus}
                     </span>
