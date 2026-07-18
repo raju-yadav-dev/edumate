@@ -1,0 +1,21 @@
+.app-shell{
+
+	min-height:100vh;
+
+}
+
+.page-stack{
+
+	width:min(1480px, calc(100% - 32px));
+
+	margin:0 auto;
+
+	padding:24px 0 32px;
+
+	display:flex;
+
+	flex-direction:column;
+
+	gap:24px;
+
+}

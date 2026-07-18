@@ -1,0 +1,225 @@
+/* =========================================================
+   FOLDER PANEL
+========================================================= */
+
+.folder-panel{
+
+    display:flex;
+
+    flex-direction:column;
+
+    gap:20px;
+
+    padding:20px;
+
+    border-radius:20px;
+
+    background:var(--glass);
+
+    border:1px solid var(--glass-border);
+
+}
+
+/* =========================================================
+   HEADER
+========================================================= */
+
+.panel-title{
+
+    display:flex;
+
+    justify-content:space-between;
+
+    align-items:flex-start;
+
+    gap:16px;
+
+}
+
+.panel-title h2{
+
+    margin:0;
+
+    font-size:20px;
+
+}
+
+.panel-title p{
+
+    margin-top:4px;
+
+    font-size:13px;
+
+    color:var(--text-light);
+
+}
+
+.folder-add-button{
+
+    width:40px;
+
+    height:40px;
+
+    display:grid;
+
+    place-items:center;
+
+    border:none;
+
+    border-radius:12px;
+
+    background:rgba(255,255,255,.05);
+
+    color:var(--text);
+
+    cursor:pointer;
+
+    transition:.25s;
+
+}
+
+.folder-add-button:hover{
+
+    background:var(--primary);
+
+    color:#111;
+
+}
+
+/* =========================================================
+   ROOT
+========================================================= */
+
+.folder-root{
+
+    display:flex;
+
+    align-items:center;
+
+    gap:8px;
+
+    margin-bottom:12px;
+
+    padding:10px 12px;
+
+    font-weight:700;
+
+    color:var(--text-light);
+
+}
+
+/* =========================================================
+   LIST
+========================================================= */
+
+.folder-list{
+
+    display:flex;
+
+    flex-direction:column;
+
+    gap:8px;
+
+    overflow:auto;
+
+}
+
+/* =========================================================
+   ITEM
+========================================================= */
+
+.folder-item{
+
+    display:flex;
+
+    justify-content:space-between;
+
+    align-items:center;
+
+    width:100%;
+
+    padding:12px 14px;
+
+    border:none;
+
+    border-radius:14px;
+
+    background:transparent;
+
+    color:var(--text);
+
+    cursor:pointer;
+
+    transition:.25s;
+
+}
+
+.folder-item:hover{
+
+    background:rgba(255,255,255,.05);
+
+}
+
+/* =========================================================
+   ACTIVE
+========================================================= */
+
+.folder-item.active{
+
+    background:linear-gradient(
+        135deg,
+        rgba(200,255,73,.18),
+        rgba(52,238,255,.10)
+    );
+
+    border:1px solid rgba(200,255,73,.25);
+
+}
+
+/* =========================================================
+   LEFT
+========================================================= */
+
+.folder-info{
+
+    display:flex;
+
+    align-items:center;
+
+    gap:12px;
+
+    min-width:0;
+
+}
+
+.folder-info span{
+
+    overflow:hidden;
+
+    text-overflow:ellipsis;
+
+    white-space:nowrap;
+
+}
+
+/* =========================================================
+   COUNT
+========================================================= */
+
+.folder-count{
+
+    min-width:30px;
+
+    padding:4px 10px;
+
+    border-radius:999px;
+
+    background:rgba(255,255,255,.06);
+
+    font-size:12px;
+
+    font-weight:700;
+
+    text-align:center;
+
+}

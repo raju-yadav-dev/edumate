@@ -1,0 +1,9 @@
+.page-container{
+
+    flex:1;
+
+    padding:30px;
+
+    overflow:auto;
+
+}

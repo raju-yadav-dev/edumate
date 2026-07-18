@@ -1,0 +1,690 @@
+/* ==========================================================
+   STORAGE OVERVIEW
+========================================================== */
+
+.storage-section{
+
+    display:flex;
+
+    flex-direction:column;
+
+    gap:28px;
+
+    margin-bottom:40px;
+
+    padding:0 24px;
+
+}
+
+/* ==========================================================
+   HEADER
+========================================================== */
+
+.storage-header{
+
+    display:flex;
+
+    justify-content:space-between;
+
+    align-items:flex-start;
+
+    gap:20px;
+
+    position:relative;
+
+    padding-left:20px;
+
+}
+
+.storage-header::before{
+
+    content:"";
+
+    position:absolute;
+
+    left:0;
+
+    top:4px;
+
+    width:4px;
+
+    height:44px;
+
+    border-radius:999px;
+
+    background:linear-gradient(
+        180deg,
+        #7CFF3F,
+        #33D1FF
+    );
+
+}
+
+.storage-header h2{
+
+    margin:0;
+
+    font-size:30px;
+
+    font-weight:700;
+
+    color:var(--text);
+
+    letter-spacing:-.5px;
+
+}
+
+.storage-header p{
+
+    margin-top:8px;
+
+    color:var(--text-light);
+
+    font-size:15px;
+
+    line-height:1.6;
+
+}
+
+/* ==========================================================
+   GRID
+========================================================== */
+
+.storage-grid{
+
+    display:grid;
+
+    grid-template-columns:
+        repeat(3,minmax(320px,1fr));
+
+    gap:24px;
+
+    align-items:stretch;
+
+}
+
+/* ==========================================================
+   STORAGE CARD
+========================================================== */
+
+.storage-dashboard-card{
+
+    position:relative;
+
+    display:flex;
+
+    flex-direction:column;
+
+    gap:22px;
+
+    padding:24px;
+
+    border-radius:22px;
+
+    background:var(--glass);
+
+    border:1px solid var(--glass-border);
+
+    backdrop-filter:blur(18px);
+
+    transition:
+        transform .25s,
+        border-color .25s,
+        box-shadow .25s;
+
+}
+
+.storage-dashboard-card:hover{
+
+    transform:translateY(-5px);
+
+    border-color:rgba(124,255,63,.25);
+
+    box-shadow:
+        0 20px 45px rgba(0,0,0,.20);
+
+}
+
+/* ==========================================================
+   CARD HEADER
+========================================================== */
+
+.panel-title{
+
+    display:flex;
+
+    justify-content:space-between;
+
+    align-items:flex-start;
+
+    gap:18px;
+
+}
+
+.panel-title h2{
+
+    margin:0;
+
+    font-size:21px;
+
+    font-weight:700;
+
+}
+
+.panel-title p{
+
+    margin-top:6px;
+
+    color:var(--text-light);
+
+    font-size:13px;
+
+    line-height:1.5;
+
+}
+
+.panel-title svg{
+
+    width:42px;
+
+    height:42px;
+
+    padding:10px;
+
+    border-radius:14px;
+
+    background:rgba(255,255,255,.05);
+
+    color:var(--primary);
+
+    flex-shrink:0;
+
+}
+
+/* ==========================================================
+   COMBINED STORAGE METER
+========================================================== */
+
+.combined-meter{
+
+    position:relative;
+
+    display:flex;
+
+    width:100%;
+
+    height:12px;
+
+    overflow:hidden;
+
+    border-radius:999px;
+
+    background:rgba(255,255,255,.06);
+
+}
+
+.combined-meter span{
+
+    height:100%;
+
+    transition:width .4s ease;
+
+}
+
+.combined-meter .mongo{
+
+    background:linear-gradient(
+        90deg,
+        #6EEB83,
+        #3DDC84
+    );
+
+}
+
+.combined-meter .supabase{
+
+    background:linear-gradient(
+        90deg,
+        #38BDF8,
+        #0EA5E9
+    );
+
+}
+
+/* ==========================================================
+   ENTERPRISE PROGRESS BAR
+========================================================== */
+
+.enterprise-progress{
+
+    position:relative;
+
+    width:100%;
+
+    height:12px;
+
+    overflow:hidden;
+
+    border-radius:999px;
+
+    background:rgba(255,255,255,.06);
+
+}
+
+.enterprise-progress span{
+
+    display:block;
+
+    height:100%;
+
+    border-radius:999px;
+
+    transition:width .35s ease;
+
+}
+
+.enterprise-progress.mongo span{
+
+    background:linear-gradient(
+        90deg,
+        #84F45B,
+        #47D147
+    );
+
+}
+
+.enterprise-progress.supabase span{
+
+    background:linear-gradient(
+        90deg,
+        #38BDF8,
+        #2563EB
+    );
+
+}
+
+/* ==========================================================
+   KPI GRID
+========================================================== */
+
+.storage-kpis{
+
+    display:grid;
+
+    grid-template-columns:repeat(2,minmax(0,1fr));
+
+    gap:16px;
+
+}
+
+.storage-kpis span{
+
+    display:flex;
+
+    flex-direction:column;
+
+    gap:8px;
+
+    padding:16px;
+
+    border-radius:16px;
+
+    background:rgba(255,255,255,.03);
+
+    border:1px solid rgba(255,255,255,.05);
+
+    transition:
+        transform .2s ease,
+        background .2s ease;
+
+}
+
+.storage-kpis span:hover{
+
+    transform:translateY(-2px);
+
+    background:rgba(255,255,255,.05);
+
+}
+
+.storage-kpis small{
+
+    font-size:12px;
+
+    color:var(--text-light);
+
+    line-height:1.4;
+
+}
+
+.storage-kpis b{
+
+    font-size:18px;
+
+    font-weight:700;
+
+    color:var(--text);
+
+    word-break:break-word;
+
+}
+
+/* ==========================================================
+   LEGEND
+========================================================== */
+
+.storage-legend{
+
+    display:flex;
+
+    flex-wrap:wrap;
+
+    gap:18px;
+
+    margin-top:auto;
+
+    padding-top:8px;
+
+}
+
+.storage-legend span{
+
+    display:flex;
+
+    align-items:center;
+
+    gap:8px;
+
+    font-size:13px;
+
+    color:var(--text-light);
+
+}
+
+.legend-dot{
+
+    width:10px;
+
+    height:10px;
+
+    border-radius:50%;
+
+    display:inline-block;
+
+}
+
+.legend-dot.mongo{
+
+    background:#57D857;
+
+}
+
+.legend-dot.supabase{
+
+    background:#2BA8FF;
+
+}
+
+/* ==========================================================
+   COMBINED CARD
+========================================================== */
+
+.combined-storage-card{
+
+    border-color:rgba(124,255,63,.12);
+
+}
+
+.combined-storage-card:hover{
+
+    border-color:rgba(124,255,63,.28);
+
+}
+
+/* ==========================================================
+   CARD ANIMATIONS
+========================================================== */
+
+.storage-dashboard-card::before{
+
+    content:"";
+
+    position:absolute;
+
+    inset:0;
+
+    border-radius:22px;
+
+    pointer-events:none;
+
+    opacity:0;
+
+    transition:opacity .3s ease;
+
+    background:
+        linear-gradient(
+            135deg,
+            rgba(124,255,63,.05),
+            rgba(51,209,255,.03)
+        );
+
+}
+
+.storage-dashboard-card:hover::before{
+
+    opacity:1;
+
+}
+
+.storage-dashboard-card>*{
+
+    position:relative;
+
+    z-index:1;
+
+}
+
+/* ==========================================================
+   VALUE COLORS
+========================================================== */
+
+.storage-kpis b{
+
+    color:var(--text);
+
+}
+
+.storage-kpis small{
+
+    color:var(--text-light);
+
+}
+
+/* ==========================================================
+   LIGHT MODE
+========================================================== */
+
+[data-theme="light"] .storage-dashboard-card{
+
+    background:#ffffff;
+
+    border:1px solid rgba(15,23,42,.08);
+
+    box-shadow:
+        0 10px 24px rgba(15,23,42,.06);
+
+}
+
+[data-theme="light"] .storage-dashboard-card:hover{
+
+    box-shadow:
+        0 20px 40px rgba(15,23,42,.12);
+
+}
+
+[data-theme="light"] .storage-kpis span{
+
+    background:#f8fafc;
+
+    border-color:#e2e8f0;
+
+}
+
+[data-theme="light"] .combined-meter,
+
+[data-theme="light"] .enterprise-progress{
+
+    background:#e5e7eb;
+
+}
+
+/* ==========================================================
+   DARK MODE
+========================================================== */
+
+[data-theme="dark"] .storage-dashboard-card{
+
+    background:rgba(22,28,36,.75);
+
+    border:1px solid rgba(255,255,255,.06);
+
+}
+
+[data-theme="dark"] .storage-kpis span{
+
+    background:rgba(255,255,255,.03);
+
+}
+
+[data-theme="dark"] .combined-meter,
+
+[data-theme="dark"] .enterprise-progress{
+
+    background:rgba(255,255,255,.05);
+
+}
+
+/* ==========================================================
+   RESPONSIVE
+========================================================== */
+
+@media (max-width:1400px){
+
+    .storage-grid{
+
+        grid-template-columns:
+            repeat(2,minmax(320px,1fr));
+
+    }
+
+}
+
+@media (max-width:1100px){
+
+    .storage-grid{
+
+        grid-template-columns:1fr;
+
+    }
+
+}
+
+@media (max-width:768px){
+
+    .storage-section{
+
+        padding:0 16px;
+
+    }
+
+    .storage-header{
+
+        padding-left:16px;
+
+    }
+
+    .storage-header h2{
+
+        font-size:26px;
+
+    }
+
+    .storage-dashboard-card{
+
+        padding:20px;
+
+    }
+
+    .storage-kpis{
+
+        grid-template-columns:1fr;
+
+    }
+
+    .panel-title{
+
+        flex-direction:column;
+
+        align-items:flex-start;
+
+    }
+
+    .panel-title svg{
+
+        width:40px;
+
+        height:40px;
+
+    }
+
+}
+
+@media (max-width:480px){
+
+    .storage-section{
+
+        padding:0 12px;
+
+    }
+
+    .storage-dashboard-card{
+
+        padding:18px;
+
+        border-radius:18px;
+
+    }
+
+    .panel-title h2{
+
+        font-size:18px;
+
+    }
+
+    .storage-kpis b{
+
+        font-size:16px;
+
+    }
+
+    .storage-header h2{
+
+        font-size:22px;
+
+    }
+
+    .storage-header p{
+
+        font-size:14px;
+
+    }
+
+    .storage-legend{
+
+        flex-direction:column;
+
+        gap:10px;
+
+    }
+
+}

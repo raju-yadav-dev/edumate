@@ -1536,3 +1536,403 @@
         grid-template-columns: minmax(220px, 1fr) 44px 44px minmax(160px, auto);
     }
 }
+
+/* Final responsive enterprise console overrides */
+.admin-console-screen .admin-page {
+    height: 100vh;
+    overflow: hidden;
+}
+
+.admin-console-screen .admin-left {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+}
+
+.admin-console-screen .admin-main {
+    height: 100vh;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-bottom: 34px;
+}
+
+.admin-console-screen .storage-overview-section,
+.admin-console-screen .document-manager-shell {
+    display: grid;
+    gap: 14px;
+    min-width: 0;
+}
+
+.admin-console-screen .storage-overview-section {
+    order: 1;
+    padding: 0;
+    margin: 0;
+}
+
+.admin-console-screen .kb-dashboard-grid {
+    order: 2;
+}
+
+.admin-console-screen .document-manager-shell {
+    order: 3;
+}
+
+.admin-console-screen .storage-dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(260px, 1fr));
+    align-items: stretch;
+    gap: 14px;
+}
+
+.admin-console-screen .storage-dashboard-card {
+    min-width: 0;
+    min-height: 236px;
+    padding: 16px;
+    display: grid;
+    gap: 14px;
+    border: 1px solid var(--console-border);
+    border-radius: 12px;
+    background: linear-gradient(180deg, rgba(18, 25, 34, 0.86), rgba(10, 16, 23, 0.9));
+}
+
+.admin-console-screen .combined-meter {
+    height: 12px;
+    display: flex;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(148, 163, 184, 0.14);
+}
+
+.admin-console-screen .combined-meter span,
+.admin-console-screen .enterprise-progress span {
+    height: 100%;
+    display: block;
+}
+
+.admin-console-screen .combined-meter .mongo,
+.admin-console-screen .enterprise-progress.mongo span {
+    background: linear-gradient(90deg, #8bdc3f, #59b92f);
+}
+
+.admin-console-screen .combined-meter .supabase,
+.admin-console-screen .enterprise-progress.supabase span {
+    background: linear-gradient(90deg, #2f9bff, #1769c2);
+}
+
+.admin-console-screen .storage-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    color: var(--console-muted);
+    font-size: 12px;
+}
+
+.admin-console-screen .storage-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.admin-console-screen .legend-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 999px;
+}
+
+.admin-console-screen .legend-dot.mongo {
+    background: #8bdc3f;
+}
+
+.admin-console-screen .legend-dot.supabase {
+    background: #2f9bff;
+}
+
+.admin-console-screen .storage-kpis {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(138px, 1fr));
+    gap: 10px;
+}
+
+.admin-console-screen .storage-kpis span {
+    min-width: 0;
+}
+
+.admin-console-screen .storage-kpis b {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.admin-console-screen .document-manager-shell {
+    min-height: clamp(520px, 58vh, 720px);
+}
+
+.admin-console-screen .document-manager-head {
+    align-items: start;
+}
+
+.admin-console-screen .toolbar-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 10px;
+    min-width: 0;
+}
+
+.admin-console-screen .toolbar-actions .primary-action,
+.admin-console-screen .toolbar-actions .secondary-action {
+    min-height: 40px;
+    border-radius: 10px;
+}
+
+.admin-console-screen .document-management.explorer {
+    height: clamp(500px, 56vh, 680px);
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(240px, 280px) minmax(520px, 1fr) minmax(260px, 320px);
+    align-items: stretch;
+    overflow: hidden;
+}
+
+.admin-console-screen .file-manager-sidebar {
+    min-height: 0;
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto;
+    border-right: 1px solid var(--console-border);
+    overflow: hidden;
+}
+
+.admin-console-screen .file-manager-sidebar .folder-panel {
+    border: 0 !important;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.admin-console-screen .folder-root {
+    min-height: 30px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--console-muted);
+    font-size: 13px;
+}
+
+.admin-console-screen .file-manager-sidebar .upload-area {
+    margin: 0;
+    padding: 14px;
+    border-top: 1px solid var(--console-border);
+    overflow: visible;
+}
+
+.admin-console-screen .document-management .file-panel {
+    min-width: 0;
+    overflow: hidden;
+}
+
+.admin-console-screen .document-management .toolbar {
+    grid-template-columns: minmax(170px, auto) minmax(240px, 1fr) auto;
+    margin: 0;
+    padding: 12px 14px;
+}
+
+.admin-console-screen .document-management .file-panel .search {
+    width: 100%;
+    min-width: 0;
+    padding: 0 12px;
+}
+
+.admin-console-screen .document-management .file-panel .search input,
+.admin-console-screen .document-management .file-panel .search > svg {
+    display: block;
+}
+
+.admin-console-screen .file-manager-table {
+    min-width: 0;
+    overflow: auto;
+}
+
+.admin-console-screen .file-manager-table .table-head,
+.admin-console-screen .file-manager-table .file-row {
+    width: max-content;
+    min-width: 1120px;
+    display: grid;
+    grid-template-columns: 42px 54px minmax(240px, 1.5fr) 82px 96px 130px 148px 148px 116px 236px;
+}
+
+.admin-console-screen .file-manager-table .table-head {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+}
+
+.admin-console-screen .preview-panel {
+    min-width: 0;
+    min-height: 0;
+    padding: 16px;
+    display: grid;
+    grid-template-rows: auto minmax(160px, 1fr) auto auto;
+    gap: 14px;
+    border-left: 1px solid var(--console-border);
+    background: rgba(8, 14, 21, 0.68);
+    overflow: auto;
+}
+
+.admin-console-screen .preview-surface {
+    min-height: 180px;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--console-border);
+    border-radius: 12px;
+    background: rgba(10, 16, 23, 0.86);
+    overflow: hidden;
+}
+
+.admin-console-screen .preview-surface iframe {
+    width: 100%;
+    height: 100%;
+    min-height: 220px;
+    border: 0;
+}
+
+.admin-console-screen .metadata-grid {
+    display: grid;
+    gap: 8px;
+}
+
+.admin-console-screen .metadata-grid span {
+    min-width: 0;
+    padding: 9px 10px;
+    display: grid;
+    gap: 3px;
+    border: 1px solid var(--console-border);
+    border-radius: 9px;
+    background: rgba(255, 255, 255, 0.025);
+}
+
+.admin-console-screen .metadata-grid small {
+    color: var(--console-muted);
+    font-size: 11px;
+}
+
+.admin-console-screen .metadata-grid b {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--console-text);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-transform: capitalize;
+}
+
+.admin-console-screen .context-menu {
+    position: fixed;
+    z-index: 80;
+    min-width: 190px;
+    padding: 8px;
+    display: grid;
+    gap: 4px;
+    border: 1px solid var(--console-border);
+    border-radius: 12px;
+    background: #0a1017;
+    box-shadow: 0 20px 48px rgba(0, 0, 0, 0.38);
+}
+
+.admin-console-screen .context-menu button {
+    min-height: 36px;
+    padding: 0 10px;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--console-text);
+    text-align: left;
+    cursor: pointer;
+}
+
+.admin-console-screen .context-menu button:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.admin-console-screen .context-menu .danger {
+    color: #ff8f8f;
+}
+
+@media (max-width: 1500px) {
+    .admin-console-screen .storage-dashboard-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .admin-console-screen .document-management.explorer {
+        grid-template-columns: minmax(230px, 260px) minmax(0, 1fr);
+    }
+
+    .admin-console-screen .preview-panel {
+        grid-column: 1 / -1;
+        min-height: 260px;
+        border-left: 0;
+        border-top: 1px solid var(--console-border);
+    }
+}
+
+@media (max-width: 1080px) {
+    .admin-console-screen .admin-page {
+        height: auto;
+        min-height: 100vh;
+        overflow: auto;
+        grid-template-columns: 1fr;
+    }
+
+    .admin-console-screen .admin-left {
+        position: relative;
+        height: auto;
+        max-height: none;
+        border-radius: 0;
+    }
+
+    .admin-console-screen .admin-main {
+        height: auto;
+        min-height: 100vh;
+        overflow: visible;
+        padding: 22px;
+    }
+
+    .admin-console-screen .document-manager-shell {
+        min-height: auto;
+    }
+
+    .admin-console-screen .document-management.explorer {
+        height: auto;
+        min-height: 720px;
+        grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+    }
+}
+
+@media (max-width: 820px) {
+    .admin-console-screen .admin-topbar,
+    .admin-console-screen .document-management.explorer,
+    .admin-console-screen .document-management .toolbar,
+    .admin-console-screen .document-filter-row {
+        grid-template-columns: 1fr;
+    }
+
+    .admin-console-screen .file-manager-sidebar {
+        border-right: 0;
+        border-bottom: 1px solid var(--console-border);
+    }
+
+    .admin-console-screen .preview-panel {
+        grid-column: auto;
+    }
+
+    .admin-console-screen .toolbar-actions {
+        justify-content: stretch;
+    }
+
+    .admin-console-screen .toolbar-actions .primary-action,
+    .admin-console-screen .toolbar-actions .secondary-action {
+        flex: 1 1 140px;
+    }
+}

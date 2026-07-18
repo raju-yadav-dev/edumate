@@ -1,0 +1,318 @@
+/* Global Reset */
+* {
+    box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+    width: 100%;
+    min-height: 100%;
+}
+
+/* ===========================
+   ADMIN PAGE
+=========================== */
+
+.admin-page {
+    width: 100%;
+    min-height: 100vh;
+    padding: 18px;
+    display: grid;
+    grid-template-columns:
+        clamp(260px, 18vw, 320px)
+        minmax(0, 1fr);
+    gap: 18px;
+    background: var(--bg);
+    color: var(--text);
+}
+
+.admin-main {
+    margin-left: 326px;
+    min-height: calc(100vh - 36px);
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    overflow-x: hidden;
+}
+
+.admin-left,
+.admin-main,
+.admin-panel-card {
+    border: 1px solid var(--glass-border);
+    border-radius: 26px;
+    background: var(--glass);
+    backdrop-filter: blur(calc(var(--blur) + 2px));
+    -webkit-backdrop-filter: blur(calc(var(--blur) + 2px));
+    box-shadow: var(--shadow);
+}
+
+/* ===========================
+   SIDEBAR
+=========================== */
+
+.admin-left {
+    position: fixed;
+    left: 18px;
+    top: 18px;
+    bottom: 18px;
+    width: 290px;
+    display: flex;
+    flex-direction: column;
+    z-index: 100;
+}
+
+.admin-brand {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 8px 2px;
+}
+
+.admin-brand span {
+    font-size: 12px;
+    font-weight: 900;
+    letter-spacing: .12em;
+    color: var(--primary);
+}
+
+.admin-brand strong {
+    font-size: 22px;
+}
+
+.admin-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.admin-nav button {
+    min-height: 50px;
+    padding: 0 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border: 0;
+    background: transparent;
+    color: var(--text);
+    border-radius: 16px;
+    cursor: pointer;
+    font-weight: 700;
+}
+
+.admin-nav button.active {
+    background: linear-gradient(135deg,var(--primary),var(--secondary));
+    color:#07131c;
+}
+
+/* ===========================
+   STORAGE
+=========================== */
+
+.storage-box{
+    margin-top:auto;
+    padding:18px;
+    display:flex;
+    flex-direction:column;
+    gap:16px;
+    border-radius:22px;
+}
+
+.storage-circle{
+    width:140px;
+    height:140px;
+    border-radius:50%;
+    display:grid;
+    place-items:center;
+    margin:auto;
+}
+
+.storage-inner{
+    width:104px;
+    height:104px;
+    border-radius:50%;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    flex-direction:column;
+}
+
+.storage-inner h2{
+    font-size:24px;
+}
+
+.storage-inner p{
+    font-size:11px;
+}
+
+/* ===========================
+   HEADER
+=========================== */
+
+.admin-header{
+    display:flex;
+    justify-content:space-between;
+    gap:16px;
+}
+
+.admin-header h1{
+    font-size:clamp(28px,2.4vw,42px);
+}
+
+.notification-banner{
+    display:flex;
+    flex-wrap:wrap;
+    gap:10px;
+}
+
+.status-pill{
+    padding:10px 14px;
+    border-radius:14px;
+}
+
+/* ===========================
+   BUTTONS
+=========================== */
+
+.primary-action,
+.secondary-action,
+.upload-submit{
+    min-height:44px;
+    padding:0 16px;
+    border-radius:14px;
+    display:inline-flex;
+    align-items:center;
+    gap:10px;
+    cursor:pointer;
+}
+
+.primary-action{
+    background:linear-gradient(135deg,var(--primary),var(--secondary));
+}
+
+.secondary-action{
+    background:rgba(255,255,255,.04);
+}
+
+/* ===========================
+   DASHBOARD
+=========================== */
+
+.dashboard-stats{
+    display:grid;
+    grid-template-columns:
+        repeat(auto-fit,minmax(220px,1fr));
+    gap:20px;
+}
+
+/* ===========================
+   COMMON PANEL
+=========================== */
+
+.admin-panel-card{
+    display:flex;
+    flex-direction:column;
+    gap:16px;
+}
+
+/* ===========================
+   USERS
+=========================== */
+
+.admin-list{
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+}
+
+.admin-card-row{
+    min-height:70px;
+    display:grid;
+    grid-template-columns:
+        52px
+        minmax(0,1fr)
+        auto
+        auto;
+    gap:14px;
+}
+
+.avatar-badge{
+    width:52px;
+    height:52px;
+    display:grid;
+    place-items:center;
+}
+
+.keys-form{
+    display:grid;
+    gap:14px;
+}
+
+/* ===========================
+   TOOLS
+=========================== */
+
+.tool-card-grid{
+    display:grid;
+    grid-template-columns:
+        repeat(3,minmax(0,1fr));
+    gap:14px;
+}
+
+.tool-card{
+    min-height:180px;
+    padding:18px;
+    display:grid;
+    gap:10px;
+}
+
+/* ===========================
+   RESPONSIVE
+=========================== */
+
+@media(max-width:1200px){
+
+.admin-page{
+grid-template-columns:1fr;
+}
+
+.admin-left{
+position:relative;
+width:100%;
+left:auto;
+top:auto;
+bottom:auto;
+}
+
+.admin-main{
+margin-left:0;
+}
+
+}
+
+@media(max-width:900px){
+
+.admin-header{
+flex-direction:column;
+}
+
+.tool-card-grid{
+grid-template-columns:1fr;
+}
+
+}
+
+@media(max-width:640px){
+
+.admin-page{
+padding:12px;
+}
+
+.admin-main,
+.admin-panel-card{
+padding:14px;
+}
+
+}
+

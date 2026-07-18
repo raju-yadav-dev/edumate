@@ -1,0 +1,229 @@
+/* ==========================================
+   PREVIEW PANEL
+========================================== */
+
+.preview-panel{
+
+    display:flex;
+
+    flex-direction:column;
+
+    gap:20px;
+
+    padding:20px;
+
+    border-radius:20px;
+
+    border:1px solid var(--glass-border);
+
+    background:var(--glass);
+
+}
+
+/* ==========================================
+   HEADER
+========================================== */
+
+.preview-head{
+
+    display:flex;
+
+    justify-content:space-between;
+
+    align-items:flex-start;
+
+    gap:16px;
+
+}
+
+.preview-head strong{
+
+    display:block;
+
+    font-size:16px;
+
+}
+
+.preview-head span{
+
+    font-size:13px;
+
+    color:var(--text-light);
+
+}
+
+.preview-close{
+
+    width:38px;
+
+    height:38px;
+
+    border:none;
+
+    border-radius:12px;
+
+    background:rgba(255,255,255,.05);
+
+    color:var(--text);
+
+    cursor:pointer;
+
+}
+
+.preview-close:hover{
+
+    background:rgba(255,255,255,.12);
+
+}
+
+/* ==========================================
+   PREVIEW SURFACE
+========================================== */
+
+.preview-surface{
+
+    height:420px;
+
+    overflow:hidden;
+
+    border-radius:18px;
+
+    border:1px solid var(--glass-border);
+
+    background:rgba(255,255,255,.03);
+
+}
+
+.preview-surface iframe{
+
+    width:100%;
+
+    height:100%;
+
+    border:none;
+
+}
+
+.preview-placeholder{
+
+    height:100%;
+
+    display:flex;
+
+    flex-direction:column;
+
+    justify-content:center;
+
+    align-items:center;
+
+    gap:14px;
+
+    color:var(--text-light);
+
+}
+
+/* ==========================================
+   METADATA
+========================================== */
+
+.metadata-grid{
+
+    display:grid;
+
+    grid-template-columns:repeat(2,minmax(0,1fr));
+
+    gap:14px;
+
+}
+
+.metadata-item{
+
+    display:flex;
+
+    flex-direction:column;
+
+    gap:4px;
+
+    padding:12px;
+
+    border-radius:14px;
+
+    background:rgba(255,255,255,.03);
+
+}
+
+.metadata-item small{
+
+    color:var(--text-light);
+
+    font-size:12px;
+
+}
+
+.metadata-item strong{
+
+    font-size:14px;
+
+}
+
+/* ==========================================
+   EMPTY
+========================================== */
+
+.preview-empty{
+
+    min-height:500px;
+
+    display:flex;
+
+    flex-direction:column;
+
+    justify-content:center;
+
+    align-items:center;
+
+    gap:18px;
+
+    text-align:center;
+
+    color:var(--text-light);
+
+}
+
+/* ==========================================
+   BUTTONS
+========================================== */
+
+.preview-actions{
+
+    display:flex;
+
+    gap:12px;
+
+}
+
+.preview-actions button{
+
+    flex:1;
+
+}
+
+/* ==========================================
+   MOBILE
+========================================== */
+
+@media(max-width:900px){
+
+.metadata-grid{
+
+grid-template-columns:1fr;
+
+}
+
+.preview-surface{
+
+height:320px;
+
+}
+
+}

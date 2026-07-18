@@ -1,0 +1,131 @@
+/* ==========================================
+   CONTEXT MENU
+========================================== */
+
+.context-menu{
+
+    position:fixed;
+
+    z-index:5000;
+
+    width:230px;
+
+    padding:8px;
+
+    display:flex;
+
+    flex-direction:column;
+
+    gap:4px;
+
+    border-radius:16px;
+
+    border:1px solid var(--glass-border);
+
+    background:var(--glass);
+
+    backdrop-filter:blur(18px);
+
+    box-shadow:0 18px 50px rgba(0,0,0,.35);
+
+    animation:contextFade .15s ease;
+
+}
+
+/* ==========================================
+   BUTTONS
+========================================== */
+
+.context-menu button{
+
+    display:flex;
+
+    align-items:center;
+
+    gap:12px;
+
+    width:100%;
+
+    padding:10px 12px;
+
+    border:none;
+
+    border-radius:10px;
+
+    background:transparent;
+
+    color:var(--text);
+
+    cursor:pointer;
+
+    transition:.18s;
+
+    font-size:14px;
+
+}
+
+.context-menu button:hover{
+
+    background:rgba(255,255,255,.06);
+
+}
+
+.context-menu button svg{
+
+    flex-shrink:0;
+
+}
+
+/* ==========================================
+   DIVIDER
+========================================== */
+
+.context-divider{
+
+    height:1px;
+
+    margin:4px 0;
+
+    background:rgba(255,255,255,.08);
+
+}
+
+/* ==========================================
+   DANGER
+========================================== */
+
+.context-menu .danger{
+
+    color:#ef4444;
+
+}
+
+.context-menu .danger:hover{
+
+    background:rgba(239,68,68,.12);
+
+}
+
+/* ==========================================
+   ANIMATION
+========================================== */
+
+@keyframes contextFade{
+
+    from{
+
+        opacity:0;
+
+        transform:translateY(-6px) scale(.98);
+
+    }
+
+    to{
+
+        opacity:1;
+
+        transform:none;
+
+    }
+
+}

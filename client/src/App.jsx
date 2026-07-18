@@ -8,8 +8,8 @@ import Register from "./pages/Register/Register";
 import ForgotPassword from "./pages/ForgotPassword/ForgotPassword";
 import Profile from "./pages/Profile/Profile";
 import Chat from "./pages/Chat/Chat";
-import AdminLogin from "./pages/Admin/Login/AdminLogin";
-import AdminConsole from "./pages/Admin/Console/AdminConsole";
+import AdminLogin from "./Admin/Login/AdminLogin";
+import AdminConsole from "./Admin/Console/AdminConsole";
 
 function App() {
 

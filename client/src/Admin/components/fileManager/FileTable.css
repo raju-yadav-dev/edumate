@@ -1,0 +1,262 @@
+/* ===========================================
+   FILE TABLE
+=========================================== */
+
+.file-table{
+
+    flex:1;
+
+    display:flex;
+
+    flex-direction:column;
+
+    overflow:hidden;
+
+    border-radius:20px;
+
+    border:1px solid var(--glass-border);
+
+    background:var(--glass);
+
+}
+
+/* ===========================================
+   HEADER
+=========================================== */
+
+.table-head{
+
+    display:grid;
+
+    grid-template-columns:
+        50px
+        60px
+        2fr
+        110px
+        110px
+        180px
+        160px
+        160px
+        120px
+        220px;
+
+    align-items:center;
+
+    padding:16px 20px;
+
+    font-weight:700;
+
+    border-bottom:1px solid var(--glass-border);
+
+    background:rgba(255,255,255,.03);
+
+}
+
+/* ===========================================
+   BODY
+=========================================== */
+
+.file-rows{
+
+    overflow:auto;
+
+    flex:1;
+
+}
+
+/* ===========================================
+   ROW
+=========================================== */
+
+.file-row{
+
+    display:grid;
+
+    grid-template-columns:
+        50px
+        60px
+        2fr
+        110px
+        110px
+        180px
+        160px
+        160px
+        120px
+        220px;
+
+    align-items:center;
+
+    padding:16px 20px;
+
+    border-bottom:1px solid rgba(255,255,255,.06);
+
+    transition:.2s;
+
+}
+
+.file-row:hover{
+
+    background:rgba(255,255,255,.03);
+
+}
+
+/* ===========================================
+   FILE INFO
+=========================================== */
+
+.row-main{
+
+    border:none;
+
+    background:none;
+
+    color:inherit;
+
+    text-align:left;
+
+    cursor:pointer;
+
+}
+
+.row-text{
+
+    display:flex;
+
+    flex-direction:column;
+
+    gap:4px;
+
+}
+
+.row-text strong{
+
+    font-size:14px;
+
+}
+
+.row-text span{
+
+    font-size:12px;
+
+    color:var(--text-light);
+
+}
+
+/* ===========================================
+   ICON
+=========================================== */
+
+.pdf-icon{
+
+    color:#ef4444;
+
+}
+
+/* ===========================================
+   STATUS
+=========================================== */
+
+.document-status{
+
+    display:inline-flex;
+
+    justify-content:center;
+
+    padding:6px 12px;
+
+    border-radius:999px;
+
+    font-size:12px;
+
+    font-weight:700;
+
+}
+
+.status-ready{
+
+    background:#22c55e22;
+
+    color:#22c55e;
+
+}
+
+.status-processing{
+
+    background:#f59e0b22;
+
+    color:#f59e0b;
+
+}
+
+.status-failed{
+
+    background:#ef444422;
+
+    color:#ef4444;
+
+}
+
+.status-uploaded{
+
+    background:#3b82f622;
+
+    color:#3b82f6;
+
+}
+
+.status-embedding{
+
+    background:#8b5cf622;
+
+    color:#8b5cf6;
+
+}
+
+/* ===========================================
+   ACTIONS
+=========================================== */
+
+.actions{
+
+    display:flex;
+
+    gap:8px;
+
+    justify-content:flex-end;
+
+}
+
+/* ===========================================
+   EMPTY STATE
+=========================================== */
+
+.empty-state{
+
+    display:flex;
+
+    justify-content:center;
+
+    align-items:center;
+
+    min-height:250px;
+
+    color:var(--text-light);
+
+    font-size:15px;
+
+}
+
+/* ===========================================
+   RESPONSIVE
+=========================================== */
+
+@media (max-width:1200px){
+
+.table-head,
+.file-row{
+
+min-width:1450px;
+
+}
+
+}

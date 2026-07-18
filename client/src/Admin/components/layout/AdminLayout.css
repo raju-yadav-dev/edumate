@@ -1,0 +1,23 @@
+.admin-layout{
+
+    display:grid;
+
+    grid-template-columns:280px 1fr;
+
+    min-height:100vh;
+
+    background:var(--admin-bg);
+
+}
+
+.admin-content{
+
+    display:flex;
+
+    flex-direction:column;
+
+    min-height:100vh;
+
+    overflow:hidden;
+
+}

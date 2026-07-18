@@ -17,6 +17,80 @@ async function parseResponse(response, fallbackMessage) {
     return payload;
 }
 
+const percent = (used, total) => {
+    const numericTotal = Number(total || 0);
+
+    if (!numericTotal) {
+        return 0;
+    }
+
+    return Math.min((Number(used || 0) / numericTotal) * 100, 100);
+};
+
+const normalizeStorageStats = (stats = {}) => {
+    if (stats.mongodb && stats.supabase && stats.combined) {
+        return stats;
+    }
+
+    const limit = Number(stats.limitBytes || 0);
+    const mongoUsed = Number(stats.mongodbBytes ?? stats.dataBytes ?? 0);
+    const supabaseUsed = Number(stats.supabaseBytes ?? stats.documentBytes ?? 0);
+    const combinedUsed = Number(stats.usedBytes ?? mongoUsed + supabaseUsed);
+    const combinedTotal = Number(stats.totalBytes ?? stats.combinedLimitBytes ?? limit);
+    const supabaseQuota = Number(stats.supabaseQuotaBytes ?? limit);
+    const mongoTotal = Number(stats.mongodbStorageSize ?? stats.mongodbTotalBytes ?? limit);
+
+    return {
+        ...stats,
+        mongodb: {
+            total: mongoTotal,
+            used: mongoUsed,
+            remaining: Math.max(mongoTotal - mongoUsed, 0),
+            usage: percent(mongoUsed, mongoTotal),
+            collections: stats.mongodbCollections || stats.collections || 0,
+            documents: stats.mongodbObjects || stats.documentCount || 0,
+            indexesSize: stats.mongodbIndexSize || 0,
+            ...(stats.mongodb || {})
+        },
+        supabase: {
+            bucket: stats.supabaseBucket || stats.bucket || "",
+            files: stats.supabaseFiles ?? stats.documentCount ?? 0,
+            used: supabaseUsed,
+            remaining: Math.max(supabaseQuota - supabaseUsed, 0),
+            averageFileSize: stats.supabaseAverageFileSize || (stats.documentCount ? supabaseUsed / stats.documentCount : 0),
+            largestFile: stats.supabaseLargestFile || null,
+            quota: supabaseQuota,
+            usage: percent(supabaseUsed, supabaseQuota),
+            ...(stats.supabase || {})
+        },
+        combined: {
+            total: combinedTotal,
+            used: combinedUsed,
+            remaining: Math.max((stats.availableBytes ?? combinedTotal - combinedUsed), 0),
+            usage: percent(combinedUsed, combinedTotal),
+            ...(stats.combined || {})
+        },
+        knowledgeBase: {
+            totalDocuments: stats.documentCount || 0,
+            totalPages: stats.totalPages || 0,
+            totalChunks: stats.totalChunks || 0,
+            totalEmbeddings: stats.totalEmbeddings || 0,
+            processingQueue: stats.processingQueue || 0,
+            pendingDocuments: stats.pendingDocuments || 0,
+            successfulDocuments: stats.successfulDocuments || 0,
+            failedDocuments: stats.failedDocuments || 0,
+            ...(stats.knowledgeBase || {})
+        },
+        systemStatus: {
+            mongodb: mongoUsed || stats.mongodb ? "connected" : "unknown",
+            supabase: stats.supabaseConfigured === false ? "not configured" : (supabaseUsed || stats.supabase ? "connected" : "unknown"),
+            groq: "unknown",
+            chromadb: "unknown",
+            ...(stats.systemStatus || {})
+        }
+    };
+};
+
 export async function getAdminStatus() {
     const response = await fetch(`${AUTH_API_BASE_URL}/admin/status`);
     return parseResponse(response, "Unable to load admin status.");
@@ -46,14 +120,16 @@ export async function loginAdmin(data) {
     return parseResponse(response, "Unable to sign in as admin.");
 }
 
-export async function uploadAdminDocument({ file, category, institution, department, notes }) {
+export async function uploadAdminDocument({ file, title, category, institution, department, version, notes }) {
     const token = getAdminAccessToken();
     const formData = new FormData();
 
     formData.append("document", file);
+    formData.append("title", title || "");
     formData.append("category", category);
     formData.append("institution", institution || "");
     formData.append("department", department || "");
+    formData.append("version", version || "");
     formData.append("notes", notes || "");
 
     const response = await fetch(DOCUMENT_API_BASE_URL, {
@@ -65,6 +141,45 @@ export async function uploadAdminDocument({ file, category, institution, departm
     });
 
     return parseResponse(response, "Unable to upload document.");
+}
+
+export async function replaceAdminDocument(documentId, { file, title, category, institution, department, version, notes } = {}) {
+    const token = getAdminAccessToken();
+    const formData = new FormData();
+
+    if (file) {
+        formData.append("document", file);
+    }
+
+    formData.append("title", title || "");
+    formData.append("category", category || "");
+    formData.append("institution", institution || "");
+    formData.append("department", department || "");
+    formData.append("version", version || "");
+    formData.append("notes", notes || "");
+
+    const response = await fetch(`${DOCUMENT_API_BASE_URL}/${documentId}`, {
+        method: "PUT",
+        headers: token ? {
+            Authorization: `Bearer ${token}`
+        } : {},
+        body: formData
+    });
+
+    return parseResponse(response, "Unable to replace document.");
+}
+
+export async function rebuildAdminDocumentEmbeddings(documentId) {
+    const token = getAdminAccessToken();
+
+    const response = await fetch(`${DOCUMENT_API_BASE_URL}/${documentId}/embeddings/rebuild`, {
+        method: "POST",
+        headers: token ? {
+            Authorization: `Bearer ${token}`
+        } : {}
+    });
+
+    return parseResponse(response, "Unable to rebuild document embeddings.");
 }
 
 export async function listAdminDocuments({ search = "", category = "" } = {}) {
@@ -144,7 +259,12 @@ export async function getAdminStorageStats() {
         } : {}
     });
 
-    return parseResponse(response, "Unable to load storage stats.");
+    const payload = await parseResponse(response, "Unable to load storage stats.");
+
+    return {
+        ...payload,
+        data: normalizeStorageStats(payload.data)
+    };
 }
 
 export async function saveProviderApiKeys({ groqApiKey, openRouteServiceKey }) {
