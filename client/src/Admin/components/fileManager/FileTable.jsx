@@ -7,6 +7,7 @@ import {
     RefreshCcw,
     Trash2,
     UploadCloud,
+    Eye
 } from "lucide-react";
 
 import { formatDate } from "../../utils/formatData";
@@ -19,14 +20,16 @@ function FileTable({
     selectedIds,
     onToggleSelected,
     onSelectDocument,
+    selectedDocument,
     onDownload,
     onReplace,
     onRebuild,
     onDelete,
     onContextMenu,
+    viewMode = "list"
 }) {
     return (
-        <div className="file-table">
+        <div className={viewMode === "grid" ? "file-table grid-view" : "file-table"}>
 
             {/* ================= TABLE HEADER ================= */}
 
@@ -78,7 +81,7 @@ function FileTable({
 
                         <article
                             key={file._id}
-                            className="file-row"
+                            className={selectedDocument?._id === file._id ? "file-row selected" : "file-row"}
                             onContextMenu={(event) =>
                                 onContextMenu(event, file)
                             }
@@ -107,7 +110,7 @@ function FileTable({
                                 type="button"
                                 className="row-main"
                                 onClick={() =>
-                                    onSelectDocument(file)
+                                    onSelectDocument?.(file)
                                 }
                             >
 
@@ -155,6 +158,17 @@ function FileTable({
 
                                 <button
                                     className="icon-button"
+                                    title="Preview details"
+                                    type="button"
+                                    onClick={() => onSelectDocument?.(file)}
+                                >
+                                    <Eye size={16} />
+                                </button>
+
+                                <button
+                                    className="icon-button"
+                                    title="Download"
+                                    type="button"
                                     onClick={() => onDownload(file)}
                                 >
                                     <Download size={16} />
@@ -180,6 +194,8 @@ function FileTable({
 
                                 <button
                                     className="icon-button"
+                                    title="Rebuild embeddings"
+                                    type="button"
                                     onClick={() =>
                                         onRebuild(file._id)
                                     }
@@ -189,6 +205,8 @@ function FileTable({
 
                                 <button
                                     className="icon-button"
+                                    title="Delete"
+                                    type="button"
                                     onClick={() =>
                                         onDelete(file._id)
                                     }

@@ -1,412 +1,270 @@
-/* =========================================================
-   DOCUMENT MANAGER
-========================================================= */
-
-.document-manager-shell{
-    display:flex;
-    flex-direction:column;
-    gap:24px;
-    min-height:0;
+.document-manager-shell {
+    position: relative;
+    width: 100%;
+    min-width: 0;
+    min-height: 100vh;
+    padding: 18px 16px 0;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 14px;
+    overflow: hidden;
 }
 
-/* =========================================================
-   HEADER
-========================================================= */
-
-.document-manager-head{
-    display:flex;
-    justify-content:space-between;
-    align-items:flex-start;
-    gap:20px;
-    flex-wrap:wrap;
+/* The reference keeps uploads in the top action bar and reserves the whole
+   left rail for the folder tree. */
+.document-sidebar > .upload-area {
+    display: none !important;
 }
 
-.document-manager-head h2{
-    margin:0;
-    font-size:24px;
-    font-weight:700;
+.document-upload-portal {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    opacity: 0;
+    pointer-events: none;
 }
 
-.document-manager-head p{
-    margin-top:6px;
-    color:var(--text-light);
+.document-upload-portal .upload-area {
+    display: block;
 }
 
-/* =========================================================
-   ACTION BUTTONS
-========================================================= */
-
-.toolbar-actions{
-    display:flex;
-    flex-wrap:wrap;
-    gap:12px;
+.document-manager-head {
+    min-width: 0;
+    min-height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
 }
 
-/* =========================================================
-   MAIN LAYOUT
-========================================================= */
-
-.document-layout{
-
-    display:grid;
-
-    grid-template-columns:
-        290px
-        minmax(0,1fr)
-        340px;
-
-    gap:24px;
-
-    align-items:start;
-
-    min-height:750px;
-
+.document-manager-head h2 {
+    margin: 0;
+    font-size: 18px;
+    line-height: 22px;
 }
 
-/* =========================================================
-   LEFT SIDEBAR
-========================================================= */
-
-.document-sidebar{
-
-    display:flex;
-
-    flex-direction:column;
-
-    gap:20px;
-
-    min-width:0;
-
+.document-manager-head p {
+    margin-top: 3px;
+    color: var(--admin-muted);
+    font-size: 11px;
+    line-height: 15px;
 }
 
-/* =========================================================
-   CENTER PANEL
-========================================================= */
-
-.document-content{
-
-    display:flex;
-
-    flex-direction:column;
-
-    gap:18px;
-
-    min-width:0;
-
-    min-height:0;
-
+.toolbar-actions {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 10px;
 }
 
-/* =========================================================
-   RIGHT PREVIEW
-========================================================= */
-
-.document-preview{
-
-    position:sticky;
-
-    top:24px;
-
-    align-self:start;
-
+.document-manager-head .toolbar-actions {
+    position: static;
 }
 
-/* =========================================================
-   TOOLBAR
-========================================================= */
-
-.toolbar{
-
-    display:flex;
-
-    align-items:center;
-
-    gap:14px;
-
-    padding:16px;
-
-    border-radius:18px;
-
-    border:1px solid var(--glass-border);
-
-    background:var(--glass);
-
-    flex-wrap:wrap;
-
+.document-manager-head .toolbar-actions button {
+    min-height: 34px;
+    padding: 0 14px;
+    gap: 7px;
+    border-radius: 7px;
+    font-size: 12px;
 }
 
-/* =========================================================
-   BREADCRUMB
-========================================================= */
-
-.path{
-
-    flex:1;
-
-    display:flex;
-
-    align-items:center;
-
-    gap:10px;
-
-    color:var(--text-light);
-
-    min-width:220px;
-
-    font-weight:600;
-
+.document-manager-head .toolbar-actions button:disabled {
+    display: none;
 }
 
-.path b{
-
-    margin-left:8px;
-
-    color:var(--primary);
-
+.document-layout {
+    min-width: 0;
+    min-height: 0;
+    height: clamp(500px,800px, 920px);
+    display: grid;
+    grid-template-columns: 216px minmax(0, 1fr);
+    border: 1px solid var(--admin-line);
+    border-radius: 10px;
+    overflow: hidden;
 }
 
-/* =========================================================
-   SEARCH
-========================================================= */
-
-.search{
-
-    flex:2;
-
-    min-width:260px;
-
-    display:flex;
-
-    align-items:center;
-
-    gap:10px;
-
-    padding:0 14px;
-
-    min-height:46px;
-
-    border-radius:14px;
-
-    border:1px solid var(--glass-border);
-
-    background:rgba(255,255,255,.04);
-
+.document-sidebar {
+    min-width: 0;
+    min-height: 0;
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto;
+    border-right: 1px solid var(--admin-line);
+    overflow: hidden;
 }
 
-.search input{
-
-    flex:1;
-
-    border:none;
-
-    outline:none;
-
-    background:transparent;
-
-    color:var(--text);
-
-    font-size:14px;
-
+.document-content {
+    min-width: 0;
+    min-height: 0;
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    overflow: hidden;
 }
 
-/* =========================================================
-   TOOLBAR ICONS
-========================================================= */
-
-.toolbar-icons{
-
-    display:flex;
-
-    gap:8px;
-
+.document-content > .toolbar {
+    position: static;
+    width: auto;
+    min-height: 58px;
+    padding: 10px 16px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(200px, 260px) auto;
+    gap: 10px;
+    align-items: center;
+    border-bottom: 1px solid var(--admin-line);
 }
 
-.icon-button{
-
-    width:42px;
-
-    height:42px;
-
-    display:grid;
-
-    place-items:center;
-
-    border-radius:12px;
-
-    border:1px solid var(--glass-border);
-
-    background:rgba(255,255,255,.04);
-
-    color:var(--text);
-
-    cursor:pointer;
-
+/* Keep the content toolbar on one clean row, like the reference image. */
+.document-content > .toolbar .path {
+    display: none !important;
 }
 
-.icon-button:hover{
-
-    background:rgba(255,255,255,.08);
-
+.document-content > .toolbar .search {
+    grid-column: 2;
 }
 
-/* =========================================================
-   FILTERS
-========================================================= */
+.document-content > .toolbar .toolbar-icons {
+    grid-column: 3;
+}
 
-.document-filter-row{
+.path {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--admin-muted);
+    font-size: 12px;
+}
 
-    display:grid;
+.path span:last-of-type {
+    color: var(--admin-text);
+}
 
-    grid-template-columns:
-        repeat(4,minmax(0,1fr));
+.path b {
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: rgba(242, 163, 11, 0.13);
+    color: var(--admin-gold);
+    font-size: 11px;
+}
 
-    gap:16px;
+.search {
+    min-width: 0;
+    min-height: 34px;
+    padding: 0 10px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    border: 1px solid var(--admin-line);
+    border-radius: 7px;
+    background: rgba(7, 13, 20, 0.7);
+}
 
+.search input {
+    min-width: 0;
+    flex: 1;
+    border: 0;
+    background: transparent;
+    color: var(--admin-text);
+}
+
+.toolbar-icons {
+    display: flex;
+    gap: 7px;
+}
+
+.toolbar-icons .icon-button {
+    width: 34px;
+    height: 34px;
+    border-radius: 7px;
+}
+
+.toolbar-icons .icon-button.active {
+    border-color: rgba(242, 163, 11, 0.46);
+    color: var(--admin-gold);
+    background: rgba(242, 163, 11, 0.14);
+}
+
+.document-filter-row {
+    display: none;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 10px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--admin-line);
+    background: rgba(7, 13, 20, 0.34);
+}
+
+.document-filter-row.visible {
+    display: grid;
 }
 
 .document-filter-row input,
-.document-filter-row select{
-
-    width:100%;
-
-    min-height:44px;
-
-    padding:0 14px;
-
-    border-radius:12px;
-
-    border:1px solid var(--glass-border);
-
-    background:rgba(255,255,255,.04);
-
-    color:var(--text);
-
-    outline:none;
-
+.document-filter-row select,
+.document-filter-row button {
+    min-height: 34px;
+    border-radius: 7px;
 }
 
-/* =========================================================
-   TABLE FOOTER
-========================================================= */
-
-.table-footer{
-
-    display:flex;
-
-    justify-content:space-between;
-
-    align-items:center;
-
-    padding:12px 6px;
-
-    color:var(--text-light);
-
-    font-size:14px;
-
-    border-top:1px solid var(--glass-border);
-
+.table-footer {
+    min-height: 48px;
+    padding: 0 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    color: var(--admin-muted);
+    font-size: 11px;
+    border-top: 1px solid var(--admin-line);
 }
 
-/* =========================================================
-   RESPONSIVE
-========================================================= */
-
-@media(max-width:1500px){
-
-.document-layout{
-
-grid-template-columns:
-
-270px
-
-1fr
-
-320px;
-
+.upload-area {
+    padding: 14px;
+    display: grid;
+    gap: 12px;
+    border-top: 1px solid var(--admin-line);
 }
 
+.upload-dropzone {
+    min-height: 86px;
+    padding: 14px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border: 1px dashed rgba(130, 148, 170, 0.34);
+    border-radius: 8px;
+    background: rgba(7, 13, 20, 0.58);
+    color: var(--admin-text);
+    cursor: pointer;
 }
 
-@media(max-width:1250px){
-
-.document-layout{
-
-grid-template-columns:
-
-270px
-
-1fr;
-
+.upload-dropzone:hover,
+.upload-dropzone.active {
+    border-color: rgba(242, 163, 11, 0.55);
+    background: rgba(242, 163, 11, 0.08);
 }
 
-.document-preview{
+.upload-dropzone svg { color: var(--admin-gold); }
+.upload-dropzone span { min-width: 0; display: grid; gap: 4px; }
+.upload-dropzone small { overflow: hidden; color: var(--admin-muted); text-overflow: ellipsis; white-space: nowrap; }
+.upload-meta-grid { display: grid; gap: 8px; }
+.upload-meta-grid input { min-height: 38px; padding: 0 10px; border-radius: 8px; }
 
-grid-column:1/-1;
-
-position:relative;
-
-top:auto;
-
+@media (max-width: 900px) {
+    .document-manager-head { align-items: flex-start; flex-direction: column; }
+    .toolbar-actions { width: 100%; justify-content: flex-start; }
+    .document-content > .toolbar { grid-template-columns: minmax(0, 1fr) auto; }
+    .document-content > .toolbar .path { grid-column: 1 / -1; }
 }
 
-}
-
-@media(max-width:900px){
-
-.document-layout{
-
-grid-template-columns:1fr;
-
-}
-
-.document-sidebar{
-
-order:1;
-
-}
-
-.document-content{
-
-order:2;
-
-}
-
-.document-preview{
-
-order:3;
-
-}
-
-.document-filter-row{
-
-grid-template-columns:
-
-repeat(2,minmax(0,1fr));
-
-}
-
-}
-
-@media(max-width:600px){
-
-.document-filter-row{
-
-grid-template-columns:1fr;
-
-}
-
-.toolbar{
-
-flex-direction:column;
-
-align-items:stretch;
-
-}
-
-.search{
-
-width:100%;
-
-}
-
+@media (max-width: 720px) {
+    .document-manager-shell { height: auto; padding-inline: 10px; }
+    .document-layout { height: auto; min-height: 0; grid-template-columns: 1fr; }
+    .document-sidebar { border-right: 0; border-bottom: 1px solid var(--admin-line); }
+    .document-content > .toolbar,
+    .document-filter-row { grid-template-columns: 1fr; }
+    .document-content > .toolbar { min-height: 0; padding: 12px; }
+    .document-content > .toolbar .path { grid-column: auto; }
+    .toolbar-icons { justify-content: flex-end; }
 }

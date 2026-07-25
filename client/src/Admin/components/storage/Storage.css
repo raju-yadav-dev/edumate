@@ -1,690 +1,368 @@
-/* ==========================================================
-   STORAGE OVERVIEW
-========================================================== */
-
-.storage-section{
-
-    display:flex;
-
-    flex-direction:column;
-
-    gap:28px;
-
-    margin-bottom:40px;
-
-    padding:0 24px;
-
+.storage-section {
+    flex: 0 0 auto;
+    min-height: 300px;
+    padding: 6px 14px 10px;
+    display: grid;
+    gap: 11px;
+    border-radius: 10px;
+    overflow: visible;
 }
 
-/* ==========================================================
-   HEADER
-========================================================== */
-
-.storage-header{
-
-    display:flex;
-
-    justify-content:space-between;
-
-    align-items:flex-start;
-
-    gap:20px;
-
-    position:relative;
-
-    padding-left:20px;
-
+.storage-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 18px;
+    align-items: flex-start;
 }
 
-.storage-header::before{
-
-    content:"";
-
-    position:absolute;
-
-    left:0;
-
-    top:4px;
-
-    width:4px;
-
-    height:44px;
-
-    border-radius:999px;
-
-    background:linear-gradient(
-        180deg,
-        #7CFF3F,
-        #33D1FF
-    );
-
+.storage-header h2 {
+    font-size: 14px;
+    line-height: 17px;
+    font-weight: 700;
 }
 
-.storage-header h2{
-
-    margin:0;
-
-    font-size:30px;
-
-    font-weight:700;
-
-    color:var(--text);
-
-    letter-spacing:-.5px;
-
+.storage-header p {
+    margin-top: 3px;
+    color: var(--admin-muted);
+    font-size: 10px;
+    line-height: 13px;
 }
 
-.storage-header p{
-
-    margin-top:8px;
-
-    color:var(--text-light);
-
-    font-size:15px;
-
-    line-height:1.6;
-
+.storage-controls {
+    display: flex;
+    align-items: center;
+    gap: 28px;
+    font-size: 10px;
 }
 
-/* ==========================================================
-   GRID
-========================================================== */
-
-.storage-grid{
-
-    display:grid;
-
-    grid-template-columns:
-        repeat(3,minmax(320px,1fr));
-
-    gap:24px;
-
-    align-items:stretch;
-
+.service-select {
+    position: relative;
+    min-width: 157px;
 }
 
-/* ==========================================================
-   STORAGE CARD
-========================================================== */
-
-.storage-dashboard-card{
-
-    position:relative;
-
-    display:flex;
-
-    flex-direction:column;
-
-    gap:22px;
-
-    padding:24px;
-
-    border-radius:22px;
-
-    background:var(--glass);
-
-    border:1px solid var(--glass-border);
-
-    backdrop-filter:blur(18px);
-
-    transition:
-        transform .25s,
-        border-color .25s,
-        box-shadow .25s;
-
+.service-select select {
+    width: 100%;
+    min-height: 29px;
+    padding: 0 26px 0 10px;
+    appearance: none;
+    border: 1px solid var(--admin-line);
+    border-radius: 6px;
+    background: rgba(5, 12, 19, 0.48);
+    color: var(--admin-text);
 }
 
-.storage-dashboard-card:hover{
-
-    transform:translateY(-5px);
-
-    border-color:rgba(124,255,63,.25);
-
-    box-shadow:
-        0 20px 45px rgba(0,0,0,.20);
-
+.service-select svg {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    pointer-events: none;
+    color: var(--admin-muted);
 }
 
-/* ==========================================================
-   CARD HEADER
-========================================================== */
-
-.panel-title{
-
-    display:flex;
-
-    justify-content:space-between;
-
-    align-items:flex-start;
-
-    gap:18px;
-
+.auto-refresh {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border: 0;
+    background: transparent;
+    color: var(--admin-muted);
+    cursor: pointer;
+    white-space: nowrap;
 }
 
-.panel-title h2{
-
-    margin:0;
-
-    font-size:21px;
-
-    font-weight:700;
-
+.auto-refresh b {
+    color: var(--admin-muted);
 }
 
-.panel-title p{
-
-    margin-top:6px;
-
-    color:var(--text-light);
-
-    font-size:13px;
-
-    line-height:1.5;
-
+.auto-refresh.active b {
+    color: var(--admin-green);
 }
 
-.panel-title svg{
-
-    width:42px;
-
-    height:42px;
-
-    padding:10px;
-
-    border-radius:14px;
-
-    background:rgba(255,255,255,.05);
-
-    color:var(--primary);
-
-    flex-shrink:0;
-
+.auto-refresh i {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--admin-muted-2);
 }
 
-/* ==========================================================
-   COMBINED STORAGE METER
-========================================================== */
-
-.combined-meter{
-
-    position:relative;
-
-    display:flex;
-
-    width:100%;
-
-    height:12px;
-
-    overflow:hidden;
-
-    border-radius:999px;
-
-    background:rgba(255,255,255,.06);
-
+.auto-refresh.active i {
+    background: var(--admin-green);
 }
 
-.combined-meter span{
-
-    height:100%;
-
-    transition:width .4s ease;
-
+.auto-refresh .is-spinning {
+    animation: storage-spin 900ms linear infinite;
 }
 
-.combined-meter .mongo{
-
-    background:linear-gradient(
-        90deg,
-        #6EEB83,
-        #3DDC84
-    );
-
+@keyframes storage-spin {
+    to { transform: rotate(360deg); }
 }
 
-.combined-meter .supabase{
-
-    background:linear-gradient(
-        90deg,
-        #38BDF8,
-        #0EA5E9
-    );
-
+.storage-grid {
+    min-height: 175px;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
 }
 
-/* ==========================================================
-   ENTERPRISE PROGRESS BAR
-========================================================== */
-
-.enterprise-progress{
-
-    position:relative;
-
-    width:100%;
-
-    height:12px;
-
-    overflow:hidden;
-
-    border-radius:999px;
-
-    background:rgba(255,255,255,.06);
-
+.storage-grid.single-service {
+    grid-template-columns: minmax(0, 1fr);
 }
 
-.enterprise-progress span{
-
-    display:block;
-
-    height:100%;
-
-    border-radius:999px;
-
-    transition:width .35s ease;
-
+.storage-dashboard-card {
+    height: 175px;
+    min-height: 175px;
+    padding: 12px;
+    display: grid;
+    grid-template-rows: auto 6px auto;
+    gap: 11px;
+    align-content: start;
+    border: 1px solid var(--admin-line);
+    border-radius: 8px;
+    background: linear-gradient(140deg, rgba(12, 22, 22, 0.76), rgba(7, 14, 22, 0.92));
+    overflow: visible;
 }
 
-.enterprise-progress.mongo span{
-
-    background:linear-gradient(
-        90deg,
-        #84F45B,
-        #47D147
-    );
-
+.storage-dashboard-card:nth-child(2) {
+    background: linear-gradient(140deg, rgba(8, 24, 38, 0.72), rgba(7, 14, 22, 0.92));
 }
 
-.enterprise-progress.supabase span{
-
-    background:linear-gradient(
-        90deg,
-        #38BDF8,
-        #2563EB
-    );
-
+.combined-storage-card {
+    border-color: rgba(242, 163, 11, 0.32);
 }
 
-/* ==========================================================
-   KPI GRID
-========================================================== */
-
-.storage-kpis{
-
-    display:grid;
-
-    grid-template-columns:repeat(2,minmax(0,1fr));
-
-    gap:16px;
-
+.panel-title {
+    position: relative;
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: start;
 }
 
-.storage-kpis span{
-
-    display:flex;
-
-    flex-direction:column;
-
-    gap:8px;
-
-    padding:16px;
-
-    border-radius:16px;
-
-    background:rgba(255,255,255,.03);
-
-    border:1px solid rgba(255,255,255,.05);
-
-    transition:
-        transform .2s ease,
-        background .2s ease;
-
+.panel-title svg {
+    grid-column: 1;
+    grid-row: 1;
+    width: 18px;
+    height: 18px;
+    color: var(--admin-gold);
 }
 
-.storage-kpis span:hover{
-
-    transform:translateY(-2px);
-
-    background:rgba(255,255,255,.05);
-
+.storage-dashboard-card:nth-child(1) .panel-title svg {
+    color: var(--admin-green);
 }
 
-.storage-kpis small{
-
-    font-size:12px;
-
-    color:var(--text-light);
-
-    line-height:1.4;
-
+.storage-dashboard-card:nth-child(2) .panel-title svg {
+    color: var(--admin-cyan);
 }
 
-.storage-kpis b{
-
-    font-size:18px;
-
-    font-weight:700;
-
-    color:var(--text);
-
-    word-break:break-word;
-
+.panel-title > div {
+    grid-column: 2;
 }
 
-/* ==========================================================
-   LEGEND
-========================================================== */
-
-.storage-legend{
-
-    display:flex;
-
-    flex-wrap:wrap;
-
-    gap:18px;
-
-    margin-top:auto;
-
-    padding-top:8px;
-
+.panel-title h2 {
+    font-size: 12px;
+    line-height: 18px;
+    font-weight: 700;
 }
 
-.storage-legend span{
-
-    display:flex;
-
-    align-items:center;
-
-    gap:8px;
-
-    font-size:13px;
-
-    color:var(--text-light);
-
+.panel-title p {
+    margin-top: 5px;
+    color: var(--admin-muted);
+    font-size: 10px;
+    line-height: 14px;
 }
 
-.legend-dot{
-
-    width:10px;
-
-    height:10px;
-
-    border-radius:50%;
-
-    display:inline-block;
-
+.storage-value-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
 }
 
-.legend-dot.mongo{
-
-    background:#57D857;
-
+.storage-value-row > strong {
+    color: var(--admin-text);
+    align-self: end;
+    padding-bottom: 1px;
+    font-size: 14px;
+    white-space: nowrap;
 }
 
-.legend-dot.supabase{
-
-    background:#2BA8FF;
-
+.panel-title p b {
+    display: block;
+    margin-bottom: 1px;
+    color: var(--admin-text);
+    font-size: 21px;
+    line-height: 25px;
+    font-weight: 800;
 }
 
-/* ==========================================================
-   COMBINED CARD
-========================================================== */
-
-.combined-storage-card{
-
-    border-color:rgba(124,255,63,.12);
-
+.storage-badge {
+    grid-column: 3;
+    padding: 4px 7px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--admin-gold);
+    font-size: 8px;
+    font-weight: 800;
 }
 
-.combined-storage-card:hover{
-
-    border-color:rgba(124,255,63,.28);
-
+.storage-badge.mongo {
+    color: var(--admin-green);
+    background: rgba(123, 224, 76, 0.12);
 }
 
-/* ==========================================================
-   CARD ANIMATIONS
-========================================================== */
-
-.storage-dashboard-card::before{
-
-    content:"";
-
-    position:absolute;
-
-    inset:0;
-
-    border-radius:22px;
-
-    pointer-events:none;
-
-    opacity:0;
-
-    transition:opacity .3s ease;
-
-    background:
-        linear-gradient(
-            135deg,
-            rgba(124,255,63,.05),
-            rgba(51,209,255,.03)
-        );
-
+.storage-badge.supabase {
+    color: var(--admin-cyan);
+    background: rgba(0, 217, 245, 0.1);
 }
 
-.storage-dashboard-card:hover::before{
-
-    opacity:1;
-
+.enterprise-progress,
+.combined-meter {
+    height: 6px;
+    display: flex;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.13);
 }
 
-.storage-dashboard-card>*{
-
-    position:relative;
-
-    z-index:1;
-
+.enterprise-progress span,
+.combined-meter span {
+    height: 100%;
+    min-width: 0;
 }
 
-/* ==========================================================
-   VALUE COLORS
-========================================================== */
-
-.storage-kpis b{
-
-    color:var(--text);
-
+.enterprise-progress.mongo span,
+.combined-meter .mongo {
+     background: linear-gradient(90deg, var(--admin-green), #56bb2f); 
 }
 
-.storage-kpis small{
-
-    color:var(--text-light);
-
+.enterprise-progress.supabase span,
+.combined-meter .supabase {
+    background: linear-gradient(90deg, var(--admin-blue), #1e71cf);
 }
 
-/* ==========================================================
-   LIGHT MODE
-========================================================== */
-
-[data-theme="light"] .storage-dashboard-card{
-
-    background:#ffffff;
-
-    border:1px solid rgba(15,23,42,.08);
-
-    box-shadow:
-        0 10px 24px rgba(15,23,42,.06);
-
+.storage-kpis {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 7px;
 }
 
-[data-theme="light"] .storage-dashboard-card:hover{
-
-    box-shadow:
-        0 20px 40px rgba(15,23,42,.12);
-
+.combined-storage-card .storage-kpis {
+    grid-template-columns: 1fr;
 }
 
-[data-theme="light"] .storage-kpis span{
-
-    background:#f8fafc;
-
-    border-color:#e2e8f0;
-
+.combined-storage-card .panel-title p b {
+    color: var(--admin-gold);
 }
 
-[data-theme="light"] .combined-meter,
-
-[data-theme="light"] .enterprise-progress{
-
-    background:#e5e7eb;
-
+.combined-storage-card .storage-kpis {
+    gap: 7px;
 }
 
-/* ==========================================================
-   DARK MODE
-========================================================== */
-
-[data-theme="dark"] .storage-dashboard-card{
-
-    background:rgba(22,28,36,.75);
-
-    border:1px solid rgba(255,255,255,.06);
-
+.combined-storage-card .storage-kpis span {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 7px;
 }
 
-[data-theme="dark"] .storage-kpis span{
-
-    background:rgba(255,255,255,.03);
-
+.combined-storage-card .storage-kpis span::before {
+    width: 9px;
+    height: 9px;
+    content: "";
+    border-radius: 50%;
+    background: var(--admin-green);
 }
 
-[data-theme="dark"] .combined-meter,
-
-[data-theme="dark"] .enterprise-progress{
-
-    background:rgba(255,255,255,.05);
-
+.combined-storage-card .storage-kpis span:nth-child(2)::before {
+    background: var(--admin-blue);
 }
 
-/* ==========================================================
-   RESPONSIVE
-========================================================== */
+.combined-storage-card .storage-kpis small,
+.combined-storage-card .storage-kpis b {
+    font-size: 10px;
+    line-height: 12px;
+}
 
-@media (max-width:1400px){
+.combined-storage-card .storage-kpis b {
+    justify-self: end;
+    font-size: 9px;
+    font-weight: 500;
+}
 
-    .storage-grid{
+.combined-storage-card .storage-legend {
+    display: none;
+}
 
-        grid-template-columns:
-            repeat(2,minmax(320px,1fr));
+.storage-kpis span {
+    min-width: 0;
+    display: grid;
+    gap: 8px;
+}
 
+.storage-kpis small,
+.storage-legend {
+    color: var(--admin-muted);
+    font-size: 8px;
+    line-height: 10px;
+}
+
+.storage-kpis b {
+    overflow: hidden;
+    color: var(--admin-text);
+    font-size: 12px;
+    line-height: 14px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.storage-legend {
+    display: grid;
+    gap: 5px;
+}
+
+.storage-legend span {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.legend-dot {
+    width: 12px;
+    height: 12px;
+    display: inline-block;
+    margin-right: 8px;
+    border-radius: 50%;
+}
+
+.legend-dot.mongo {
+    background: var(--admin-green);
+}
+
+.legend-dot.supabase {
+    background: var(--admin-blue);
+}
+
+@media (max-width: 820px) {
+    .storage-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 900px) {
+    .storage-header,
+    .storage-controls {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+}
+
+@media (max-width: 640px) {
+    .storage-section,
+    .storage-dashboard-card {
+        padding: 16px;
     }
 
-}
-
-@media (max-width:1100px){
-
-    .storage-grid{
-
-        grid-template-columns:1fr;
-
+    .storage-kpis {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
-
-}
-
-@media (max-width:768px){
-
-    .storage-section{
-
-        padding:0 16px;
-
-    }
-
-    .storage-header{
-
-        padding-left:16px;
-
-    }
-
-    .storage-header h2{
-
-        font-size:26px;
-
-    }
-
-    .storage-dashboard-card{
-
-        padding:20px;
-
-    }
-
-    .storage-kpis{
-
-        grid-template-columns:1fr;
-
-    }
-
-    .panel-title{
-
-        flex-direction:column;
-
-        align-items:flex-start;
-
-    }
-
-    .panel-title svg{
-
-        width:40px;
-
-        height:40px;
-
-    }
-
-}
-
-@media (max-width:480px){
-
-    .storage-section{
-
-        padding:0 12px;
-
-    }
-
-    .storage-dashboard-card{
-
-        padding:18px;
-
-        border-radius:18px;
-
-    }
-
-    .panel-title h2{
-
-        font-size:18px;
-
-    }
-
-    .storage-kpis b{
-
-        font-size:16px;
-
-    }
-
-    .storage-header h2{
-
-        font-size:22px;
-
-    }
-
-    .storage-header p{
-
-        font-size:14px;
-
-    }
-
-    .storage-legend{
-
-        flex-direction:column;
-
-        gap:10px;
-
-    }
-
 }

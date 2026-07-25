@@ -101,13 +101,13 @@ section:not(.hero-section):not(.statistics){
 
     margin:0;
 
-    border:1px solid var(--glass-border);
+    /*border:1px solid var(--glass-border);*/
 
-    border-radius:32px;
+    /*border-radius:32px;*/
 
     overflow:hidden;
 
-    box-shadow:var(--shadow);
+    /*box-shadow:var(--shadow);*/
 
     backdrop-filter:blur(calc(var(--blur) + 4px));
 

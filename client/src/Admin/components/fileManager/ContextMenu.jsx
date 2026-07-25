@@ -3,9 +3,7 @@ import "./ContextMenu.css";
 import {
     Copy,
     Download,
-    Edit3,
     Eye as PreviewEye,
-    MoveRight,
     Trash2,
 } from "lucide-react";
 
@@ -54,18 +52,6 @@ function ContextMenu({
                 <Download size={16} />
                 <span>Download</span>
             </button>
-
-            <button>
-                <Edit3 size={16} />
-                <span>Rename</span>
-            </button>
-
-            <button>
-                <MoveRight size={16} />
-                <span>Move</span>
-            </button>
-
-            <div className="context-divider" />
 
             <button
                 className="danger"

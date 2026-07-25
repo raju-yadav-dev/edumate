@@ -1,16 +1,15 @@
 import {
     Download,
-    Edit3,
     Filter,
     FolderPlus,
-    Home,
+    Grid2X2,
     List,
-    MoveRight,
     RefreshCcw,
     Search,
     Trash2,
     UploadCloud
 } from "lucide-react";
+import { useMemo, useState } from "react";
 
 import { formatBytes } from "../../utils/formatBytes";
 import ContextMenu from "./ContextMenu";
@@ -21,6 +20,32 @@ import "./FileManager.css";
 
 function DocumentManager(props) {
     const selectedCount = props.selectedIds.length;
+    const [viewMode, setViewMode] = useState("list");
+    const [showFilters, setShowFilters] = useState(false);
+    const [sortMode, setSortMode] = useState("date-desc");
+    const sortedDocuments = useMemo(() => {
+        const copy = [...props.documents];
+
+        copy.sort((first, second) => {
+            if (sortMode === "name-asc") {
+                return String(first.title || first.originalName || "").localeCompare(String(second.title || second.originalName || ""));
+            }
+
+            if (sortMode === "size-desc") {
+                return Number(second.fileSize || second.size || 0) - Number(first.fileSize || first.size || 0);
+            }
+
+            return new Date(second.updatedAt || second.createdAt || 0) - new Date(first.updatedAt || first.createdAt || 0);
+        });
+
+        return copy;
+    }, [props.documents, sortMode]);
+
+    function downloadSelected() {
+        props.documents
+            .filter((file) => props.selectedIds.includes(file._id))
+            .forEach((file) => props.onDownload(file));
+    }
 
     return (
         <section className="document-manager-shell">
@@ -30,8 +55,8 @@ function DocumentManager(props) {
             <div className="panel-header-row document-manager-head">
 
                 <div>
-                    <h2>File Manager</h2>
-                    <p>Upload, organize, preview, and manage knowledge files.</p>
+                    <h2>Document Management</h2>
+                    <p>Upload, organize and manage your files</p>
                 </div>
 
                 <div className="toolbar-actions">
@@ -42,9 +67,9 @@ function DocumentManager(props) {
                         onClick={() =>
                             document.querySelector(".upload-dropzone input")?.click()
                         }
-                    >
+                        >
                         <UploadCloud size={16} />
-                        Upload
+                        Upload Files
                     </button>
 
                     <button
@@ -59,22 +84,8 @@ function DocumentManager(props) {
                     <button
                         type="button"
                         className="secondary-action"
-                    >
-                        <Edit3 size={16} />
-                        Rename
-                    </button>
-
-                    <button
-                        type="button"
-                        className="secondary-action"
-                    >
-                        <MoveRight size={16} />
-                        Move
-                    </button>
-
-                    <button
-                        type="button"
-                        className="secondary-action"
+                        onClick={downloadSelected}
+                        disabled={!selectedCount}
                     >
                         <Download size={16} />
                         Download
@@ -113,8 +124,6 @@ function DocumentManager(props) {
 
                     <FolderTree {...props} />
 
-                    <UploadDialog {...props} />
-
                 </aside>
 
                 {/* ========== CENTER CONTENT ========== */}
@@ -124,22 +133,6 @@ function DocumentManager(props) {
                     {/* Toolbar */}
 
                     <div className="toolbar">
-
-                        <div className="path">
-
-                            <Home size={16} />
-
-                            <span>Admin</span>
-
-                            <span>/</span>
-
-                            <span>{props.activeFolderLabel}</span>
-
-                            {selectedCount > 0 && (
-                                <b>{selectedCount} selected</b>
-                            )}
-
-                        </div>
 
                         <div className="search">
 
@@ -159,25 +152,26 @@ function DocumentManager(props) {
 
                             <button
                                 type="button"
-                                className="icon-button"
-                                onClick={props.onRefresh}
-                                aria-label="Refresh"
+                                className={viewMode === "grid" ? "icon-button active" : "icon-button"}
+                                onClick={() => setViewMode("grid")}
+                                aria-label="Grid view"
                             >
-                                <RefreshCcw size={16} />
+                                <Grid2X2 size={16} />
                             </button>
 
                             <button
                                 type="button"
-                                className="icon-button"
-                                aria-label="Sort"
+                                className={viewMode === "list" ? "icon-button active" : "icon-button"}
+                                onClick={() => setViewMode("list")}
+                                aria-label="List view"
                             >
                                 <List size={16} />
                             </button>
 
                             <button
                                 type="button"
-                                className="icon-button"
-                                onClick={props.onReset}
+                                className={showFilters ? "icon-button active" : "icon-button"}
+                                onClick={() => setShowFilters((current) => !current)}
                                 aria-label="Filter"
                             >
                                 <Filter size={16} />
@@ -189,7 +183,7 @@ function DocumentManager(props) {
 
                     {/* Filters */}
 
-                    <div className="document-filter-row">
+                    <div className={showFilters ? "document-filter-row visible" : "document-filter-row"}>
 
                         <input
                             value={props.filters.department}
@@ -225,6 +219,19 @@ function DocumentManager(props) {
                         />
 
                         <select
+                            value={sortMode}
+                            onChange={(event) => setSortMode(event.target.value)}
+                        >
+                            <option value="date-desc">Newest first</option>
+                            <option value="name-asc">Name A-Z</option>
+                            <option value="size-desc">Largest first</option>
+                        </select>
+
+                        <button type="button" className="secondary-action" onClick={props.onReset}>
+                            Clear
+                        </button>
+
+                        <select
                             value={props.filters.processingStatus}
                             onChange={(event) =>
                                 props.setFilters((current) => ({
@@ -245,7 +252,13 @@ function DocumentManager(props) {
 
                     {/* File Table */}
 
-                    <FileTable {...props} />
+                    <FileTable
+                        {...props}
+                        documents={sortedDocuments}
+                        viewMode={viewMode}
+                        onSelectDocument={props.setSelectedDocument}
+                        selectedDocument={props.selectedDocument}
+                    />
 
                     {/* Footer */}
 
@@ -263,6 +276,11 @@ function DocumentManager(props) {
 
                 </section>
 
+            </div>
+
+            {/* Hidden upload form keeps the top Upload Files button functional. */}
+            <div className="document-upload-portal">
+                <UploadDialog {...props} />
             </div>
 
             {/* Floating Context Menu */}

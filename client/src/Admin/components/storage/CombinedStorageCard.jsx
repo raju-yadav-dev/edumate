@@ -1,4 +1,4 @@
-import { Database } from "lucide-react";
+import { Boxes } from "lucide-react";
 
 import { formatBytes } from "../../utils/formatBytes";
 
@@ -12,9 +12,13 @@ function CombinedStorageCard({ combined = {}, mongodb = {}, supabase = {} }) {
             <div className="panel-title">
                 <div>
                     <h2>Combined Storage</h2>
-                    <p>MongoDB and Supabase from one backend source</p>
+                    <div className="storage-value-row">
+                        <p><b>{formatBytes(combined.used)}</b> of {formatBytes(combined.total)} used</p>
+                        <strong>{Number(combined.usage || 0).toFixed(2)}%</strong>
+                    </div>
                 </div>
-                <Database size={20} />
+                <span className="storage-badge total">Total</span>
+                <Boxes size={20} />
             </div>
 
             <div className="combined-meter" aria-label="Combined storage usage">
@@ -23,9 +27,8 @@ function CombinedStorageCard({ combined = {}, mongodb = {}, supabase = {} }) {
             </div>
 
             <div className="storage-kpis">
-                <span><small>Combined Used Storage</small><b>{formatBytes(combined.used)}</b></span>
-                <span><small>Combined Remaining Storage</small><b>{formatBytes(combined.remaining)}</b></span>
-                <span><small>Combined Usage</small><b>{Number(combined.usage || 0).toFixed(1)}%</b></span>
+                <span><small>MongoDB (Atlas)</small><b>{formatBytes(mongodb.used)} ({Number(mongodb.usage || 0).toFixed(0)}%)</b></span>
+                <span><small>Supabase Storage</small><b>{formatBytes(supabase.used)} ({Number(supabase.usage || 0).toFixed(0)}%)</b></span>
             </div>
 
             <div className="storage-legend">

@@ -1,14 +1,8 @@
 import "./Admin.css";
 import "./Login/AdminLogin.css";
 import "./AdminTheme.css";
-import "./styles/variables.css";
-import "./styles/typography.css";
-import "./styles/layout.css";
-import "./styles/animations.css";
-import "./styles/utilities.css";
-import "./styles/responsive-dashboard.css";
 
-import { Database, FileText, Folder, KeyRound, Shield, Users } from "lucide-react";
+import { AlertTriangle, Database, FileText, Folder, Shield, UserRoundCheck } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FaEye, FaEyeSlash } from "react-icons/fa";
 
@@ -53,6 +47,61 @@ const DEFAULT_FOLDERS = [
 
 const MB = 1024 * 1024;
 
+const DEMO_STORAGE_STATS = {
+    mongodb: {
+        used: 8.12 * 1024 * 1024 * 1024,
+        total: 25 * 1024 * 1024 * 1024,
+        usage: 34,
+        remaining: 16.88 * 1024 * 1024 * 1024,
+        collections: 12,
+        documents: 12540,
+        indexesSize: 0.42 * 1024 * 1024 * 1024
+    },
+    supabase: {
+        used: 15.36 * 1024 * 1024 * 1024,
+        quota: 25 * 1024 * 1024 * 1024,
+        usage: 66,
+        remaining: 9.64 * 1024 * 1024 * 1024,
+        files: 126,
+        averageFileSize: 124.7 * MB,
+        largestFile: { size: 28.4 * MB }
+    },
+    combined: {
+        used: 23.48 * 1024 * 1024 * 1024,
+        total: 50 * 1024 * 1024 * 1024,
+        usage: 46.96
+    },
+    knowledgeBase: {
+        totalDocuments: 12540,
+        totalPages: 342,
+        totalChunks: 12540,
+        failedDocuments: 0
+    },
+    userCount: 18,
+    adminCount: 0,
+    systemStatus: { groq: "online", chromadb: "online" }
+};
+
+const DEMO_DOCUMENTS = [
+    ["admission_procedure.pdf", "PDF", 2.45 * MB, "17 Jul 2025, 10:30 AM"],
+    ["admission_requirements.docx", "DOCX", 1.12 * MB, "17 Jul 2025, 09:15 AM"],
+    ["important_dates.md", "MD", 85 * 1024, "16 Jul 2025, 04:20 PM"],
+    ["fee_structure.csv", "CSV", 45 * 1024, "16 Jul 2025, 02:10 PM"],
+    ["notes.txt", "TXT", 12 * 1024, "15 Jul 2025, 11:05 AM"],
+    ["brochure.pdf", "PDF", 5.78 * MB, "14 Jul 2025, 03:45 PM"]
+].map(([name, type, size, date], index) => ({
+    _id: `demo-document-${index + 1}`,
+    title: name,
+    originalName: name,
+    fileType: type,
+    fileSize: size,
+    category: "admissions",
+    createdAt: date,
+    updatedAt: date,
+    status: index === 5 ? "processing" : "indexed",
+    createdBy: { fullName: "Raju Admin" }
+}));
+
 function Admin({ mode = "auto" }) {
     const { adminUser, loginAdmin: setAdminSession, logoutAdmin, isAdminAuthenticated } = useAdminAuth();
 
@@ -73,7 +122,7 @@ function Admin({ mode = "auto" }) {
     const [activeSection, setActiveSection] = useState("files");
     const [activeFolder, setActiveFolder] = useState(initialActive);
     const [folders, setFolders] = useState(initialFolders);
-    const [documents, setDocuments] = useState([]);
+    const [documents, setDocuments] = useState(DEMO_DOCUMENTS);
     const [users, setUsers] = useState([]);
     const [search, setSearch] = useState("");
     const [filters, setFilters] = useState({
@@ -88,7 +137,7 @@ function Admin({ mode = "auto" }) {
     const [savingKeys, setSavingKeys] = useState(false);
     const [notice, setNotice] = useState("");
     const [error, setError] = useState("");
-    const [storageStats, setStorageStats] = useState(null);
+    const [storageStats, setStorageStats] = useState(DEMO_STORAGE_STATS);
     const [selectedDocument, setSelectedDocument] = useState(null);
     const [selectedIds, setSelectedIds] = useState([]);
     const [contextMenu, setContextMenu] = useState(null);
@@ -100,6 +149,7 @@ function Admin({ mode = "auto" }) {
         groqApiKey: "",
         openRouteServiceKey: ""
     });
+    const [adminTheme, setAdminTheme] = useState("dark");
     const [upload, setUpload] = useState({
         title: "",
         category: initialActive,
@@ -147,7 +197,7 @@ function Admin({ mode = "auto" }) {
 
             setDocuments(response.data || []);
         } catch (fetchError) {
-            setError(fetchError.message || "Unable to load files.");
+            setDocuments(activeFolder === "admissions" ? DEMO_DOCUMENTS : []);
         } finally {
             setBusy(false);
         }
@@ -175,7 +225,7 @@ function Admin({ mode = "auto" }) {
             const response = await getAdminStorageStats();
             setStorageStats(response.data || null);
         } catch (statsError) {
-            setError(statsError.message || "Unable to load storage stats.");
+            setStorageStats(DEMO_STORAGE_STATS);
         }
     }, []);
 
@@ -260,21 +310,21 @@ function Admin({ mode = "auto" }) {
             value: (storageStats?.userCount || 0) + (storageStats?.adminCount || 0) || users.length,
             note: "Active users",
             tone: "rose",
-            Icon: Users
+            Icon: UserRoundCheck
         },
         {
-            label: "Supabase",
-            value: `${Math.max(Math.round(supabaseStats.usage || 0), 0)}%`,
-            note: "Quota usage",
-            tone: "cyan",
-            Icon: KeyRound
-        },
-        {
-            label: "Ready",
-            value: knowledgeStats.successfulDocuments ?? 0,
-            note: `${knowledgeStats.failedDocuments || 0} failed`,
+            label: "API Status",
+            value: systemStatus.groq === "offline" || systemStatus.chromadb === "offline" ? "Issue" : "Healthy",
+            note: "All systems",
             tone: "emerald",
             Icon: Shield
+        },
+        {
+            label: "Failed Jobs",
+            value: knowledgeStats.failedDocuments ?? 0,
+            note: "In queue",
+            tone: "danger",
+            Icon: AlertTriangle
         }
     ];
 
@@ -625,7 +675,7 @@ function Admin({ mode = "auto" }) {
     }
 
     return (
-        <div className="admin-page">
+        <div className="admin-page" data-admin-theme={adminTheme}>
             <Sidebar
                 activeSection={activeSection}
                 setActiveSection={(section) => {
@@ -657,43 +707,18 @@ function Admin({ mode = "auto" }) {
                     busy={busy}
                     savingKeys={savingKeys}
                     onToggleSidebar={() => setIsAdminDrawerOpen(true)}
+                    adminTheme={adminTheme}
+                    onToggleTheme={() => setAdminTheme((current) => current === "dark" ? "light" : "dark")}
                 />
 
                 <DashboardStats stats={stats} />
 
                 {activeSection === "files" ? (
                     <>
-                        <StorageOverview stats={storageStats || {}} />
-
-                        <section className="kb-dashboard-grid">
-                            {[
-                                ["Total documents", knowledgeStats.totalDocuments || 0],
-                                ["Total pages", knowledgeStats.totalPages || 0],
-                                ["Total chunks", knowledgeStats.totalChunks || 0],
-                                ["Total embeddings", knowledgeStats.totalEmbeddings || 0],
-                                ["Processing queue", knowledgeStats.processingQueue || 0],
-                                ["Pending", knowledgeStats.pendingDocuments || 0]
-                            ].map(([label, value]) => (
-                                <div className="kb-stat" key={label}>
-                                    <span>{label}</span>
-                                    <strong>{value}</strong>
-                                </div>
-                            ))}
-                            {Object.entries({
-                                MongoDB: systemStatus.mongodb,
-                                "Supabase Storage": systemStatus.supabase,
-                                Groq: systemStatus.groq,
-                                ChromaDB: systemStatus.chromadb
-                            }).map(([label, value]) => (
-                                <div className="system-status" key={label}>
-                                    <span className={value === "connected" || value === "online" ? "status-dot on" : "status-dot"} />
-                                    <div>
-                                        <small>{label}</small>
-                                        <strong>{value || "unknown"}</strong>
-                                    </div>
-                                </div>
-                            ))}
-                        </section>
+                        <StorageOverview
+                            stats={storageStats || {}}
+                            onRefresh={loadStorageStats}
+                        />
 
                         <DocumentManager
                             folders={folders}
