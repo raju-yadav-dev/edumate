@@ -213,6 +213,7 @@ function Chat() {
     const [threads, setThreads] = useState(() => readStoredThreads());
     const [activeThreadId, setActiveThreadId] = useState(() => readStoredActiveThread(readStoredThreads()));
     const [input, setInput] = useState(initialPrompt);
+    const [chatSearch, setChatSearch] = useState("");
     const [messageSearch, setMessageSearch] = useState("");
     const [attachments, setAttachments] = useState([]);
     const [loading, setLoading] = useState(false);
@@ -280,7 +281,7 @@ function Chat() {
             { label: "Previous Week", items: filteredThreads.filter((thread) => thread.bucket === "Previous Week") },
             { label: "Archive", items: filteredThreads.filter((thread) => thread.bucket === "Archive") }
         ];
-    }, [threads, messageSearch]);
+    }, [threads, chatSearch]);
 
     useEffect(() => {
         if (!threads.some((thread) => thread.id === activeThreadId)) {
@@ -306,12 +307,14 @@ function Chat() {
         setInput("");
         setAttachments([]);
         setMessageSearch("");
+        setChatSearch("");
         abortRef.current?.abort();
     }, []);
 
     const handleSelectThread = useCallback((threadId) => {
         setActiveThreadId(threadId);
         setMessageSearch("");
+        setChatSearch("");
         setAttachments([]);
         setInput("");
         abortRef.current?.abort();
@@ -667,8 +670,8 @@ function Chat() {
                 isCollapsed={sidebarCollapsed}
                 onToggleCollapse={handleSidebarToggle}
                 onNewChat={createNewChat}
-                searchValue={messageSearch}
-                onSearchChange={setMessageSearch}
+                searchValue={chatSearch}
+                onSearchChange={setChatSearch}
                 sections={groupedSections}
                 activeThreadId={activeThreadId}
                 onSelectThread={handleSelectThread}
