@@ -5,6 +5,8 @@ import {
     Download,
     Eye as PreviewEye,
     Trash2,
+    Edit2,
+    FolderSymlink
 } from "lucide-react";
 
 function ContextMenu({
@@ -12,6 +14,8 @@ function ContextMenu({
     onClose,
     onOpen,
     onDownload,
+    onRename,
+    onMove,
     onDelete,
 }) {
     if (!menu?.file) {
@@ -44,6 +48,16 @@ function ContextMenu({
             <button onClick={copyPath}>
                 <Copy size={16} />
                 <span>Copy Path</span>
+            </button>
+
+            <button onClick={() => { onRename(menu.file._id, menu.file.originalName || menu.file.title); onClose(); }}>
+                <Edit2 size={16} />
+                <span>Rename</span>
+            </button>
+
+            <button onClick={() => { onMove(menu.file._id, menu.file.category); onClose(); }}>
+                <FolderSymlink size={16} />
+                <span>Move to Folder</span>
             </button>
 
             <div className="context-divider" />

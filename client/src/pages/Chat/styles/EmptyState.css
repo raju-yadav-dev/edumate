@@ -1,0 +1,122 @@
+.chat-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem;
+    text-align: center;
+    height: 100%;
+}
+
+.empty-state-header {
+    margin-bottom: 3rem;
+}
+
+.brand-logo-container {
+    background: linear-gradient(135deg, var(--primary, #6366f1) 0%, var(--primary-dark, #4f46e5) 100%);
+    color: white;
+    width: 80px;
+    height: 80px;
+    border-radius: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 1.5rem;
+    box-shadow: 0 10px 25px -5px rgba(99, 102, 241, 0.4);
+    animation: pulseLogo 3s infinite alternate;
+}
+
+.brand-icon {
+    transform: rotate(-10deg);
+}
+
+.empty-state-header h1 {
+    font-size: 2.5rem;
+    font-weight: 800;
+    margin-bottom: 0.75rem;
+    background: linear-gradient(135deg, var(--text-main, #ffffff) 30%, var(--primary, #a5b4fc) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.empty-state-header p {
+    font-size: 1.1rem;
+    color: var(--text-muted, #94a3b8);
+    max-width: 580px;
+    margin: 0 auto;
+    line-height: 1.6;
+}
+
+.prompts-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.25rem;
+    width: 100%;
+}
+
+.prompt-card {
+    background: var(--bg-card, rgba(30, 41, 59, 0.4));
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.05));
+    border-radius: 16px;
+    padding: 1.5rem;
+    text-align: left;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    backdrop-filter: blur(10px);
+}
+
+.prompt-card:hover {
+    transform: translateY(-4px);
+    background: var(--bg-card-hover, rgba(30, 41, 59, 0.7));
+    border-color: var(--primary, #6366f1);
+    box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.3);
+}
+
+.prompt-icon-wrapper {
+    background: var(--bg-icon, rgba(99, 102, 241, 0.15));
+    color: var(--primary, #6366f1);
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 1rem;
+}
+
+.prompt-card h3 {
+    font-size: 1.1rem;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+    color: var(--text-main, #ffffff);
+}
+
+.prompt-card p {
+    font-size: 0.9rem;
+    color: var(--text-muted, #94a3b8);
+    line-height: 1.4;
+    font-style: italic;
+}
+
+@keyframes pulseLogo {
+    0% {
+        transform: scale(1);
+        box-shadow: 0 10px 25px -5px rgba(99, 102, 241, 0.4);
+    }
+    100% {
+        transform: scale(1.04);
+        box-shadow: 0 15px 35px -5px rgba(99, 102, 241, 0.6);
+    }
+}
+
+@media (max-width: 640px) {
+    .prompts-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .empty-state-header h1 {
+        font-size: 2rem;
+    }
+}

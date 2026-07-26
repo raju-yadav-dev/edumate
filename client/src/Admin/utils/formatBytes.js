@@ -1,8 +1,12 @@
 export function formatBytes(value) {
-    const size = Number(value || 0);
-
-    if (!size) {
+    if (value === null || value === undefined || isNaN(Number(value))) {
         return "—";
+    }
+
+    const size = Number(value);
+
+    if (size === 0) {
+        return "0 B";
     }
 
     if (size >= 1024 * 1024 * 1024) {

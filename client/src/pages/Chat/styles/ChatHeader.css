@@ -1,0 +1,167 @@
+.chat-header-bar {
+    height: 64px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 1.5rem;
+    background: var(--bg-header, rgba(15, 23, 42, 0.6));
+    border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.05));
+    backdrop-filter: blur(12px);
+    z-index: 10;
+}
+
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    min-width: 0;
+    flex: 1;
+}
+
+.mobile-menu-toggle {
+    display: none;
+    background: transparent;
+    border: none;
+    color: var(--text-main, #ffffff);
+    cursor: pointer;
+    padding: 6px;
+    border-radius: 8px;
+    transition: background 0.2s ease;
+}
+
+.mobile-menu-toggle:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.title-display-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+}
+
+.header-chat-title {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--text-main, #ffffff);
+    margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.rename-trigger-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted, #64748b);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    opacity: 0;
+    transition: all 0.2s ease;
+}
+
+.title-display-wrapper:hover .rename-trigger-btn {
+    opacity: 1;
+}
+
+.rename-trigger-btn:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-main, #ffffff);
+}
+
+.rename-input-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.rename-textbox {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--primary, #6366f1);
+    color: var(--text-main, #ffffff);
+    font-size: 0.9rem;
+    padding: 4px 8px;
+    border-radius: 6px;
+    outline: none;
+    width: 220px;
+}
+
+.rename-confirm-btn,
+.rename-cancel-btn {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s ease;
+}
+
+.rename-confirm-btn {
+    color: var(--accent-green, #10b981);
+}
+
+.rename-cancel-btn {
+    color: var(--accent-red, #ef4444);
+}
+
+.rename-confirm-btn:hover,
+.rename-cancel-btn:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-shrink: 0;
+}
+
+.auth-status-pill {
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 20px;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+}
+
+.auth-status-pill.authenticated {
+    background: rgba(16, 185, 129, 0.1);
+    color: #10b981;
+    border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.auth-status-pill.guest {
+    background: rgba(245, 158, 11, 0.1);
+    color: #f59e0b;
+    border: 1px solid rgba(245, 158, 11, 0.2);
+}
+
+.theme-toggle-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted, #94a3b8);
+    cursor: pointer;
+    padding: 8px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.theme-toggle-btn:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-main, #ffffff);
+    transform: rotate(15deg);
+}
+
+@media (max-width: 768px) {
+    .mobile-menu-toggle {
+        display: block;
+    }
+}

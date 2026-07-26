@@ -17,7 +17,9 @@ import {
     rebuildAdminDocumentEmbeddings,
     replaceAdminDocument,
     saveProviderApiKeys,
-    uploadAdminDocument
+    uploadAdminDocument,
+    renameAdminDocument,
+    moveAdminDocument
 } from "../services/adminService";
 
 import DashboardStats from "./components/dashboard/DashboardStats";
@@ -185,6 +187,16 @@ function Admin({ mode = "auto" }) {
         }
     }, [folders]);
 
+    const handleAuthError = useCallback((fetchError) => {
+        console.error("API error encountered:", fetchError);
+        if (fetchError.status === 401 || fetchError.status === 403) {
+            logoutAdmin();
+            setError("Session expired or unauthorized. Please log in again.");
+        } else {
+            setError(fetchError.message || "An error occurred while connecting to the server.");
+        }
+    }, [logoutAdmin]);
+
     const loadDocuments = useCallback(async () => {
         try {
             setBusy(true);
@@ -197,11 +209,13 @@ function Admin({ mode = "auto" }) {
 
             setDocuments(response.data || []);
         } catch (fetchError) {
+            console.error("Failed to load documents:", fetchError);
+            handleAuthError(fetchError);
             setDocuments(activeFolder === "admissions" ? DEMO_DOCUMENTS : []);
         } finally {
             setBusy(false);
         }
-    }, [search, activeFolder, filters]);
+    }, [search, activeFolder, filters, handleAuthError]);
 
     const loadUsers = useCallback(async () => {
         try {
@@ -214,20 +228,34 @@ function Admin({ mode = "auto" }) {
 
             setUsers(response.data || []);
         } catch (fetchError) {
-            setError(fetchError.message || "Unable to load users.");
+            console.error("Failed to load users:", fetchError);
+            handleAuthError(fetchError);
         } finally {
             setBusy(false);
         }
-    }, [userSearch, roleFilter]);
+    }, [userSearch, roleFilter, handleAuthError]);
 
     const loadStorageStats = useCallback(async () => {
         try {
             const response = await getAdminStorageStats();
             setStorageStats(response.data || null);
         } catch (statsError) {
+            console.error("Failed to load storage stats:", statsError);
+            handleAuthError(statsError);
             setStorageStats(DEMO_STORAGE_STATS);
         }
-    }, []);
+    }, [handleAuthError]);
+
+    const handleShowStorageOverview = useCallback(() => {
+        setActiveSection("files");
+        void loadStorageStats();
+        setTimeout(() => {
+            const element = document.querySelector(".storage-section");
+            if (element) {
+                element.scrollIntoView({ behavior: "smooth" });
+            }
+        }, 100);
+    }, [loadStorageStats]);
 
     useEffect(() => {
         if (activeSection === "files") {
@@ -479,6 +507,60 @@ function Admin({ mode = "auto" }) {
         }
     }
 
+    async function renameDocument(id, currentName) {
+        const newName = window.prompt("Rename file:", currentName);
+        if (!newName || newName.trim() === "" || newName === currentName) {
+            return;
+        }
+
+        try {
+            setBusy(true);
+            setError("");
+            await renameAdminDocument(id, newName.trim());
+            setNotice("Document renamed.");
+            await loadDocuments();
+            await loadStorageStats();
+        } catch (err) {
+            setError(err.message || "Unable to rename document.");
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    async function moveDocument(id, currentCategory) {
+        const folderOptions = folders.map(f => f.label).join(", ");
+        const newCategoryLabel = window.prompt(
+            `Move to folder (${folderOptions}):`,
+            folders.find(f => f.value === currentCategory)?.label || currentCategory
+        );
+        if (!newCategoryLabel || newCategoryLabel.trim() === "") {
+            return;
+        }
+
+        const matchedFolder = folders.find(
+            f => f.label.toLowerCase() === newCategoryLabel.trim().toLowerCase() ||
+                 f.value.toLowerCase() === newCategoryLabel.trim().toLowerCase()
+        );
+        const newCategory = matchedFolder ? matchedFolder.value : slugifyFolder(newCategoryLabel);
+
+        if (newCategory === currentCategory) {
+            return;
+        }
+
+        try {
+            setBusy(true);
+            setError("");
+            await moveAdminDocument(id, newCategory);
+            setNotice("Document moved.");
+            await loadDocuments();
+            await loadStorageStats();
+        } catch (err) {
+            setError(err.message || "Unable to move document.");
+        } finally {
+            setBusy(false);
+        }
+    }
+
     async function rebuildDocument(id) {
         try {
             setBusy(true);
@@ -688,7 +770,7 @@ function Admin({ mode = "auto" }) {
                 mongoStats={mongoStats}
                 supabaseStats={supabaseStats}
                 combinedStats={combinedStats}
-                loadStorageStats={loadStorageStats}
+                loadStorageStats={handleShowStorageOverview}
                 refreshSection={refreshSection}
                 logoutAdmin={logoutAdmin}
                 formatBytes={formatBytes}
@@ -757,6 +839,8 @@ function Admin({ mode = "auto" }) {
                             onOpenDocument={handleOpenDocument}
                             onDownload={handleDownload}
                             onReplace={replaceDocument}
+                            onRename={renameDocument}
+                            onMove={moveDocument}
                             onRebuild={rebuildDocument}
                             onDelete={removeDocument}
                             onBulkDelete={bulkDeleteDocuments}

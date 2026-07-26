@@ -5,7 +5,9 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "node scripts/startup.js",
+    "setup": "node scripts/bootstrap.js",
+    "doctor": "node scripts/doctor.js"
   },
   "keywords": [],
   "author": "",
@@ -13,6 +15,7 @@
   "type": "commonjs",
   "dependencies": {
     "@supabase/supabase-js": "^2.110.8",
+    "@qdrant/js-client-rest": "^1.1.0",
     "bcrypt": "^6.0.0",
     "compression": "^1.8.1",
     "cookie-parser": "^1.4.7",
@@ -23,7 +26,8 @@
     "helmet": "^8.2.0",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.7.3",
-    "multer": "^2.2.0"
+    "multer": "^2.2.0",
+    "pdf-parse": "^1.1.1"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"

@@ -290,6 +290,8 @@ function DocumentManager(props) {
                 onClose={props.closeContextMenu}
                 onOpen={props.onOpenDocument}
                 onDownload={props.onDownload}
+                onRename={props.onRename}
+                onMove={props.onMove}
                 onDelete={props.onDelete}
             />
 

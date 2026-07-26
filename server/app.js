@@ -12,6 +12,8 @@ const documentRoutes = require("./routes/documentRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const apiRoutes = require("./routes/apiRoutes");
 const { notFound, errorHandler } = require("./middleware/errorMiddleware");
+const uploadRoutes = require("./routes/uploadRoutes");
+const storageRoutes = require("./routes/storageRoutes");
 
 const app = express();
 
@@ -82,6 +84,8 @@ app.use("/api/users", userRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/documents", documentRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/storage", storageRoutes);
+app.use("/api/upload", uploadRoutes);
 
 // ==============================
 // Test Route

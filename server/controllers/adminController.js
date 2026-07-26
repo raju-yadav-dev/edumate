@@ -4,25 +4,37 @@ const User = require("../models/User");
 const { sendSuccess } = require("../utils/response");
 const settingsService = require("../services/settingsService");
 const mongoose = require("mongoose");
+const { getConfiguredProviders } = require("../services/groqProviderManager");
 
 const DEFAULT_STORAGE_LIMIT = 10 * 1024 * 1024 * 1024;
 
 const toStorageLimit = () => {
-    const configuredLimit = Number(process.env.ADMIN_STORAGE_LIMIT_BYTES);
-    return Number.isFinite(configuredLimit) && configuredLimit > 0 ? configuredLimit : DEFAULT_STORAGE_LIMIT;
+    let limit = Number(process.env.ADMIN_STORAGE_LIMIT_BYTES);
+    if (!Number.isFinite(limit) || limit <= 0) {
+        const limitMB = Number(process.env.ADMIN_STORAGE_LIMIT_MB);
+        if (Number.isFinite(limitMB) && limitMB > 0) {
+            limit = limitMB * 1024 * 1024;
+        }
+    }
+    return Number.isFinite(limit) && limit > 0 ? limit : DEFAULT_STORAGE_LIMIT;
 };
 
 const getSupabaseConfig = () => {
     const url = process.env.SUPABASE_URL || process.env.SUPABASE_PROJECT_URL;
     const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY;
     const bucket = process.env.SUPABASE_BUCKET || process.env.SUPABASE_STORAGE_BUCKET || process.env.SUPABASE_BUCKET_NAME;
-    const quota = Number(process.env.SUPABASE_STORAGE_LIMIT_BYTES || process.env.SUPABASE_QUOTA_BYTES || DEFAULT_STORAGE_LIMIT);
+    
+    let quota = Number(process.env.SUPABASE_STORAGE_LIMIT_BYTES || process.env.SUPABASE_QUOTA_BYTES);
+    if (!Number.isFinite(quota) || quota <= 0) {
+        const quotaMB = Number(process.env.SUPABASE_STORAGE_QUOTA_MB || process.env.SUPABASE_QUOTA_MB);
+        quota = quotaMB ? quotaMB * 1024 * 1024 : DEFAULT_STORAGE_LIMIT;
+    }
 
     return {
         url,
         key,
         bucket,
-        quota: Number.isFinite(quota) && quota > 0 ? quota : DEFAULT_STORAGE_LIMIT,
+        quota,
         configured: Boolean(url && key && bucket && typeof fetch === "function")
     };
 };
@@ -41,22 +53,44 @@ const getMongoStorageStats = async () => {
         };
     }
 
-    const stats = await mongoose.connection.db.stats();
-    const total = Number(process.env.MONGODB_STORAGE_LIMIT_BYTES || toStorageLimit());
-    const used = Number(stats.storageSize || stats.dataSize || 0) + Number(stats.indexSize || 0);
+    try {
+        const stats = await mongoose.connection.db.stats();
+        let total = Number(process.env.MONGODB_STORAGE_LIMIT_BYTES);
+        if (!Number.isFinite(total) || total <= 0) {
+            const totalMB = Number(process.env.MONGODB_STORAGE_LIMIT_MB);
+            if (Number.isFinite(totalMB) && totalMB > 0) {
+                total = totalMB * 1024 * 1024;
+            } else {
+                total = toStorageLimit();
+            }
+        }
+        const used = Number(stats.storageSize || stats.dataSize || 0) + Number(stats.indexSize || 0);
 
-    return {
-        connected: true,
-        total,
-        used,
-        remaining: Math.max(total - used, 0),
-        usage: total ? Math.min((used / total) * 100, 100) : 0,
-        collections: stats.collections || 0,
-        documents: stats.objects || 0,
-        indexesSize: stats.indexSize || 0,
-        dataSize: stats.dataSize || 0,
-        storageSize: stats.storageSize || 0
-    };
+        return {
+            connected: true,
+            total,
+            used,
+            remaining: Math.max(total - used, 0),
+            usage: total ? Math.min((used / total) * 100, 100) : 0,
+            collections: stats.collections || 0,
+            documents: stats.objects || 0,
+            indexesSize: stats.indexSize || 0,
+            dataSize: stats.dataSize || 0,
+            storageSize: stats.storageSize || 0
+        };
+    } catch (error) {
+        console.error("Error fetching Mongo storage stats, using fallbacks:", error);
+        return {
+            connected: false,
+            used: 0,
+            total: toStorageLimit(),
+            remaining: toStorageLimit(),
+            usage: 0,
+            collections: 0,
+            documents: 0,
+            indexesSize: 0
+        };
+    }
 };
 
 const listSupabaseObjects = async ({ url, key, bucket, prefix = "", offset = 0 }) => {
@@ -85,6 +119,51 @@ const listSupabaseObjects = async ({ url, key, bucket, prefix = "", offset = 0 }
     return response.json();
 };
 
+const walkSupabaseStorage = async (config, folder = "") => {
+    let used = 0;
+    let files = 0;
+    let largestFile = null;
+
+    const objects = await listSupabaseObjects({
+        url: config.url,
+        key: config.key,
+        bucket: config.bucket,
+        prefix: folder
+    });
+
+    if (Array.isArray(objects)) {
+        for (const object of objects) {
+            if (!object.id) {
+                // It's a folder
+                const subfolder = folder ? `${folder}/${object.name}` : object.name;
+                const subStats = await walkSupabaseStorage(config, subfolder);
+                used += subStats.used;
+                files += subStats.files;
+                if (subStats.largestFile) {
+                    if (!largestFile || subStats.largestFile.size > largestFile.size) {
+                        largestFile = subStats.largestFile;
+                    }
+                }
+            } else {
+                const size = Number(object.metadata?.size || object.size || 0);
+                if (size > 0) {
+                    used += size;
+                    files += 1;
+                    if (!largestFile || size > largestFile.size) {
+                        largestFile = {
+                            name: object.name,
+                            path: folder ? `${folder}/${object.name}` : object.name,
+                            size
+                        };
+                    }
+                }
+            }
+        }
+    }
+
+    return { used, files, largestFile };
+};
+
 const getSupabaseStorageStats = async (fallbackBytes = 0, fallbackCount = 0) => {
     const config = getSupabaseConfig();
 
@@ -102,58 +181,34 @@ const getSupabaseStorageStats = async (fallbackBytes = 0, fallbackCount = 0) => 
         };
     }
 
-    let offset = 0;
-    let used = 0;
-    let files = 0;
-    let largestFile = null;
+    try {
+        const { used, files, largestFile } = await walkSupabaseStorage(config);
 
-    while (true) {
-        const objects = await listSupabaseObjects({
-            url: config.url,
-            key: config.key,
+        return {
+            configured: true,
             bucket: config.bucket,
-            offset
-        });
-
-        if (!Array.isArray(objects) || objects.length === 0) {
-            break;
-        }
-
-        objects.forEach((object) => {
-            const size = Number(object.metadata?.size || object.size || 0);
-
-            if (size > 0) {
-                used += size;
-                files += 1;
-
-                if (!largestFile || size > Number(largestFile.size || 0)) {
-                    largestFile = {
-                        name: object.name,
-                        path: object.name,
-                        size
-                    };
-                }
-            }
-        });
-
-        if (objects.length < 1000) {
-            break;
-        }
-
-        offset += objects.length;
+            quota: config.quota,
+            used,
+            remaining: Math.max(config.quota - used, 0),
+            usage: config.quota ? Math.min((used / config.quota) * 100, 100) : 0,
+            files,
+            averageFileSize: files ? used / files : 0,
+            largestFile
+        };
+    } catch (error) {
+        console.error("Error fetching Supabase storage stats, using fallbacks:", error);
+        return {
+            configured: false,
+            bucket: config.bucket || "",
+            quota: config.quota,
+            used: fallbackBytes,
+            remaining: Math.max(config.quota - fallbackBytes, 0),
+            usage: config.quota ? Math.min((fallbackBytes / config.quota) * 100, 100) : 0,
+            files: fallbackCount,
+            averageFileSize: fallbackCount ? fallbackBytes / fallbackCount : 0,
+            largestFile: null
+        };
     }
-
-    return {
-        configured: true,
-        bucket: config.bucket,
-        quota: config.quota,
-        used,
-        remaining: Math.max(config.quota - used, 0),
-        usage: config.quota ? Math.min((used / config.quota) * 100, 100) : 0,
-        files,
-        averageFileSize: files ? used / files : 0,
-        largestFile
-    };
 };
 
 const sumBsonSizeByFilter = async (Model, filter) => {
@@ -206,7 +261,7 @@ const getStorageStats = asyncHandler(async (req, res) => {
         role: { $nin: ["admin", "super_admin"] }
     };
 
-    const [documentStorage, categoryStorage, documentRecords, userRecords, adminRecords, mongoStats] = await Promise.all([
+    const [documentStorage, categoryStorage, documentRecords, userRecords, adminRecords, mongoStats, kbStats] = await Promise.all([
         Document.aggregate([
             { $match: activeDocumentFilter },
             {
@@ -230,7 +285,76 @@ const getStorageStats = asyncHandler(async (req, res) => {
         sumBsonSizeByFilter(Document, activeDocumentFilter),
         sumBsonSizeByFilter(User, regularUserFilter),
         sumBsonSizeByFilter(User, adminUserFilter),
-        getMongoStorageStats()
+        getMongoStorageStats(),
+        Document.aggregate([
+            { $match: activeDocumentFilter },
+            {
+                $group: {
+                    _id: null,
+                    totalChunks: { $sum: "$chunkCount" },
+                    totalPages: {
+                        $sum: {
+                            $cond: [
+                                { $gt: ["$metadata.pageCount", 0] },
+                                "$metadata.pageCount",
+                                {
+                                    $cond: [
+                                        { $gt: ["$metadata.totalPages", 0] },
+                                        "$metadata.totalPages",
+                                        0
+                                    ]
+                                }
+                            ]
+                        }
+                    },
+                    totalEmbeddings: {
+                        $sum: {
+                            $cond: [
+                                { $eq: ["$embeddingStatus", "indexed"] },
+                                "$chunkCount",
+                                0
+                            ]
+                        }
+                    },
+                    processingQueue: {
+                        $sum: {
+                            $cond: [
+                                { $eq: ["$embeddingStatus", "processing"] },
+                                1,
+                                0
+                            ]
+                        }
+                    },
+                    pendingDocuments: {
+                        $sum: {
+                            $cond: [
+                                { $eq: ["$embeddingStatus", "pending"] },
+                                1,
+                                0
+                            ]
+                        }
+                    },
+                    successfulDocuments: {
+                        $sum: {
+                            $cond: [
+                                { $eq: ["$embeddingStatus", "indexed"] },
+                                1,
+                                0
+                            ]
+                        }
+                    },
+                    failedDocuments: {
+                        $sum: {
+                            $cond: [
+                                { $eq: ["$embeddingStatus", "failed"] },
+                                1,
+                                0
+                            ]
+                        }
+                    }
+                }
+            }
+        ])
     ]);
 
     const documentBytes = documentStorage[0]?.bytes || 0;
@@ -244,6 +368,26 @@ const getStorageStats = asyncHandler(async (req, res) => {
     const supabaseUsed = supabaseStats.used || documentBytes;
     const usedBytes = mongoUsed + supabaseUsed;
     const totalBytes = (mongoStats.total || storageLimit) + (supabaseStats.quota || storageLimit);
+
+    const kb = kbStats[0] || {
+        totalChunks: 0,
+        totalPages: 0,
+        totalEmbeddings: 0,
+        processingQueue: 0,
+        pendingDocuments: 0,
+        successfulDocuments: 0,
+        failedDocuments: 0
+    };
+
+    let groqStatus = "offline";
+    try {
+        const groqProviders = await getConfiguredProviders();
+        if (groqProviders && groqProviders.length > 0) {
+            groqStatus = "online";
+        }
+    } catch (err) {
+        console.error("Error checking Groq providers status:", err);
+    }
 
     return sendSuccess(res, 200, "Storage stats retrieved successfully.", {
         limitBytes: storageLimit,
@@ -295,19 +439,19 @@ const getStorageStats = asyncHandler(async (req, res) => {
         },
         knowledgeBase: {
             totalDocuments: documentCount,
-            totalPages: 0,
-            totalChunks: 0,
-            totalEmbeddings: 0,
-            processingQueue: 0,
-            pendingDocuments: 0,
-            successfulDocuments: 0,
-            failedDocuments: 0
+            totalPages: kb.totalPages,
+            totalChunks: kb.totalChunks,
+            totalEmbeddings: kb.totalEmbeddings,
+            processingQueue: kb.processingQueue,
+            pendingDocuments: kb.pendingDocuments,
+            successfulDocuments: kb.successfulDocuments,
+            failedDocuments: kb.failedDocuments
         },
         systemStatus: {
             mongodb: mongoStats.connected ? "connected" : "unknown",
             supabase: supabaseStats.configured ? "connected" : "not configured",
-            groq: "unknown",
-            chromadb: "unknown"
+            groq: groqStatus,
+            chromadb: "not_configured"
         }
     });
 });

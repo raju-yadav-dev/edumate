@@ -6,7 +6,12 @@ const documentUpload = require("../middleware/documentUploadMiddleware");
 const {
     uploadDocument,
     listDocuments,
-    deleteDocument
+    deleteDocument,
+    replaceDocument,
+    renameDocument,
+    moveDocument,
+    reindexDocument,
+    rebuildAllEmbeddings
 } = require("../controllers/documentController");
 
 const router = express.Router();
@@ -20,10 +25,36 @@ router.post(
     documentUpload.single("document"),
     uploadDocument
 );
+router.put(
+    "/:documentId",
+    authorizeRoles("admin", "super_admin"),
+    documentUpload.single("document"),
+    replaceDocument
+);
+router.put(
+    "/:documentId/rename",
+    authorizeRoles("admin", "super_admin"),
+    renameDocument
+);
+router.put(
+    "/:documentId/move",
+    authorizeRoles("admin", "super_admin"),
+    moveDocument
+);
 router.delete(
     "/:documentId",
     authorizeRoles("admin", "super_admin"),
     deleteDocument
+);
+router.post(
+    "/rebuild",
+    authorizeRoles("admin", "super_admin"),
+    rebuildAllEmbeddings
+);
+router.post(
+    "/:documentId/reindex",
+    authorizeRoles("admin", "super_admin"),
+    reindexDocument
 );
 
 module.exports = router;

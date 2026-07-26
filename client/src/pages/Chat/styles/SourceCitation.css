@@ -1,0 +1,123 @@
+.source-citations-container {
+    margin-top: 0.75rem;
+    background: var(--bg-citation-container, rgba(99, 102, 241, 0.05));
+    border: 1px solid var(--border-citation, rgba(99, 102, 241, 0.15));
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.citation-toggle-button {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: var(--primary, #6366f1);
+    transition: background 0.2s ease;
+    text-align: left;
+}
+
+.citation-toggle-button:hover {
+    background: var(--bg-citation-hover, rgba(99, 102, 241, 0.08));
+}
+
+.citation-header-text {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.check-icon {
+    color: var(--accent-green, #10b981);
+}
+
+.citations-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0 1rem 1rem;
+}
+
+.citation-badge-card {
+    background: var(--bg-citation-card, rgba(15, 23, 42, 0.5));
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.05));
+    border-radius: 8px;
+    padding: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.citation-card-main {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.pdf-icon-wrapper {
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.citation-metadata {
+    min-width: 0;
+    flex: 1;
+}
+
+.citation-doc-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-main, #ffffff);
+    margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.citation-doc-reference {
+    font-size: 0.75rem;
+    color: var(--text-muted, #94a3b8);
+    margin: 2px 0 0 0;
+}
+
+.citation-card-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    padding-left: 2.5rem;
+}
+
+.citation-tag {
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.citation-tag.category {
+    background: rgba(99, 102, 241, 0.1);
+    color: var(--primary, #6366f1);
+}
+
+.citation-tag.department {
+    background: rgba(245, 158, 11, 0.1);
+    color: #f59e0b;
+}
+
+.citation-tag.similarity {
+    background: rgba(16, 185, 129, 0.1);
+    color: #10b981;
+}

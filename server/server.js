@@ -30,6 +30,10 @@ const startServer = async () => {
 
         await connectDB();
 
+        // Verify Qdrant connection during startup
+        const { ensureCollection } = require("./ai/config/qdrant");
+        await ensureCollection();
+
         app.listen(PORT, () => {
 
             console.log(`

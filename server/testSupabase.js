@@ -1,15 +1,19 @@
-import supabase from "./config/supabase.js";
+require("dotenv").config();
 
-async function test() {
+const supabase = require("./config/supabase");
+
+async function testSupabase() {
 
     const { data, error } = await supabase.storage.listBuckets();
 
     if (error) {
-        console.log(error);
-    } else {
-        console.log(data);
+        console.error("❌ Error:", error.message);
+        return;
     }
+
+    console.log("✅ Connected Successfully");
+    console.table(data);
 
 }
 
-test();
+testSupabase();

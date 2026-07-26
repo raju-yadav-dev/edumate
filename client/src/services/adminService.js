@@ -11,7 +11,9 @@ async function parseResponse(response, fallbackMessage) {
 
     if (!response.ok) {
         const validationDetails = Array.isArray(payload.errors) ? ` ${payload.errors.join(" ")}` : "";
-        throw new Error(`${payload.message || fallbackMessage}${validationDetails}`);
+        const error = new Error(`${payload.message || fallbackMessage}${validationDetails}`);
+        error.status = response.status;
+        throw error;
     }
 
     return payload;
@@ -265,6 +267,36 @@ export async function getAdminStorageStats() {
         ...payload,
         data: normalizeStorageStats(payload.data)
     };
+}
+
+export async function renameAdminDocument(documentId, originalName) {
+    const token = getAdminAccessToken();
+
+    const response = await fetch(`${DOCUMENT_API_BASE_URL}/${documentId}/rename`, {
+        method: "PUT",
+        headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({ originalName })
+    });
+
+    return parseResponse(response, "Unable to rename document.");
+}
+
+export async function moveAdminDocument(documentId, category) {
+    const token = getAdminAccessToken();
+
+    const response = await fetch(`${DOCUMENT_API_BASE_URL}/${documentId}/move`, {
+        method: "PUT",
+        headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({ category })
+    });
+
+    return parseResponse(response, "Unable to move document.");
 }
 
 export async function saveProviderApiKeys({ groqApiKey, openRouteServiceKey }) {

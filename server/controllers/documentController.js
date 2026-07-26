@@ -37,8 +37,59 @@ const deleteDocument = asyncHandler(async (req, res) => {
     return sendSuccess(res, 200, "Document deleted successfully.");
 });
 
+const replaceDocument = asyncHandler(async (req, res) => {
+    const document = await documentService.replaceDocument({
+        documentId: req.params.documentId,
+        file: req.file,
+        body: req.body,
+        user: req.user
+    });
+
+    return sendSuccess(res, 200, "Document replaced successfully.", document);
+});
+
+const renameDocument = asyncHandler(async (req, res) => {
+    const document = await documentService.renameDocument({
+        documentId: req.params.documentId,
+        originalName: req.body.originalName,
+        user: req.user
+    });
+
+    return sendSuccess(res, 200, "Document renamed successfully.", document);
+});
+
+const moveDocument = asyncHandler(async (req, res) => {
+    const document = await documentService.moveDocument({
+        documentId: req.params.documentId,
+        category: req.body.category,
+        user: req.user
+    });
+
+    return sendSuccess(res, 200, "Document moved successfully.", document);
+});
+
+const reindexDocument = asyncHandler(async (req, res) => {
+    const document = await documentService.reindexDocument({
+        documentId: req.params.documentId,
+        user: req.user
+    });
+
+    return sendSuccess(res, 200, "Document indexing initiated in background.", document);
+});
+
+const rebuildAllEmbeddings = asyncHandler(async (req, res) => {
+    const result = await documentService.rebuildAllEmbeddings();
+
+    return sendSuccess(res, 200, `Rebuilding initiated for ${result.count} documents.`, result);
+});
+
 module.exports = {
     uploadDocument,
     listDocuments,
-    deleteDocument
+    deleteDocument,
+    replaceDocument,
+    renameDocument,
+    moveDocument,
+    reindexDocument,
+    rebuildAllEmbeddings
 };
