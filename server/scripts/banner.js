@@ -16,6 +16,11 @@ const printBanner = () => {
 };
 
 const printDashboard = (stats) => {
+    const isOllama = process.env.LLM_PROVIDER === "ollama";
+    const aiProviderName = isOllama ? "Ollama" : "Gemini";
+    const aiModelName = isOllama ? `${process.env.OLLAMA_MODEL || "qwen2.5:3b"} (Ollama)` : "Gemini 2.5 Flash";
+    const embeddingModelName = isOllama ? `${process.env.OLLAMA_EMBEDDING_MODEL || process.env.OLLAMA_MODEL || "qwen2.5:3b"} (Ollama)` : "Gemini text-embedding-004";
+
     console.log(colors.cyan("══════════════════════════════════════════════"));
     console.log(colors.bold(colors.green("            🚀 EduMate AI Server")));
     console.log(colors.cyan("══════════════════════════════════════════════\n"));
@@ -23,7 +28,7 @@ const printDashboard = (stats) => {
     console.log(`${colors.green("✓")} Environment Variables Loaded`);
     console.log(`${colors.green("✓")} MongoDB Connected`);
     console.log(`${colors.green("✓")} Supabase Connected`);
-    console.log(`${colors.green("✓")} Gemini Connected`);
+    console.log(`${colors.green("✓")} ${aiProviderName} Connected`);
     console.log(`${colors.green("✓")} Qdrant Running`);
     console.log(`${colors.green("✓")} Vector Collection Ready`);
     console.log(`${colors.green("✓")} AI Services Initialized`);
@@ -36,8 +41,8 @@ const printDashboard = (stats) => {
     console.log(`${colors.bold("Database")}    : ${colors.green("MongoDB Atlas")}`);
     console.log(`${colors.bold("Storage")}     : ${colors.green("Supabase")}`);
     console.log(`${colors.bold("Vector DB")}   : ${colors.green("Qdrant")}`);
-    console.log(`${colors.bold("AI Model")}    : ${colors.green("Gemini 2.5 Flash")}`);
-    console.log(`${colors.bold("Embeddings")}  : ${colors.green("Gemini text-embedding-004")}`);
+    console.log(`${colors.bold("AI Model")}    : ${colors.green(aiModelName)}`);
+    console.log(`${colors.bold("Embeddings")}  : ${colors.green(embeddingModelName)}`);
     console.log(colors.cyan("──────────────────────────────────────────────\n"));
 
     console.log(colors.bold(colors.green("Ready to accept requests.")));

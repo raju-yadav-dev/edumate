@@ -8,16 +8,30 @@ if (fs.existsSync(envPath)) {
     require("dotenv").config();
 }
 
+// Auto-detect LLM provider if not set
+if (!process.env.LLM_PROVIDER) {
+    if (process.env.OLLAMA_MODEL || !process.env.GEMINI_API_KEY) {
+        process.env.LLM_PROVIDER = "ollama";
+        console.log(colors.yellow("💡 LLM_PROVIDER not set. Automatically detected and set to 'ollama'."));
+    } else {
+        process.env.LLM_PROVIDER = "gemini";
+        console.log(colors.cyan("💡 LLM_PROVIDER not set. Automatically defaulted to 'gemini'."));
+    }
+}
+
 const REQUIRED_VARS = [
     "PORT",
     "MONGODB_URI",
     "JWT_SECRET",
     "SUPABASE_URL",
     "SUPABASE_SERVICE_ROLE_KEY",
-    "GEMINI_API_KEY",
     "QDRANT_URL",
     "QDRANT_COLLECTION"
 ];
+
+if (process.env.LLM_PROVIDER !== "ollama") {
+    REQUIRED_VARS.push("GEMINI_API_KEY");
+}
 
 /**
  * Verifies that the .env file exists and contains all required variables

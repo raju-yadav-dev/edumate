@@ -16,6 +16,11 @@ const printBanner = () => {
 };
 
 const printDashboard = (stats = {}) => {
+    const isOllama = process.env.LLM_PROVIDER === "ollama";
+    const aiProviderName = isOllama ? "Ollama" : "Gemini";
+    const aiModelName = isOllama ? `${process.env.OLLAMA_MODEL || "qwen2.5:3b"} (Ollama)` : "Gemini 2.5 Flash";
+    const embeddingModelName = isOllama ? `${process.env.OLLAMA_EMBEDDING_MODEL || process.env.OLLAMA_MODEL || "qwen2.5:3b"} (Ollama)` : "Gemini text-embedding-004";
+
     console.log(logger.cyan("══════════════════════════════════════════════"));
     console.log(logger.bold(logger.green("🚀 EduMate Development Environment")));
     console.log(logger.cyan("══════════════════════════════════════════════"));
@@ -24,7 +29,7 @@ const printDashboard = (stats = {}) => {
     console.log(`${logger.green("✓")} npm`);
     console.log(`${logger.green("✓")} MongoDB Connected`);
     console.log(`${logger.green("✓")} Supabase Connected`);
-    console.log(`${logger.green("✓")} Gemini Connected`);
+    console.log(`${logger.green("✓")} ${aiProviderName} Connected`);
     console.log(`${logger.green("✓")} Qdrant Running`);
     console.log(`${logger.green("✓")} AI Initialized`);
     console.log(`${logger.green("✓")} Backend Started`);
@@ -49,11 +54,11 @@ const printDashboard = (stats = {}) => {
     console.log();
     
     console.log(logger.bold("AI"));
-    console.log(logger.green("Gemini 2.5 Flash"));
+    console.log(logger.green(aiModelName));
     console.log();
     
     console.log(logger.bold("Embeddings"));
-    console.log(logger.green("Gemini text-embedding-004"));
+    console.log(logger.green(embeddingModelName));
     
     console.log(logger.cyan("──────────────────────────────────────────────"));
     console.log(logger.bold(logger.green("Ready to accept requests")));

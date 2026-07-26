@@ -1,4 +1,9 @@
 const gemini = require("../config/gemini");
+const ollama = require("../ai/config/ollama");
+
+const getProvider = () => {
+    return process.env.LLM_PROVIDER === "ollama" ? ollama : gemini;
+};
 
 /**
  * Generates vector embedding for a single text using Gemini text-embedding-004
@@ -9,7 +14,8 @@ const generateEmbedding = async (text) => {
     if (!text || typeof text !== "string") {
         throw new Error("Text must be a non-empty string.");
     }
-    return gemini.generateEmbedding(text);
+    const provider = getProvider();
+    return provider.generateEmbedding(text);
 };
 
 /**
@@ -28,6 +34,13 @@ const generateEmbeddingsBatch = async (texts) => {
         return [];
     }
 
+    const provider = getProvider();
+
+    // If using Ollama, let its batch method handle batching directly
+    if (process.env.LLM_PROVIDER === "ollama") {
+        return provider.generateEmbeddingsBatch(sanitizedTexts);
+    }
+
     // Google API allows batch request up to 100 requests per batch.
     // We will batch-request in sub-batches of 50 to avoid API payload limit issues.
     const batchSize = 50;
@@ -35,7 +48,7 @@ const generateEmbeddingsBatch = async (texts) => {
 
     for (let i = 0; i < sanitizedTexts.length; i += batchSize) {
         const subBatch = sanitizedTexts.slice(i, i + batchSize);
-        const subEmbeddings = await gemini.generateEmbeddingsBatch(subBatch);
+        const subEmbeddings = await provider.generateEmbeddingsBatch(subBatch);
         results.push(...subEmbeddings);
     }
 
