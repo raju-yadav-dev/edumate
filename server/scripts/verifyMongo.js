@@ -1,6 +1,14 @@
 const mongoose = require("mongoose");
 const colors = require("./colors");
 
+// Set fallback DNS servers to resolve MongoDB SRV records on Windows networks/ISPs
+try {
+    const dns = require("dns");
+    dns.setServers(["1.1.1.1", "8.8.8.8"]);
+} catch (e) {
+    // Ignore DNS custom configuration error
+}
+
 /**
  * Connects and checks health of the MongoDB instance
  * @returns {Promise<boolean>}

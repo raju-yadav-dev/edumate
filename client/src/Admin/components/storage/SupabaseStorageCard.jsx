@@ -7,7 +7,7 @@ function SupabaseStorageCard({ supabase = {} }) {
     const largestFileSize = Number(supabase.largestFile?.size || supabase.largestFile?.fileSize || 0);
 
     return (
-        <article className="storage-dashboard-card">
+        <article className="storage-dashboard-card supabase-card">
             <div className="panel-title">
                 <div>
                     <h2>Supabase Storage</h2>

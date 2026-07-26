@@ -1,4 +1,5 @@
 const { execSync } = require("child_process");
+const path = require("path");
 const colors = require("./colors");
 
 /**
@@ -31,9 +32,10 @@ const verifyDependencies = () => {
     ];
 
     const missing = [];
+    const pkgDir = path.resolve(__dirname, "..");
     for (const dep of requiredDeps) {
         try {
-            require.resolve(dep);
+            require.resolve(dep, { paths: [pkgDir] });
         } catch (e) {
             missing.push(dep);
         }

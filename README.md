@@ -221,82 +221,69 @@ edumate/
 
 ---
 
-# ⚙️ Installation
+# ⚙️ Installation & Developer Workflow
 
-## Clone Repository
+EduMate is structured as an npm workspaces monorepo. All packages, configurations, docker compose networks, databases, and servers are controlled from the repository root.
 
-```bash
-git clone https://github.com/YOUR_USERNAME/edumate.git
-```
+## Quick Start
 
-```bash
-cd edumate
-```
+1. **Clone the Repository:**
+   ```bash
+   git clone <repo>
+   cd edumate
+   ```
 
----
+2. **Install Root and Workspace Dependencies:**
+   ```bash
+   npm install
+   ```
 
-## Install Client
+3. **Run One-Time Initial Setup:**
+   This command automatically configures environment files, pulls Docker images, sets up databases, connects to Supabase, and initializes Qdrant collections.
+   ```bash
+   npm run setup
+   ```
 
-```bash
-cd client
-npm install
-```
+4. **Launch the Development Environment:**
+   Run both frontend and backend concurrently with live hot-reloading:
+   ```bash
+   npm run dev
+   ```
 
----
+## Master CLI Commands
 
-## Install Server
+All commands must be executed from the repository root:
 
-```bash
-cd ../server
-npm install
-```
+- `npm install` - Installs all dependencies for root, client, and server workspaces into a shared root folder.
+- `npm run setup` - Validates Node.js/npm, copies environment templates, provisions containers, and checks database connections.
+- `npm run dev` - Pre-flights system checks and spins up Vite and Express servers concurrently with colored log prefixing.
+- `npm run doctor` - Audits external integrations (MongoDB, Supabase, Gemini, Qdrant) and fixes missing configs.
+- `npm run clean` - Cleans caches, logs, build assets, and redundant node_modules folders.
+- `npm run reset` - Stops compose services, purges cache, recreates vector database indexes, and rebuilds the project.
+- `npm run build` - Builds production bundles for frontend and backend.
+- `npm run format` - Standardizes syntax across frontend, backend, and scripts.
 
 ---
 
 # 🔐 Environment Variables
 
-Create a `.env` file inside the **server** directory.
+A single `.env` file located at the repository root governs configurations for both the client (via Vite) and server:
 
 ```env
 PORT=5000
+NODE_ENV=development
+CLIENT_URL=http://localhost:5173
 
 MONGODB_URI=your_mongodb_connection_string
-
 JWT_SECRET=your_jwt_secret
 
+SUPABASE_URL=your_supabase_url
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
+
 GEMINI_API_KEY=your_gemini_api_key
-```
 
----
-
-# ▶ Running the Project
-
-## Backend
-
-```bash
-cd server
-npm run dev
-```
-
-Runs on:
-
-```
-http://localhost:5000
-```
-
----
-
-## Frontend
-
-```bash
-cd client
-npm run dev
-```
-
-Runs on:
-
-```
-http://localhost:5173
+QDRANT_URL=http://localhost:6333
+QDRANT_COLLECTION=edumate
 ```
 
 ---

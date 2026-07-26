@@ -37,9 +37,7 @@ const ensureCollection = async () => {
     }
 };
 
-// Trigger background validation check
-ensureCollection().catch(() => {});
-
+// Export client resources without triggering side-effect auto-creation on require
 module.exports = {
     client,
     collectionName,

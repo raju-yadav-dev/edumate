@@ -4,10 +4,7 @@
   "description": "",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node scripts/startup.js",
-    "setup": "node scripts/bootstrap.js",
-    "doctor": "node scripts/doctor.js"
+    "start": "node server.js"
   },
   "keywords": [],
   "author": "",

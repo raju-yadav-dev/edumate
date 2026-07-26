@@ -1,14 +1,13 @@
 const { INSTITUTIONAL_INTENTS } = require("../constants/intents");
 
-const validateResponse = ({ intent, retrievedContext, generatedAnswer, providerSuccess }) => {
-    const institutionalAnswer = INSTITUTIONAL_INTENTS.includes(intent);
-    const hasTrustedSources = Boolean(retrievedContext?.sources?.length);
+const validateResponse = ({ intent, retrievedContext, generatedAnswer, providerSuccess, questionType }) => {
+    const hasTrustedSources = Boolean(retrievedContext?.chunks?.length || retrievedContext?.sources?.length);
 
-    if (institutionalAnswer && !hasTrustedSources) {
+    if (questionType === "university_specific" && !hasTrustedSources) {
         return {
             valid: false,
             confidence: "low",
-            reason: "No trusted institutional source was available."
+            reason: "No university-specific document context was retrieved for this university query."
         };
     }
 
@@ -18,6 +17,33 @@ const validateResponse = ({ intent, retrievedContext, generatedAnswer, providerS
             confidence: "low",
             reason: "No AI provider response was available."
         };
+    }
+
+    const citationRegex = /\[([^\]]+)\]/g;
+    let match;
+    const citedDocs = new Set();
+    while ((match = citationRegex.exec(generatedAnswer)) !== null) {
+        const citationContent = match[1];
+        const docName = citationContent.split(",")[0].trim().toLowerCase();
+        if (!docName.includes("http") && !docName.includes("www") && docName.endsWith(".pdf")) {
+            citedDocs.add(docName);
+        }
+    }
+
+    if (citedDocs.size > 0 && retrievedContext?.chunks) {
+        const retrievedDocNames = new Set(
+            retrievedContext.chunks.map(chunk => (chunk.metadata?.originalName || "").toLowerCase())
+        );
+
+        for (const citedDoc of citedDocs) {
+            if (!retrievedDocNames.has(citedDoc)) {
+                return {
+                    valid: false,
+                    confidence: "low",
+                    reason: `Hallucination detected: Response cited "${citedDoc}" which was not in the retrieved documents.`
+                };
+            }
+        }
     }
 
     return {

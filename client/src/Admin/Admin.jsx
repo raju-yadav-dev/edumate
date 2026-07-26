@@ -81,7 +81,13 @@ const DEMO_STORAGE_STATS = {
     },
     userCount: 18,
     adminCount: 0,
-    systemStatus: { groq: "online", chromadb: "online" }
+    qdrant: {
+        connected: true,
+        status: "green",
+        vectors: 12540,
+        collection: "edumate"
+    },
+    systemStatus: { groq: "online", qdrant: "online" }
 };
 
 const DEMO_DOCUMENTS = [
@@ -329,7 +335,7 @@ function Admin({ mode = "auto" }) {
         {
             label: "Chunks",
             value: knowledgeStats.totalChunks ?? 0,
-            note: "Chroma records",
+            note: "Qdrant vectors",
             tone: "violet",
             Icon: Database
         },
@@ -342,7 +348,7 @@ function Admin({ mode = "auto" }) {
         },
         {
             label: "API Status",
-            value: systemStatus.groq === "offline" || systemStatus.chromadb === "offline" ? "Issue" : "Healthy",
+            value: systemStatus.groq === "offline" || systemStatus.qdrant === "offline" ? "Issue" : "Healthy",
             note: "All systems",
             tone: "emerald",
             Icon: Shield

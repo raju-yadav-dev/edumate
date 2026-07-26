@@ -108,77 +108,72 @@
 
     /* Brand */
 
-    --primary:#C8FF49;
+    --primary:#5865f2; /* Qdrant Vibrant Blue/Indigo Button Color */
 
-    --primary-hover:#EDFF9B;
+    --primary-hover:#4a57e3;
 
-    --secondary:#34EEFF;
+    --secondary:#e93c4c; /* Qdrant Coral Red Logo Color */
 
-    --accent:#6C63FF;
+    --accent:#e93c4c;
 
     --success:#8DFF3E;
 
     --warning:#FBBF24;
 
-    --danger:#F87171;
+    --danger:#e93c4c;
 
 
     /* Background */
 
-    --bg:#05070B;
+    --bg:#0b0f19; /* Qdrant Main Panel Background */
 
     --ambient-glow:
         radial-gradient(circle at top left,
-            rgba(200,255,73,.22),
-            transparent 30%),
+            rgba(88, 101, 242, 0.08),
+            transparent 35%),
         radial-gradient(circle at top right,
-            rgba(52,238,255,.16),
-            transparent 28%),
-        radial-gradient(circle at bottom left,
-            rgba(108,99,255,.12),
-            transparent 42%);
+            rgba(233, 60, 76, 0.03),
+            transparent 25%);
 
-    --surface:rgba(11,16,22,.88);
+    --surface:#0a0d15; /* Qdrant Sidebar Background */
 
-    --card:rgba(14,20,30,.92);
+    --card:#131924; /* Qdrant Card Container Background */
 
 
     /* Text */
 
     --text:#FFFFFF;
 
-    --text-light:#C9D3DF;
+    --text-light:#8a99ad; /* Qdrant secondary text color */
 
-    --on-primary:#081019;
+    --on-primary:#FFFFFF;
 
     --heading:#FFFFFF;
 
 
     /* Border */
 
-    --border:rgba(141,255,62,.15);
+    --border:#1f2738; /* Qdrant Card and Grid Borders */
 
 
     /* Glass */
 
-    --glass:rgba(10,17,26,.88);
+    --glass:rgba(10, 13, 21, 0.9);
 
-    --glass-border:rgba(200,255,73,.30);
+    --glass-border:rgba(88, 101, 242, 0.15);
 
 
     /* Shadow */
 
     --shadow:
-        0 0 0 1px rgba(200,255,73,.10),
-        0 0 34px rgba(200,255,73,.24),
-        0 22px 60px rgba(0,0,0,.52);
+        0 0 0 1px rgba(88, 101, 242, 0.04),
+        0 4px 20px rgba(0, 0, 0, 0.4);
 
     --shadow-hover:
-        0 0 0 1px rgba(200,255,73,.18),
-        0 0 48px rgba(200,255,73,.34),
-        0 28px 72px rgba(0,0,0,.56);
+        0 0 0 1px rgba(88, 101, 242, 0.08),
+        0 8px 30px rgba(0, 0, 0, 0.5);
 
-    --neon-shadow:0 0 28px rgba(200,255,73,.34);
+    --neon-shadow:0 0 20px rgba(88, 101, 242, 0.15);
 
 
     /* Radius */

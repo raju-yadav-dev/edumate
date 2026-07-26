@@ -6,11 +6,13 @@ import { ChevronDown, RefreshCcw } from "lucide-react";
 import CombinedStorageCard from "./CombinedStorageCard";
 import DatabaseStorageCard from "./DatabaseStorageCard";
 import SupabaseStorageCard from "./SupabaseStorageCard";
+import QdrantStorageCard from "./QdrantStorageCard";
 
 const serviceOptions = [
     { value: "all", label: "All Services" },
     { value: "database", label: "MongoDB (Atlas)" },
     { value: "files", label: "Supabase Storage" },
+    { value: "qdrant", label: "Qdrant Vector DB" },
     { value: "combined", label: "Combined Storage" },
 ];
 
@@ -128,11 +130,14 @@ function StorageOverview({ stats = {}, onRefresh }) {
 
                 {service === "all" || service === "files" ? <SupabaseStorageCard supabase={stats.supabase} /> : null}
 
+                {service === "all" || service === "qdrant" ? <QdrantStorageCard qdrant={stats.qdrant} /> : null}
+
                 {service === "all" || service === "combined" ? (
                     <CombinedStorageCard
                         combined={stats.combined}
                         mongodb={stats.mongodb}
                         supabase={stats.supabase}
+                        qdrant={stats.qdrant}
                     />
                 ) : null}
 

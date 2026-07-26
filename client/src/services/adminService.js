@@ -30,17 +30,24 @@ const percent = (used, total) => {
 };
 
 const normalizeStorageStats = (stats = {}) => {
-    if (stats.mongodb && stats.supabase && stats.combined) {
-        return stats;
-    }
-
     const limit = Number(stats.limitBytes || 0);
-    const mongoUsed = Number(stats.mongodbBytes ?? stats.dataBytes ?? 0);
-    const supabaseUsed = Number(stats.supabaseBytes ?? stats.documentBytes ?? 0);
-    const combinedUsed = Number(stats.usedBytes ?? mongoUsed + supabaseUsed);
-    const combinedTotal = Number(stats.totalBytes ?? stats.combinedLimitBytes ?? limit);
-    const supabaseQuota = Number(stats.supabaseQuotaBytes ?? limit);
-    const mongoTotal = Number(stats.mongodbStorageSize ?? stats.mongodbTotalBytes ?? limit);
+
+    // MongoDB normalization
+    const mongoUsed = Number(stats.mongodb?.used ?? stats.mongodbBytes ?? stats.dataBytes ?? 0);
+    const mongoTotal = Number(stats.mongodb?.total ?? stats.mongodbStorageSize ?? stats.mongodbTotalBytes ?? limit);
+
+    // Supabase normalization
+    const supabaseUsed = Number(stats.supabase?.used ?? stats.supabaseBytes ?? stats.documentBytes ?? 0);
+    const supabaseQuota = Number(stats.supabase?.quota ?? stats.supabaseQuotaBytes ?? limit);
+
+    // Qdrant normalization & estimated byte usage (4KB per vector points/embeddings)
+    const qdrantVectors = Number(stats.qdrant?.vectors ?? stats.knowledgeBase?.totalChunks ?? stats.totalChunks ?? 0);
+    const qdrantUsed = qdrantVectors * 4096;
+    const qdrantTotal = 512 * 1024 * 1024; // 512 MB hard quota
+
+    // Combined normalization (includes mongo, supabase, and qdrant)
+    const combinedUsed = Number(stats.combined?.used ?? stats.usedBytes ?? (mongoUsed + supabaseUsed + qdrantUsed));
+    const combinedTotal = Number(stats.combined?.total ?? stats.totalBytes ?? (mongoTotal + supabaseQuota + qdrantTotal));
 
     return {
         ...stats,
@@ -49,46 +56,51 @@ const normalizeStorageStats = (stats = {}) => {
             used: mongoUsed,
             remaining: Math.max(mongoTotal - mongoUsed, 0),
             usage: percent(mongoUsed, mongoTotal),
-            collections: stats.mongodbCollections || stats.collections || 0,
-            documents: stats.mongodbObjects || stats.documentCount || 0,
-            indexesSize: stats.mongodbIndexSize || 0,
-            ...(stats.mongodb || {})
+            collections: stats.mongodb?.collections ?? stats.mongodbCollections ?? stats.collections ?? 0,
+            documents: stats.mongodb?.documents ?? stats.mongodbObjects ?? stats.documentCount ?? 0,
+            indexesSize: stats.mongodb?.indexesSize ?? stats.mongodbIndexSize ?? 0
         },
         supabase: {
-            bucket: stats.supabaseBucket || stats.bucket || "",
-            files: stats.supabaseFiles ?? stats.documentCount ?? 0,
+            bucket: stats.supabase?.bucket ?? stats.supabaseBucket ?? stats.bucket ?? "",
+            files: stats.supabase?.files ?? stats.supabaseFiles ?? stats.documentCount ?? 0,
             used: supabaseUsed,
             remaining: Math.max(supabaseQuota - supabaseUsed, 0),
-            averageFileSize: stats.supabaseAverageFileSize || (stats.documentCount ? supabaseUsed / stats.documentCount : 0),
-            largestFile: stats.supabaseLargestFile || null,
+            averageFileSize: stats.supabase?.averageFileSize ?? stats.supabaseAverageFileSize ?? (stats.documentCount ? supabaseUsed / stats.documentCount : 0),
+            largestFile: stats.supabase?.largestFile ?? stats.supabaseLargestFile ?? null,
             quota: supabaseQuota,
-            usage: percent(supabaseUsed, supabaseQuota),
-            ...(stats.supabase || {})
+            usage: percent(supabaseUsed, supabaseQuota)
+        },
+        qdrant: {
+            connected: stats.qdrant?.connected ?? false,
+            status: stats.qdrant?.status ?? "offline",
+            vectors: qdrantVectors,
+            collection: stats.qdrant?.collection ?? "edumate",
+            used: qdrantUsed,
+            total: qdrantTotal,
+            remaining: Math.max(qdrantTotal - qdrantUsed, 0),
+            usage: percent(qdrantUsed, qdrantTotal)
         },
         combined: {
             total: combinedTotal,
             used: combinedUsed,
-            remaining: Math.max((stats.availableBytes ?? combinedTotal - combinedUsed), 0),
-            usage: percent(combinedUsed, combinedTotal),
-            ...(stats.combined || {})
+            remaining: Math.max(combinedTotal - combinedUsed, 0),
+            usage: percent(combinedUsed, combinedTotal)
         },
         knowledgeBase: {
-            totalDocuments: stats.documentCount || 0,
-            totalPages: stats.totalPages || 0,
-            totalChunks: stats.totalChunks || 0,
-            totalEmbeddings: stats.totalEmbeddings || 0,
-            processingQueue: stats.processingQueue || 0,
-            pendingDocuments: stats.pendingDocuments || 0,
-            successfulDocuments: stats.successfulDocuments || 0,
-            failedDocuments: stats.failedDocuments || 0,
-            ...(stats.knowledgeBase || {})
+            totalDocuments: stats.documentCount ?? stats.knowledgeBase?.totalDocuments ?? 0,
+            totalPages: stats.totalPages ?? stats.knowledgeBase?.totalPages ?? 0,
+            totalChunks: stats.totalChunks ?? stats.knowledgeBase?.totalChunks ?? 0,
+            totalEmbeddings: stats.totalEmbeddings ?? stats.knowledgeBase?.totalEmbeddings ?? 0,
+            processingQueue: stats.processingQueue ?? stats.knowledgeBase?.processingQueue ?? 0,
+            pendingDocuments: stats.pendingDocuments ?? stats.knowledgeBase?.pendingDocuments ?? 0,
+            successfulDocuments: stats.successfulDocuments ?? stats.knowledgeBase?.successfulDocuments ?? 0,
+            failedDocuments: stats.failedDocuments ?? stats.knowledgeBase?.failedDocuments ?? 0
         },
         systemStatus: {
-            mongodb: mongoUsed || stats.mongodb ? "connected" : "unknown",
-            supabase: stats.supabaseConfigured === false ? "not configured" : (supabaseUsed || stats.supabase ? "connected" : "unknown"),
-            groq: "unknown",
-            chromadb: "unknown",
-            ...(stats.systemStatus || {})
+            mongodb: mongoUsed || stats.mongodb?.connected ? "connected" : "unknown",
+            supabase: stats.supabaseConfigured === false || stats.supabase?.configured === false ? "not configured" : (supabaseUsed || stats.supabase ? "connected" : "unknown"),
+            groq: stats.systemStatus?.groq ?? "unknown",
+            qdrant: stats.qdrant?.connected || stats.systemStatus?.qdrant === "connected" ? "connected" : "offline"
         }
     };
 };

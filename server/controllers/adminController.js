@@ -261,7 +261,7 @@ const getStorageStats = asyncHandler(async (req, res) => {
         role: { $nin: ["admin", "super_admin"] }
     };
 
-    const [documentStorage, categoryStorage, documentRecords, userRecords, adminRecords, mongoStats, kbStats] = await Promise.all([
+    const [documentStorage, categoryStorage, documentRecords, userRecords, adminRecords, mongoStats, kbStats, qdrantStats] = await Promise.all([
         Document.aggregate([
             { $match: activeDocumentFilter },
             {
@@ -354,7 +354,26 @@ const getStorageStats = asyncHandler(async (req, res) => {
                     }
                 }
             }
-        ])
+        ]),
+        (async () => {
+            try {
+                const { client: qdrantClient, collectionName: qdrantCollection } = require("../ai/config/qdrant");
+                const stats = await qdrantClient.getCollection(qdrantCollection);
+                return {
+                    connected: true,
+                    status: stats.status || "green",
+                    vectorsCount: stats.vectors_count || stats.points_count || 0,
+                    collection: qdrantCollection
+                };
+            } catch (err) {
+                return {
+                    connected: false,
+                    status: "offline",
+                    vectorsCount: 0,
+                    collection: process.env.QDRANT_COLLECTION || "edumate"
+                };
+            }
+        })()
     ]);
 
     const documentBytes = documentStorage[0]?.bytes || 0;
@@ -431,6 +450,12 @@ const getStorageStats = asyncHandler(async (req, res) => {
             indexesSize: mongoStats.indexesSize || 0
         },
         supabase: supabaseStats,
+        qdrant: {
+            connected: qdrantStats.connected,
+            status: qdrantStats.status,
+            vectors: qdrantStats.vectorsCount,
+            collection: qdrantStats.collection
+        },
         combined: {
             total: totalBytes,
             used: usedBytes,
@@ -451,7 +476,7 @@ const getStorageStats = asyncHandler(async (req, res) => {
             mongodb: mongoStats.connected ? "connected" : "unknown",
             supabase: supabaseStats.configured ? "connected" : "not configured",
             groq: groqStatus,
-            chromadb: "not_configured"
+            qdrant: qdrantStats.connected ? "connected" : "offline"
         }
     });
 });

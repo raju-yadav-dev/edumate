@@ -1,5 +1,23 @@
 {
-  "dependencies": {
-    "react-router-dom": "^7.18.1"
+  "name": "edumate-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "scripts": {
+    "setup": "node scripts/setup.js",
+    "dev": "node scripts/startup.js",
+    "build": "npm run build --workspaces --if-present",
+    "doctor": "node scripts/doctor.js",
+    "lint": "npm run lint --workspaces --if-present",
+    "clean": "node scripts/clean.js",
+    "format": "node scripts/format.js",
+    "start": "node server/server.js",
+    "reset": "node scripts/reset.js"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
   }
 }

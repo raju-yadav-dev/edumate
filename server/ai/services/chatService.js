@@ -1,9 +1,10 @@
 const Chat = require("../../models/Chat");
-const { classifyIntent } = require("../../services/intentService");
+const { classifyIntent, classifyQuestionType, QUESTION_TYPES } = require("../../services/intentService");
 const { decide } = require("../../services/decisionEngine");
 const mapService = require("../../services/mapService");
 const responseValidator = require("../../services/responseValidator");
 const responseFormatter = require("../../services/responseFormatter");
+const { SOURCE_LABELS } = responseFormatter;
 const AI_CONSTANTS = require("../constants/aiConstants");
 
 // AI module services
@@ -14,6 +15,7 @@ const rerankService = require("./rerankService");
 const promptService = require("./promptService");
 const conversationService = require("./conversationService");
 const citationService = require("./citationService");
+const webSearchService = require("./webSearchService");
 
 const deterministicGreeting = (user) => ({
     answer: `Hello ${user?.fullName || "there"}. I can help with institutional questions, documents, campus services, routes, and academic support.`,
@@ -105,7 +107,7 @@ const getOrCreateChat = async ({ user, conversationId, question }) => {
 };
 
 /**
- * Handles chatbot queries with RAG matching using Gemini 2.5 Flash and ChromaDB
+ * Handles chatbot queries with RAG matching using Gemini 2.5 Flash and Qdrant
  */
 const askQuestion = async ({ user, question, conversationId }) => {
     const startedAt = Date.now();
@@ -119,6 +121,7 @@ const askQuestion = async ({ user, question, conversationId }) => {
     }
 
     const intentResult = classifyIntent(normalizedQuestion);
+    const questionType = classifyQuestionType(normalizedQuestion, intentResult.intent);
     const decision = decide(intentResult);
 
     // 1. Retrieve dialogue history memory context
@@ -129,6 +132,9 @@ const askQuestion = async ({ user, question, conversationId }) => {
     });
 
     let retrievedChunks = [];
+    let webResults = [];
+    let activeQuestionType = questionType;
+    let sourceLabel = SOURCE_LABELS.UNIVERSITY;
     let formatted;
     let provider = "system";
 
@@ -148,11 +154,12 @@ const askQuestion = async ({ user, question, conversationId }) => {
             ? responseFormatter.formatAnswer({
                 answer: mapResult.answer,
                 confidence: "high",
-                sources: mapResult.sources
+                sources: mapResult.sources,
+                sourceLabel: SOURCE_LABELS.UNIVERSITY
             })
             : responseFormatter.formatUnavailable({ reason: mapResult.answer });
     } else {
-        // 2. Perform RAG pipeline
+        // Perform RAG and Web Search Pipeline
         try {
             // A. Generate embedding for query
             const queryEmbedding = await embeddingService.getQueryEmbedding(normalizedQuestion);
@@ -168,48 +175,84 @@ const askQuestion = async ({ user, question, conversationId }) => {
                 filter
             });
 
-            // C. Rerank extension point
+            // C. Rerank retrieved chunks
             const reranked = await rerankService.rerank(normalizedQuestion, chunks);
+            
+            // Calculate max score from reranked chunks
+            const maxScore = reranked.length > 0 ? Math.max(...reranked.map(c => c.score)) : 0;
 
-            // D. Threshold filtering
-            retrievedChunks = reranked.filter((chunk) => chunk.score >= AI_CONSTANTS.SIMILARITY_THRESHOLD);
+            console.log(`RAG Max Similarity Score: ${maxScore.toFixed(3)} for query: "${normalizedQuestion}"`);
+
+            // D. Confidence based decision rules
+            if (maxScore > 0.80) {
+                // High confidence university resource match
+                retrievedChunks = reranked.filter((chunk) => chunk.score >= AI_CONSTANTS.SIMILARITY_THRESHOLD);
+                webResults = [];
+                activeQuestionType = QUESTION_TYPES.UNIVERSITY_SPECIFIC;
+                sourceLabel = SOURCE_LABELS.UNIVERSITY;
+            } else if (maxScore >= 0.50 && maxScore <= 0.80) {
+                // Medium confidence -> Hybrid RAG (Combine university resource + web search)
+                retrievedChunks = reranked.filter((chunk) => chunk.score >= AI_CONSTANTS.SIMILARITY_THRESHOLD);
+                webResults = await webSearchService.searchWeb(normalizedQuestion);
+                activeQuestionType = QUESTION_TYPES.HYBRID;
+                sourceLabel = SOURCE_LABELS.COMBINED;
+            } else {
+                // Low confidence -> Web Search Only
+                retrievedChunks = [];
+                webResults = await webSearchService.searchWeb(normalizedQuestion);
+                activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
+                sourceLabel = SOURCE_LABELS.WEB;
+            }
         } catch (e) {
-            console.error("Vector search or retrieval failed:", e.message);
+            console.error("Hybrid RAG pipeline failed:", e);
+            // Fallback to web search if Qdrant is down or embedding fails
+            try {
+                webResults = await webSearchService.searchWeb(normalizedQuestion);
+                activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
+                sourceLabel = SOURCE_LABELS.WEB;
+            } catch (err) {
+                console.error("Web search fallback failed:", err);
+            }
         }
 
-        const sources = citationService.formatCitations(retrievedChunks);
+        const sources = citationService.formatCitations(retrievedChunks, webResults);
 
+        // If we require verified context but have no sources, mark as unavailable
         if (decision.requiresVerifiedContext && sources.length === 0) {
             formatted = responseFormatter.formatUnavailable({
                 reason: AI_CONSTANTS.FALLBACK_RESPONSE
             });
         } else {
-            // E. Assemble grounded system instruction and user details prompts
+            // E. Assemble message prompts
             const messages = promptService.buildPromptMessages({
                 question: normalizedQuestion,
                 intent: intentResult.intent,
                 retrievedChunks,
+                webResults,
                 historyText,
-                user: activeUser
+                user: activeUser,
+                questionType: activeQuestionType
             });
 
             // F. Call Gemini completion endpoint
             const textResponse = await gemini.generateCompletion(messages);
             provider = "gemini-flash";
 
-            // G. Validate the grounded quality of response
+            // G. Validate response against hallucinations
             const validation = responseValidator.validateResponse({
                 intent: intentResult.intent,
                 retrievedContext: { chunks: retrievedChunks, sources },
                 generatedAnswer: textResponse,
-                providerSuccess: true
+                providerSuccess: true,
+                questionType: activeQuestionType
             });
 
             formatted = validation.valid
                 ? responseFormatter.formatAnswer({
                     answer: textResponse,
                     confidence: validation.confidence,
-                    sources
+                    sources,
+                    sourceLabel
                 })
                 : responseFormatter.formatUnavailable({ reason: validation.reason });
         }
@@ -255,6 +298,7 @@ const askQuestion = async ({ user, question, conversationId }) => {
         intentConfidence: intentResult.confidence,
         confidence: formatted.confidence,
         sources: formatted.sources,
+        sourceLabel: formatted.sourceLabel || sourceLabel,
         provider,
         responseTimeMs
     };

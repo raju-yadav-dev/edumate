@@ -235,7 +235,7 @@ const archiveDocument = async ({ documentId, user }) => {
     document.updatedBy = user._id;
     await document.save();
 
-    // Clean up vector index chunks from ChromaDB via AI service
+    // Clean up vector index chunks from Qdrant via AI service
     await indexingService.deleteDocumentIndex(documentId);
 
     return document;
@@ -326,13 +326,13 @@ const replaceDocument = async ({ documentId, file, body, user }) => {
 
     await document.save();
 
-    // Rebuild index in ChromaDB
+    // Rebuild index in Qdrant
     if (file) {
         indexingService.indexDocumentBackground(document._id, file.buffer).catch((err) => {
             console.error(`Failed to trigger re-indexing on document replacement for ${document._id}:`, err);
         });
     } else {
-        // Metadata changed. Force a full index rebuild to align metadatas in ChromaDB.
+        // Metadata changed. Force a full index rebuild to align metadatas in Qdrant.
         await indexingService.deleteDocumentIndex(document._id);
         indexingService.indexDocumentBackground(document._id).catch(() => {});
     }
@@ -366,7 +366,7 @@ const renameDocument = async ({ documentId, originalName, user }) => {
     document.updatedBy = user._id;
     await document.save();
 
-    // Rebuild index in ChromaDB to update originalName metadata
+    // Rebuild index in Qdrant to update originalName metadata
     await indexingService.deleteDocumentIndex(document._id);
     indexingService.indexDocumentBackground(document._id).catch(() => {});
 
@@ -417,7 +417,7 @@ const moveDocument = async ({ documentId, category, user }) => {
     document.updatedBy = user._id;
     await document.save();
 
-    // Rebuild index in ChromaDB to update category metadata
+    // Rebuild index in Qdrant to update category metadata
     await indexingService.deleteDocumentIndex(document._id);
     indexingService.indexDocumentBackground(document._id).catch(() => {});
 

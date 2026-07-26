@@ -54,6 +54,64 @@ const classifyIntent = (question) => {
     };
 };
 
+const QUESTION_TYPES = {
+    UNIVERSITY_SPECIFIC: "university_specific",
+    GENERAL_KNOWLEDGE: "general_knowledge",
+    HYBRID: "hybrid"
+};
+
+const classifyQuestionType = (question, intent) => {
+    const normalized = String(question || "").toLowerCase();
+
+    const universityKeywords = [
+        "fee", "fees", "tuition", "admission", "admissions", "enroll", "apply", "routine", 
+        "timetable", "exam", "exams", "schedule", "calendar", "marks", "result", "results", 
+        "faculty", "department", "departments", "syllabus", "notice", "notices", "announcement", 
+        "hostel", "mess", "library", "scholarship", "scholarships", "placement", "placements", 
+        "course", "courses", "rules", "regulation", "attendance", "assignment", "assignments", 
+        "project", "lab", "labs"
+    ];
+
+    const generalKeywords = [
+        "programming", "java", "python", "react", "javascript", "html", "css", "c\\+\\+", 
+        "artificial intelligence", "ai", "machine learning", "ml", "dsa", "data structure", 
+        "algorithm", "algorithms", "networking", "cyber security", "security", "mathematics", 
+        "physics", "current affairs", "latest news", "tutorial", "explain", "what is", 
+        "how does", "binary search", "database management", "dbms"
+    ];
+
+    const hasUniversity = universityKeywords.some(keyword => {
+        const regex = new RegExp(`\\b${keyword}\\b`, "i");
+        return regex.test(normalized);
+    });
+
+    const hasGeneral = generalKeywords.some(keyword => {
+        const regex = new RegExp(`\\b${keyword}\\b`, "i");
+        return regex.test(normalized);
+    });
+
+    if (hasUniversity && hasGeneral) {
+        return QUESTION_TYPES.HYBRID;
+    }
+    
+    if (hasUniversity) {
+        return QUESTION_TYPES.UNIVERSITY_SPECIFIC;
+    }
+
+    if (hasGeneral) {
+        return QUESTION_TYPES.GENERAL_KNOWLEDGE;
+    }
+
+    const { INSTITUTIONAL_INTENTS } = require("../constants/intents");
+    if (INSTITUTIONAL_INTENTS.includes(intent)) {
+        return QUESTION_TYPES.UNIVERSITY_SPECIFIC;
+    }
+
+    return QUESTION_TYPES.HYBRID;
+};
+
 module.exports = {
-    classifyIntent
+    classifyIntent,
+    classifyQuestionType,
+    QUESTION_TYPES
 };

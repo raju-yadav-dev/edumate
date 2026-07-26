@@ -4,8 +4,8 @@
     align-items: center;
     justify-content: space-between;
     padding: 0 1.5rem;
-    background: var(--bg-header, rgba(15, 23, 42, 0.6));
-    border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.05));
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
     backdrop-filter: blur(12px);
     z-index: 10;
 }
@@ -22,7 +22,7 @@
     display: none;
     background: transparent;
     border: none;
-    color: var(--text-main, #ffffff);
+    color: var(--text);
     cursor: pointer;
     padding: 6px;
     border-radius: 8px;
@@ -30,7 +30,7 @@
 }
 
 .mobile-menu-toggle:hover {
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--card);
 }
 
 .title-display-wrapper {
@@ -43,7 +43,7 @@
 .header-chat-title {
     font-size: 1.05rem;
     font-weight: 700;
-    color: var(--text-main, #ffffff);
+    color: var(--heading);
     margin: 0;
     white-space: nowrap;
     overflow: hidden;
@@ -53,7 +53,7 @@
 .rename-trigger-btn {
     background: transparent;
     border: none;
-    color: var(--text-muted, #64748b);
+    color: var(--text-light);
     cursor: pointer;
     padding: 4px;
     border-radius: 4px;
@@ -66,8 +66,8 @@
 }
 
 .rename-trigger-btn:hover {
-    background: rgba(255, 255, 255, 0.05);
-    color: var(--text-main, #ffffff);
+    background: var(--card);
+    color: var(--text);
 }
 
 .rename-input-wrapper {
@@ -77,9 +77,9 @@
 }
 
 .rename-textbox {
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid var(--primary, #6366f1);
-    color: var(--text-main, #ffffff);
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: var(--text);
     font-size: 0.9rem;
     padding: 4px 8px;
     border-radius: 6px;
@@ -144,7 +144,7 @@
 .theme-toggle-btn {
     background: transparent;
     border: none;
-    color: var(--text-muted, #94a3b8);
+    color: var(--text-light);
     cursor: pointer;
     padding: 8px;
     border-radius: 10px;
@@ -155,8 +155,8 @@
 }
 
 .theme-toggle-btn:hover {
-    background: rgba(255, 255, 255, 0.05);
-    color: var(--text-main, #ffffff);
+    background: var(--card);
+    color: var(--text);
     transform: rotate(15deg);
 }
 

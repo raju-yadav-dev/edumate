@@ -5,7 +5,7 @@ import { formatBytes } from "../../utils/formatBytes";
 
 function DatabaseStorageCard({ mongodb = {} }) {
     return (
-        <article className="storage-dashboard-card">
+        <article className="storage-dashboard-card mongodb-card">
             <div className="panel-title">
                 <div>
                     <h2>MongoDB (Atlas)</h2>

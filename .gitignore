@@ -7,3 +7,4 @@ node_modules/
 # Login Details
 # ===========================
 server.env
+.env

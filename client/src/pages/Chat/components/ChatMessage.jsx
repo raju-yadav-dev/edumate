@@ -103,7 +103,38 @@ function parseMarkdown(text) {
 
 export default function ChatMessage({ message, onRegenerate, isLast }) {
     const isAssistant = message.role === "assistant";
-    const formattedContent = parseMarkdown(message.content);
+
+    const getSourceLabel = () => {
+        if (message.sourceLabel) {
+            return message.sourceLabel;
+        }
+        const sources = message.sources || [];
+        if (sources.length === 0) return "";
+        
+        const hasDoc = sources.some(s => s.type === "document");
+        const hasWeb = sources.some(s => s.type === "web");
+        
+        if (hasDoc && hasWeb) {
+            return "📚 + 🌐 Combined Sources";
+        }
+        if (hasWeb) {
+            return "🌐 Trusted Internet Sources";
+        }
+        return "📚 University Knowledge Base";
+    };
+
+    const sourceLabel = getSourceLabel();
+
+    const getCleanContent = () => {
+        let content = message.content || "";
+        if (sourceLabel && content.startsWith(sourceLabel)) {
+            content = content.substring(sourceLabel.length).replace(/^\s+/, "");
+        }
+        return content;
+    };
+
+    const cleanContent = getCleanContent();
+    const formattedContent = parseMarkdown(cleanContent);
 
     return (
         <div className={`chat-message-bubble-wrapper ${isAssistant ? "assistant" : "user"}`}>
@@ -113,6 +144,11 @@ export default function ChatMessage({ message, onRegenerate, isLast }) {
 
             <div className="message-content-container">
                 <div className={`message-bubble-body ${isAssistant ? "assistant" : "user"}`}>
+                    {isAssistant && sourceLabel && (
+                        <div className="message-source-badge">
+                            {sourceLabel}
+                        </div>
+                    )}
                     <div
                         className="message-rich-text"
                         dangerouslySetInnerHTML={{ __html: formattedContent }}

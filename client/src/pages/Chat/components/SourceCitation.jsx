@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { FileText, ChevronDown, ChevronUp, CheckCircle } from "lucide-react";
+import { FileText, ChevronDown, ChevronUp, CheckCircle, Globe } from "lucide-react";
 import "../styles/SourceCitation.css";
 
 export default function SourceCitation({ sources = [] }) {
@@ -15,43 +15,65 @@ export default function SourceCitation({ sources = [] }) {
             >
                 <span className="citation-header-text">
                     <CheckCircle className="check-icon" size={16} />
-                    Answer verified from <b>{sources.length}</b> official source{sources.length > 1 ? "s" : ""}
+                    Answer verified from <b>{sources.length}</b> source{sources.length > 1 ? "s" : ""}
                 </span>
                 {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
             </button>
 
             {expanded && (
                 <div className="citations-list">
-                    {sources.map((src, idx) => (
-                        <div key={idx} className="citation-badge-card">
-                            <div className="citation-card-main">
-                                <span className="pdf-icon-wrapper">
-                                    <FileText size={18} />
-                                </span>
-                                <div className="citation-metadata">
-                                    <h4 className="citation-doc-title" title={src.title}>{src.title}</h4>
-                                    <p className="citation-doc-reference">{src.reference}</p>
+                    {sources.map((src, idx) => {
+                        const isWeb = src.type === "web";
+                        return (
+                            <div key={idx} className={`citation-badge-card ${isWeb ? "web" : "document"}`}>
+                                <div className="citation-card-main">
+                                    <span className={`pdf-icon-wrapper ${isWeb ? "web" : "document"}`}>
+                                        {isWeb ? <Globe size={18} /> : <FileText size={18} />}
+                                    </span>
+                                    <div className="citation-metadata">
+                                        {isWeb && src.reference ? (
+                                            <a 
+                                                className="citation-doc-title web-link" 
+                                                href={src.reference} 
+                                                target="_blank" 
+                                                rel="noopener noreferrer"
+                                                title={src.title}
+                                            >
+                                                {src.title}
+                                            </a>
+                                        ) : (
+                                            <h4 className="citation-doc-title" title={src.title}>{src.title}</h4>
+                                        )}
+                                        <p className="citation-doc-reference">
+                                            {isWeb ? src.metadata?.domain || "Web Source" : src.reference}
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="citation-card-tags">
+                                    {isWeb && (
+                                        <span className="citation-tag web-badge">
+                                            🌐 Web
+                                        </span>
+                                    )}
+                                    {!isWeb && src.metadata?.category && (
+                                        <span className="citation-tag category">
+                                            {String(src.metadata.category).replace(/_/g, " ")}
+                                        </span>
+                                    )}
+                                    {!isWeb && src.metadata?.department && (
+                                        <span className="citation-tag department">
+                                            {src.metadata.department}
+                                        </span>
+                                    )}
+                                    {!isWeb && src.metadata?.similarity !== undefined && (
+                                        <span className="citation-tag similarity">
+                                            {src.metadata.similarity}% match
+                                        </span>
+                                    )}
                                 </div>
                             </div>
-                            <div className="citation-card-tags">
-                                {src.metadata?.category && (
-                                    <span className="citation-tag category">
-                                        {String(src.metadata.category).replace(/_/g, " ")}
-                                    </span>
-                                )}
-                                {src.metadata?.department && (
-                                    <span className="citation-tag department">
-                                        {src.metadata.department}
-                                    </span>
-                                )}
-                                {src.metadata?.similarity !== undefined && (
-                                    <span className="citation-tag similarity">
-                                        {src.metadata.similarity}% match
-                                    </span>
-                                )}
-                            </div>
-                        </div>
-                    ))}
+                        );
+                    })}
                 </div>
             )}
         </div>

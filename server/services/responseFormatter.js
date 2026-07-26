@@ -8,13 +8,29 @@ const formatUnavailable = ({ reason }) => ({
     sources: []
 });
 
-const formatAnswer = ({ answer, confidence, sources }) => ({
-    answer: answer.trim(),
-    confidence,
-    sources: sources || []
-});
+const SOURCE_LABELS = {
+    UNIVERSITY: "📚 University Knowledge Base",
+    WEB: "🌐 Trusted Internet Sources",
+    COMBINED: "📚 + 🌐 Combined Sources"
+};
+
+const formatAnswer = ({ answer, confidence, sources, sourceLabel }) => {
+    let finalAnswer = answer.trim();
+    
+    if (sourceLabel && !finalAnswer.startsWith(sourceLabel)) {
+        finalAnswer = `${sourceLabel}\n\n${finalAnswer}`;
+    }
+
+    return {
+        answer: finalAnswer,
+        confidence,
+        sources: sources || [],
+        sourceLabel: sourceLabel || SOURCE_LABELS.UNIVERSITY
+    };
+};
 
 module.exports = {
     formatUnavailable,
-    formatAnswer
+    formatAnswer,
+    SOURCE_LABELS
 };

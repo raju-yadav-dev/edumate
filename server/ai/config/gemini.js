@@ -94,7 +94,8 @@ const generateEmbedding = async (text) => {
             model: `models/${modelName}`,
             content: {
                 parts: [{ text }]
-            }
+            },
+            outputDimensionality: 768
         })
     });
 
@@ -128,7 +129,8 @@ const generateEmbeddingsBatch = async (texts) => {
         model: `models/${modelName}`,
         content: {
             parts: [{ text }]
-        }
+        },
+        outputDimensionality: 768
     }));
 
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:batchEmbedContents?key=${apiKey}`, {

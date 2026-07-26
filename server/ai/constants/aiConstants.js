@@ -1,7 +1,7 @@
 const AI_CONSTANTS = Object.freeze({
     // Models
-    COMPLETION_MODEL: "gemini-2.5-flash",
-    EMBEDDING_MODEL: "text-embedding-004",
+    COMPLETION_MODEL: "gemini-1.5-pro",
+    EMBEDDING_MODEL: "gemini-embedding-001",
 
     // Document Ingestion Chunking
     CHUNK_SIZE: 800,
@@ -10,7 +10,7 @@ const AI_CONSTANTS = Object.freeze({
 
     // Vector Similarity Search
     SIMILARITY_THRESHOLD: 0.50,
-    DEFAULT_RETRIEVAL_LIMIT: 4,
+    DEFAULT_RETRIEVAL_LIMIT: 6,
 
     // RAG fallback response
     FALLBACK_RESPONSE: "I am sorry, but that information could not be found in the uploaded university documents.",
