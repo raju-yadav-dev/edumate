@@ -25,15 +25,21 @@ const STARTER_PROMPTS = [
     }
 ];
 
+import useAuth from "../../../hooks/useAuth";
+
 export default function EmptyState({ onSelectPrompt }) {
+    const { user } = useAuth();
+    const name = user?.fullName ? user.fullName.split(" ")[0] : "Raju";
+
     return (
         <div className="chat-empty-state">
             <header className="empty-state-header">
-                <div className="brand-logo-container">
-                    <GraduationCap className="brand-icon" size={48} />
+                <div className="ai-platform-tag">
+                    <GraduationCap className="tag-icon" size={14} />
+                    <span>AI Educational Platform</span>
                 </div>
-                <h1>Welcome to EduMate</h1>
-                <p>Your institutional assistant. I answer academic, placement, hostel, and general campus queries based on official university documents.</p>
+                <h1 className="greeting-text">Hello, {name} 👋</h1>
+                <p className="subtitle-text">How can I help you today?</p>
             </header>
 
             <div className="prompts-grid">
@@ -46,7 +52,7 @@ export default function EmptyState({ onSelectPrompt }) {
                             onClick={() => onSelectPrompt(prompt.text)}
                         >
                             <span className="prompt-icon-wrapper">
-                                <Icon size={20} />
+                                <Icon size={18} />
                             </span>
                             <h3>{prompt.label}</h3>
                             <p>"{prompt.text}"</p>

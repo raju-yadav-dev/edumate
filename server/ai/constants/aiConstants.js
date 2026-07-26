@@ -1,6 +1,6 @@
 const AI_CONSTANTS = Object.freeze({
     // Models
-    COMPLETION_MODEL: "gemini-1.5-pro",
+    COMPLETION_MODEL: "gemini-3.5-flash",
     EMBEDDING_MODEL: "gemini-embedding-001",
 
     // Document Ingestion Chunking

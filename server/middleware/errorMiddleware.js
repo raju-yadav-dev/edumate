@@ -12,9 +12,12 @@ const errorHandler = (error, req, res, next) => {
     console.error(error);
 
     const statusCode = error.statusCode || 500;
-    const message = statusCode >= 500 ? "Internal Server Error" : error.message;
+    const message = error.message || "Internal Server Error";
 
-    return sendError(res, statusCode, message, error.errors || null);
+    return sendError(res, statusCode, message, {
+        stack: error.stack,
+        details: error.errors || null
+    });
 };
 
 module.exports = {
