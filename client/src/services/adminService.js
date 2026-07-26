@@ -33,21 +33,21 @@ const normalizeStorageStats = (stats = {}) => {
     const limit = Number(stats.limitBytes || 0);
 
     // MongoDB normalization
-    const mongoUsed = Number(stats.mongodb?.used ?? stats.mongodbBytes ?? stats.dataBytes ?? 0);
-    const mongoTotal = Number(stats.mongodb?.total ?? stats.mongodbStorageSize ?? stats.mongodbTotalBytes ?? limit);
+    const mongoUsed = Number(stats.mongodb?.used || stats.mongodbBytes || stats.dataBytes || 0);
+    const mongoTotal = Number(stats.mongodb?.total || stats.mongodbStorageSize || stats.mongodbTotalBytes || limit);
 
     // Supabase normalization
-    const supabaseUsed = Number(stats.supabase?.used ?? stats.supabaseBytes ?? stats.documentBytes ?? 0);
-    const supabaseQuota = Number(stats.supabase?.quota ?? stats.supabaseQuotaBytes ?? limit);
+    const supabaseUsed = Number(stats.supabase?.used || stats.supabaseBytes || stats.documentBytes || 0);
+    const supabaseQuota = Number(stats.supabase?.quota || stats.supabaseQuotaBytes || limit);
 
     // Qdrant normalization & estimated byte usage (4KB per vector points/embeddings)
-    const qdrantVectors = Number(stats.qdrant?.vectors ?? stats.knowledgeBase?.totalChunks ?? stats.totalChunks ?? 0);
+    const qdrantVectors = Number(stats.qdrant?.vectors || stats.knowledgeBase?.totalChunks || stats.totalChunks || 0);
     const qdrantUsed = qdrantVectors * 4096;
     const qdrantTotal = 512 * 1024 * 1024; // 512 MB hard quota
 
     // Combined normalization (includes mongo, supabase, and qdrant)
-    const combinedUsed = Number(stats.combined?.used ?? stats.usedBytes ?? (mongoUsed + supabaseUsed + qdrantUsed));
-    const combinedTotal = Number(stats.combined?.total ?? stats.totalBytes ?? (mongoTotal + supabaseQuota + qdrantTotal));
+    const combinedUsed = Number(stats.combined?.used || stats.usedBytes || (mongoUsed + supabaseUsed + qdrantUsed));
+    const combinedTotal = Number(stats.combined?.total || stats.totalBytes || (mongoTotal + supabaseQuota + qdrantTotal));
 
     return {
         ...stats,
@@ -56,17 +56,17 @@ const normalizeStorageStats = (stats = {}) => {
             used: mongoUsed,
             remaining: Math.max(mongoTotal - mongoUsed, 0),
             usage: percent(mongoUsed, mongoTotal),
-            collections: stats.mongodb?.collections ?? stats.mongodbCollections ?? stats.collections ?? 0,
-            documents: stats.mongodb?.documents ?? stats.mongodbObjects ?? stats.documentCount ?? 0,
-            indexesSize: stats.mongodb?.indexesSize ?? stats.mongodbIndexSize ?? 0
+            collections: stats.mongodb?.collections || stats.mongodbCollections || stats.collections || 0,
+            documents: stats.mongodb?.documents || stats.mongodbObjects || stats.documentCount || 0,
+            indexesSize: stats.mongodb?.indexesSize || stats.mongodbIndexSize || 0
         },
         supabase: {
-            bucket: stats.supabase?.bucket ?? stats.supabaseBucket ?? stats.bucket ?? "",
-            files: stats.supabase?.files ?? stats.supabaseFiles ?? stats.documentCount ?? 0,
+            bucket: stats.supabase?.bucket || stats.supabaseBucket || stats.bucket || "",
+            files: stats.supabase?.files || stats.supabaseFiles || stats.documentCount || 0,
             used: supabaseUsed,
             remaining: Math.max(supabaseQuota - supabaseUsed, 0),
-            averageFileSize: stats.supabase?.averageFileSize ?? stats.supabaseAverageFileSize ?? (stats.documentCount ? supabaseUsed / stats.documentCount : 0),
-            largestFile: stats.supabase?.largestFile ?? stats.supabaseLargestFile ?? null,
+            averageFileSize: stats.supabase?.averageFileSize || stats.supabaseAverageFileSize || (stats.documentCount ? supabaseUsed / stats.documentCount : 0),
+            largestFile: stats.supabase?.largestFile || stats.supabaseLargestFile || null,
             quota: supabaseQuota,
             usage: percent(supabaseUsed, supabaseQuota)
         },

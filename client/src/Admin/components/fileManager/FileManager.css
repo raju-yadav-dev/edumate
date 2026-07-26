@@ -2,12 +2,13 @@
     position: relative;
     width: 100%;
     min-width: 0;
-    min-height: 100vh;
+    min-height: auto;
+    height: auto;
     padding: 18px 16px 0;
     display: grid;
     grid-template-rows: auto minmax(0, 1fr);
     gap: 14px;
-    overflow: hidden;
+    overflow: visible;
 }
 
 /* The reference keeps uploads in the top action bar and reserves the whole
@@ -78,8 +79,8 @@
 
 .document-layout {
     min-width: 0;
-    min-height: 0;
-    height: clamp(500px,800px, 920px);
+    min-height: 600px;
+    height: auto;
     display: grid;
     grid-template-columns: 216px minmax(0, 1fr);
     border: 1px solid var(--admin-line);

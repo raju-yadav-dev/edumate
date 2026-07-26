@@ -17,8 +17,14 @@ const PAGE_SIZE = 6;
 
 const normaliseRole = (role = "user") => String(role).replace(/_/g, " ");
 const titleCase = (value) => normaliseRole(value).replace(/\b\w/g, (letter) => letter.toUpperCase());
-const isActive = (user) => String(user.status || "active").toLowerCase() === "active";
-const initials = (name = "User") => name.split(" ").filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
+const isActive = (user) => {
+    const status = String(user?.status || user?.userStatus || "active").toLowerCase();
+    return status === "active" || status === "online" || status === "enabled";
+};
+const initials = (name = "User") => {
+    const str = String(name || "User").trim();
+    return str.split(" ").filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "U";
+};
 const roleClass = (role) => `role-${String(role || "user").toLowerCase().replace(/[^a-z]/g, "")}`;
 const dateValue = (value) => {
     const parsed = value ? new Date(value) : null;
@@ -37,11 +43,18 @@ function UserManagement({ users = [], userSearch, setUserSearch, roleFilter, set
     const [metricFilter, setMetricFilter] = useState("all");
     const totalUsers = users.length;
     const activeUsers = users.filter(isActive).length;
-    const adminUsers = users.filter((user) => ["admin", "super_admin"].includes(String(user.role).toLowerCase())).length;
+    const adminUsers = users.filter((user) => ["admin", "super_admin", "superadmin"].includes(String(user.role || "").toLowerCase())).length;
     const newToday = users.filter((user) => {
-        if (!user.createdAt) return false;
-        return new Date(user.createdAt).toDateString() === new Date().toDateString();
+        const created = dateValue(user.createdAt || user.joinedAt || user.registeredAt);
+        if (!created) return false;
+        return created.toDateString() === new Date().toDateString();
     }).length;
+
+    const availableRoles = useMemo(() => {
+        const defaultRoles = ["student", "teacher", "faculty", "admin", "super_admin"];
+        const customRoles = users.map((u) => String(u.role || "").toLowerCase()).filter(Boolean);
+        return Array.from(new Set([...defaultRoles, ...customRoles]));
+    }, [users]);
 
     const roleBreakdown = useMemo(() => {
         const counts = users.reduce((result, user) => {
@@ -59,32 +72,40 @@ function UserManagement({ users = [], userSearch, setUserSearch, roleFilter, set
         const nextDay = new Date(day);
         nextDay.setDate(day.getDate() + 1);
         const count = users.filter((user) => {
-            const activityDate = dateValue(user.lastLogin || user.updatedAt || user.createdAt);
+            const activityDate = dateValue(user.lastLogin || user.lastActiveAt || user.updatedAt || user.createdAt || user.joinedAt);
             return activityDate && activityDate >= day && activityDate < nextDay && isActive(user);
         }).length;
         return { label: new Intl.DateTimeFormat(undefined, { weekday: "short" }).format(day), count };
     }), [users]);
+
     const registrations = useMemo(() => sevenDayActivity.map(({ label }, index) => {
         const day = new Date();
         day.setHours(0, 0, 0, 0);
         day.setDate(day.getDate() - (6 - index));
         const nextDay = new Date(day);
         nextDay.setDate(day.getDate() + 1);
-        return { label, count: users.filter((user) => { const created = dateValue(user.createdAt); return created && created >= day && created < nextDay; }).length };
+        return { label, count: users.filter((user) => { const created = dateValue(user.createdAt || user.joinedAt || user.registeredAt); return created && created >= day && created < nextDay; }).length };
     }), [users, sevenDayActivity]);
+
     const activityMax = Math.max(1, ...sevenDayActivity.map(({ count }) => count));
     const registrationMax = Math.max(1, ...registrations.map(({ count }) => count));
 
     const filteredUsers = useMemo(() => users.filter((user) => {
         const query = String(userSearch || "").trim().toLowerCase();
-        const matchesSearch = !query || [user.fullName, user.email, user.department, user.role, user.status]
+        const userName = user.fullName || user.name || user.username || "";
+        const userDept = user.department || user.departmentName || user.dept || "";
+        const userEmail = user.email || "";
+        const userRole = user.role || "";
+        const userStatus = user.status || "";
+
+        const matchesSearch = !query || [userName, userEmail, userDept, userRole, userStatus]
             .some((value) => String(value || "").toLowerCase().includes(query));
         const matchesRole = !roleFilter || String(user.role || "").toLowerCase() === roleFilter.toLowerCase();
-        const created = dateValue(user.createdAt);
+        const created = dateValue(user.createdAt || user.joinedAt || user.registeredAt);
         const isToday = created && created.toDateString() === new Date().toDateString();
         const matchesMetric = metricFilter === "all"
             || (metricFilter === "active" && isActive(user))
-            || (metricFilter === "admins" && ["admin", "super_admin"].includes(String(user.role).toLowerCase()))
+            || (metricFilter === "admins" && ["admin", "super_admin", "superadmin"].includes(String(user.role || "").toLowerCase()))
             || (metricFilter === "today" && isToday);
         return matchesSearch && matchesRole && matchesMetric;
     }), [users, userSearch, roleFilter, metricFilter]);
@@ -125,8 +146,8 @@ function UserManagement({ users = [], userSearch, setUserSearch, roleFilter, set
                         <div className="role-bars">
                             {roleBreakdown.length ? roleBreakdown.map(([role, count]) => (
                                 <button type="button" className="role-bar" key={role} onClick={() => { setRoleFilter(role); setMetricFilter("all"); setPage(1); }}>
-                                    <div><span className={`role-dot ${roleClass(role)}`} /><b>{titleCase(role)}</b><em>{count} ({Math.round((count / totalUsers) * 100)}%)</em></div>
-                                    <i><i className={roleClass(role)} style={{ width: `${(count / totalUsers) * 100}%` }} /></i>
+                                    <div><span className={`role-dot ${roleClass(role)}`} /><b>{titleCase(role)}</b><em>{count} ({Math.round((count / (totalUsers || 1)) * 100)}%)</em></div>
+                                    <i><i className={roleClass(role)} style={{ width: `${(count / (totalUsers || 1)) * 100}%` }} /></i>
                                 </button>
                             )) : <p className="analytics-empty">User role data will appear here.</p>}
                         </div>
@@ -149,11 +170,11 @@ function UserManagement({ users = [], userSearch, setUserSearch, roleFilter, set
                 <div className="table-topline"><div><h3>User Management</h3><p>View and manage all users</p></div><span>{filteredUsers.length} user{filteredUsers.length === 1 ? "" : "s"}</span></div>
                 <div className="user-tools">
                     <label><Search size={17} /><input value={userSearch} onChange={(event) => { setUserSearch(event.target.value); setPage(1); }} placeholder="Search users..." /></label>
-                    <label className="role-filter"><Filter size={16} /><select value={roleFilter} onChange={(event) => { setRoleFilter(event.target.value); setPage(1); }} aria-label="Filter users by role"><option value="">All roles</option><option value="student">Student</option><option value="teacher">Teacher</option><option value="faculty">Faculty</option><option value="admin">Admin</option><option value="super_admin">Super admin</option></select></label>
+                    <label className="role-filter"><Filter size={16} /><select value={roleFilter} onChange={(event) => { setRoleFilter(event.target.value); setPage(1); }} aria-label="Filter users by role"><option value="">All roles</option>{availableRoles.map((role) => <option key={role} value={role}>{titleCase(role)}</option>)}</select></label>
                 </div>
                 <div className="users-table-wrap">
                     <table className="users-table"><thead><tr><th>#</th><th>User</th><th>Email</th><th>Department</th><th>Role</th><th>Status</th><th>Last Login</th><th>Joined Date</th><th aria-label="Actions" /></tr></thead>
-                        <tbody>{visibleUsers.length ? visibleUsers.map((user, index) => <tr key={user._id || user.email}><td>{(page - 1) * PAGE_SIZE + index + 1}</td><td><div className="table-user"><span className="user-avatar">{initials(user.fullName)}</span><b>{user.fullName || "Unnamed user"}</b></div></td><td><small className="email-cell"><Mail size={13} />{user.email || "No email address"}</small></td><td>{user.department || user.departmentName || "—"}</td><td><span className={`role-badge ${roleClass(user.role)}`}>{titleCase(user.role)}</span></td><td><span className={`status-badge ${isActive(user) ? "is-active" : "is-inactive"}`}>{isActive(user) ? "Active" : titleCase(user.status)}</span></td><td>{formatDate(user.lastLogin, true)}</td><td>{formatDate(user.createdAt)}</td><td><button type="button" className="user-remove" onClick={() => removeUser(user._id)} title={`Remove ${user.fullName || "user"}`}><Trash2 size={16} /><span>Remove</span></button></td></tr>) : <tr><td className="no-users" colSpan="9">No users match the current search and filter.</td></tr>}</tbody>
+                        <tbody>{visibleUsers.length ? visibleUsers.map((user, index) => <tr key={user._id || user.id || user.email || index}><td>{(page - 1) * PAGE_SIZE + index + 1}</td><td><div className="table-user"><span className="user-avatar">{initials(user.fullName || user.name || user.username || user.email)}</span><b>{user.fullName || user.name || user.username || "Unnamed user"}</b></div></td><td><small className="email-cell"><Mail size={13} />{user.email || "No email address"}</small></td><td>{user.department || user.departmentName || user.dept || "—"}</td><td><span className={`role-badge ${roleClass(user.role)}`}>{titleCase(user.role)}</span></td><td><span className={`status-badge ${isActive(user) ? "is-active" : "is-inactive"}`}>{isActive(user) ? "Active" : titleCase(user.status || "Inactive")}</span></td><td>{formatDate(user.lastLogin || user.lastActiveAt || user.updatedAt, true)}</td><td>{formatDate(user.createdAt || user.joinedAt || user.registeredAt)}</td><td><button type="button" className="user-remove" onClick={() => removeUser(user._id || user.id)} title={`Remove ${user.fullName || user.name || user.username || "user"}`}><Trash2 size={16} /><span>Remove</span></button></td></tr>) : <tr><td className="no-users" colSpan="9">No users match the current search and filter.</td></tr>}</tbody>
                     </table>
                 </div>
                 <footer className="users-pagination"><span>Showing {filteredUsers.length ? (page - 1) * PAGE_SIZE + 1 : 0}–{Math.min(page * PAGE_SIZE, filteredUsers.length)} of {filteredUsers.length} users</span><div><button type="button" disabled={page === 1} onClick={() => setPage(page - 1)} aria-label="Previous page"><ChevronLeft size={17} /></button><b>{page}</b><button type="button" disabled={page === pages} onClick={() => setPage(page + 1)} aria-label="Next page"><ChevronRight size={17} /></button></div></footer>
@@ -163,3 +184,4 @@ function UserManagement({ users = [], userSearch, setUserSearch, roleFilter, set
 }
 
 export default UserManagement;
+
