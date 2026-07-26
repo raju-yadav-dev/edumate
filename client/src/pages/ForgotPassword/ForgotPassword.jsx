@@ -4,6 +4,8 @@ import { Link, useNavigate } from "react-router-dom";
 
 import { useState } from "react";
 
+import { FaEye, FaEyeSlash } from "react-icons/fa";
+
 import { forgotPassword } from "../../services/authService";
 
 function ForgotPassword() {
@@ -11,6 +13,8 @@ function ForgotPassword() {
     const [email, setEmail] = useState("");
     const [newPassword, setNewPassword] = useState("");
     const [confirmPassword, setConfirmPassword] = useState("");
+    const [showNewPassword, setShowNewPassword] = useState(false);
+    const [showConfirmPassword, setShowConfirmPassword] = useState(false);
     const [message, setMessage] = useState("");
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(false);
@@ -61,19 +65,29 @@ function ForgotPassword() {
                         onChange={(event) => setEmail(event.target.value)}
                     />
 
-                    <input
-                        type="password"
-                        placeholder="New Password"
-                        value={newPassword}
-                        onChange={(event) => setNewPassword(event.target.value)}
-                    />
+                    <div className="forgot-password-box">
+                        <input
+                            type={showNewPassword ? "text" : "password"}
+                            placeholder="New Password"
+                            value={newPassword}
+                            onChange={(event) => setNewPassword(event.target.value)}
+                        />
+                        <button type="button" className="forgot-password-toggle" onClick={() => setShowNewPassword((current) => !current)} aria-label={showNewPassword ? "Hide new password" : "Show new password"}>
+                            {showNewPassword ? <FaEyeSlash /> : <FaEye />}
+                        </button>
+                    </div>
 
-                    <input
-                        type="password"
-                        placeholder="Confirm New Password"
-                        value={confirmPassword}
-                        onChange={(event) => setConfirmPassword(event.target.value)}
-                    />
+                    <div className="forgot-password-box">
+                        <input
+                            type={showConfirmPassword ? "text" : "password"}
+                            placeholder="Confirm New Password"
+                            value={confirmPassword}
+                            onChange={(event) => setConfirmPassword(event.target.value)}
+                        />
+                        <button type="button" className="forgot-password-toggle" onClick={() => setShowConfirmPassword((current) => !current)} aria-label={showConfirmPassword ? "Hide confirm password" : "Show confirm password"}>
+                            {showConfirmPassword ? <FaEyeSlash /> : <FaEye />}
+                        </button>
+                    </div>
 
                     <button type="submit" disabled={loading}>
                         {loading ? "Updating..." : "Reset Password"}

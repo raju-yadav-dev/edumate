@@ -255,7 +255,7 @@
 }
 
 .profile-avatar {
-    background: linear-gradient(135deg, rgba(132,255,61,.30), rgba(47,140,255,.22));
+    background: linear-gradient(135deg, rgba(10, 44, 155, 0.3), rgba(7, 37, 73, 0.22));
     color: var(--admin-text);
 }
 

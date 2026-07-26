@@ -757,7 +757,7 @@ function Admin({ mode = "auto" }) {
     }
 
     return (
-        <div className="admin-page" data-admin-theme={adminTheme}>
+        <div className={`admin-page${activeSection === "users" ? " admin-page--users" : ""}`} data-admin-theme={adminTheme}>
             <Sidebar
                 activeSection={activeSection}
                 setActiveSection={(section) => {
@@ -793,7 +793,7 @@ function Admin({ mode = "auto" }) {
                     onToggleTheme={() => setAdminTheme((current) => current === "dark" ? "light" : "dark")}
                 />
 
-                <DashboardStats stats={stats} />
+                {activeSection === "files" ? <DashboardStats stats={stats} /> : null}
 
                 {activeSection === "files" ? (
                     <>
