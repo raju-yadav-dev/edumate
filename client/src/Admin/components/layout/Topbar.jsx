@@ -82,26 +82,48 @@ function Topbar({
                     <Menu size={20} />
                 </button>
 
-                {activeSection === "users" ? (
+                {activeSection === "storage" ? (
+                    <div>
+                        <h1>Storage Overview</h1>
+                        <p>Real-time storage usage and database overview across all services.</p>
+                    </div>
+                ) : activeSection === "keys" ? (
+                    <div>
+                        <h1>API Keys</h1>
+                        <p>Manage API keys and external service integrations.</p>
+                    </div>
+                ) : activeSection === "users" ? (
                     <div>
                         <h1>Users</h1>
-
-                        <p>
-                            Manage all registered users and their permissions.
-                        </p>
+                        <p>Manage all registered users and their permissions.</p>
+                    </div>
+                ) : activeSection === "tools" ? (
+                    <div>
+                        <h1>Data Tools</h1>
+                        <p>Rebuild embeddings, clean index, and monitor backend operations.</p>
+                    </div>
+                ) : activeSection === "activity" ? (
+                    <div>
+                        <h1>Activity Logs</h1>
+                        <p>Monitor all system activities and user actions in real-time.</p>
+                    </div>
+                ) : activeSection === "settings" ? (
+                    <div>
+                        <h1>Settings</h1>
+                        <p>Manage system preferences and configuration settings.</p>
                     </div>
                 ) : (
                     <div>
                         <nav className="admin-breadcrumbs" aria-label="Breadcrumb">
                             <span>Admin</span>
                             <span>/</span>
-                            <strong>{activeSection === "files" ? activeFolderLabel : activeSection}</strong>
+                            <strong>{activeFolderLabel}</strong>
                         </nav>
 
-                        <h1>EduMate Admin Console</h1>
+                        <h1>File Manager</h1>
 
                         <p>
-                            Manage documents, API setup, and knowledge data.
+                            Manage documents, folders, and knowledge base files.
                         </p>
                     </div>
                 )}
