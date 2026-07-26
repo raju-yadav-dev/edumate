@@ -82,20 +82,29 @@ function Topbar({
                     <Menu size={20} />
                 </button>
 
-                <div>
-                    <nav className="admin-breadcrumbs" aria-label="Breadcrumb">
-                        <span>Admin</span>
-                        <span>/</span>
-                        <strong>{activeSection === "files" ? activeFolderLabel : activeSection}</strong>
-                    </nav>
+                {activeSection === "users" ? (
+                    <div>
+                        <h1>Users</h1>
 
-                    <h1>EduMate Admin Console</h1>
+                        <p>
+                            Manage all registered users and their permissions.
+                        </p>
+                    </div>
+                ) : (
+                    <div>
+                        <nav className="admin-breadcrumbs" aria-label="Breadcrumb">
+                            <span>Admin</span>
+                            <span>/</span>
+                            <strong>{activeSection === "files" ? activeFolderLabel : activeSection}</strong>
+                        </nav>
 
-                    <p>
-                        Manage documents, API setup, and knowledge data.
-                    </p>
+                        <h1>EduMate Admin Console</h1>
 
-                </div>
+                        <p>
+                            Manage documents, API setup, and knowledge data.
+                        </p>
+                    </div>
+                )}
 
             </div>
 
@@ -193,18 +202,17 @@ function Topbar({
                     ) : null}
                 </div>
 
-                <button
-                    className="refresh-btn"
-                    type="button"
-                    onClick={refreshSection}
-                    disabled={busy || savingKeys}
-                >
-
-                    {busy || savingKeys ? <Zap size={17}/> : <RefreshCcw size={17}/>}
-
-                    Refresh
-
-                </button>
+                {activeSection !== "users" ? (
+                    <button
+                        className="refresh-btn"
+                        type="button"
+                        onClick={refreshSection}
+                        disabled={busy || savingKeys}
+                    >
+                        {busy || savingKeys ? <Zap size={17}/> : <RefreshCcw size={17}/>}
+                        Refresh
+                    </button>
+                ) : null}
 
             </div>
 

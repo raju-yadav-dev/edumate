@@ -113,7 +113,7 @@ section:not(.hero-section):not(.statistics){
 
     -webkit-backdrop-filter:blur(calc(var(--blur) + 4px));
 
-    background:var(--glass);
+    /*background:var(--glass);*/
 
 }
 

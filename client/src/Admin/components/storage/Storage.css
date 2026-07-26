@@ -38,25 +38,63 @@
 .service-select {
     position: relative;
     min-width: 157px;
+    border-radius: 7px;
 }
 
-.service-select select {
+.service-select-trigger {
     width: 100%;
     min-height: 29px;
     padding: 0 26px 0 10px;
-    appearance: none;
-    border: 1px solid var(--admin-line);
-    border-radius: 6px;
-    background: rgba(5, 12, 19, 0.48);
-    color: var(--admin-text);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border: 1px solid var(--admin-gold);
+    border-radius: 7px;
+    border-color: rgba(242, 163, 11, 0.46);
+    background: rgba(238, 159, 14, 0.14);
+    color: var(--admin-gold);
+    cursor: pointer;
+    font: inherit;
+    text-align: left;
 }
 
-.service-select svg {
-    position: absolute;
-    top: 8px;
-    right: 8px;
+.service-select-trigger svg {
+    flex: 0 0 auto;
     pointer-events: none;
-    color: var(--admin-muted);
+    color: var(--admin-gold);
+}
+
+.service-select-menu {
+    position: absolute;
+    z-index: 20;
+    top: calc(100% + 5px);
+    left: 0;
+    width: 100%;
+    overflow: hidden;
+    border: 1px solid rgba(242, 163, 11, 0.46);
+    border-radius: 9px;
+    background: #fff3df;
+    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
+}
+
+.service-select-menu button {
+    width: 100%;
+    padding: 8px 10px;
+    display: block;
+    border: 0;
+    background: transparent;
+    color: #ed9200;
+    cursor: pointer;
+    font: inherit;
+    text-align: left;
+}
+
+.service-select-menu button:hover,
+.service-select-menu button:focus-visible,
+.service-select-menu button.selected {
+    outline: 0;
+    background: #a3a89a;
+    color: #0c0c0b;
 }
 
 .auto-refresh {

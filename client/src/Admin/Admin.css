@@ -200,3 +200,39 @@ body,
         padding: 12px;
     }
 }
+
+/* Users page: the complete main content scrolls vertically, never horizontally. */
+@media (min-width: 1081px) {
+    .admin-page--users {
+        height: 100vh;
+        min-height: 0;
+        overflow: hidden;
+    }
+
+    .admin-page--users .admin-main {
+        height: 100vh;
+        min-height: 0;
+        overflow-x: hidden;
+        overflow-y: scroll;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(168, 179, 207, 0.28) transparent;
+    }
+
+    .admin-page--users .admin-main::-webkit-scrollbar {
+        width: 8px;
+    }
+
+    .admin-page--users .admin-main::-webkit-scrollbar-thumb {
+        background: rgba(168, 179, 207, 0.28);
+        border-radius: 999px;
+    }
+
+    .admin-page--users .admin-left {
+        position: sticky;
+        top: 0;
+        align-self: start;
+        height: 100vh;
+        overflow-x: hidden;
+        overflow-y: auto;
+    }
+}

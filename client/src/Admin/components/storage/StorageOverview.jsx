@@ -1,16 +1,27 @@
 import "./Storage.css";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronDown, RefreshCcw } from "lucide-react";
 
 import CombinedStorageCard from "./CombinedStorageCard";
 import DatabaseStorageCard from "./DatabaseStorageCard";
 import SupabaseStorageCard from "./SupabaseStorageCard";
 
+const serviceOptions = [
+    { value: "all", label: "All Services" },
+    { value: "database", label: "MongoDB (Atlas)" },
+    { value: "files", label: "Supabase Storage" },
+    { value: "combined", label: "Combined Storage" },
+];
+
 function StorageOverview({ stats = {}, onRefresh }) {
     const [service, setService] = useState("all");
+    const [isServiceMenuOpen, setIsServiceMenuOpen] = useState(false);
     const [autoRefresh, setAutoRefresh] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+    const serviceSelectRef = useRef(null);
+
+    const selectedService = serviceOptions.find((option) => option.value === service) ?? serviceOptions[0];
 
     async function refreshStats() {
         if (typeof onRefresh !== "function" || refreshing) {
@@ -36,6 +47,17 @@ function StorageOverview({ stats = {}, onRefresh }) {
         return () => window.clearInterval(timer);
     }, [autoRefresh, onRefresh, refreshing]);
 
+    useEffect(() => {
+        function closeServiceMenu(event) {
+            if (serviceSelectRef.current && !serviceSelectRef.current.contains(event.target)) {
+                setIsServiceMenuOpen(false);
+            }
+        }
+
+        document.addEventListener("mousedown", closeServiceMenu);
+        return () => document.removeEventListener("mousedown", closeServiceMenu);
+    }, []);
+
     return (
 
         <section className="storage-section">
@@ -53,15 +75,40 @@ function StorageOverview({ stats = {}, onRefresh }) {
                 </div>
 
                 <div className="storage-controls">
-                    <label className="service-select">
-                        <select value={service} onChange={(event) => setService(event.target.value)}>
-                            <option value="all">All Services</option>
-                            <option value="database">MongoDB (Atlas)</option>
-                            <option value="files">Supabase Storage</option>
-                            <option value="combined">Combined Storage</option>
-                        </select>
-                        <ChevronDown size={14} />
-                    </label>
+                    <div className="service-select" ref={serviceSelectRef}>
+                        <button
+                            type="button"
+                            className="service-select-trigger"
+                            aria-haspopup="listbox"
+                            aria-expanded={isServiceMenuOpen}
+                            onClick={() => setIsServiceMenuOpen((open) => !open)}
+                            onKeyDown={(event) => {
+                                if (event.key === "Escape") setIsServiceMenuOpen(false);
+                            }}
+                        >
+                            <span>{selectedService.label}</span>
+                            <ChevronDown size={14} />
+                        </button>
+                        {isServiceMenuOpen ? (
+                            <div className="service-select-menu" role="listbox" aria-label="Storage service">
+                                {serviceOptions.map((option) => (
+                                    <button
+                                        key={option.value}
+                                        type="button"
+                                        role="option"
+                                        aria-selected={service === option.value}
+                                        className={service === option.value ? "selected" : ""}
+                                        onClick={() => {
+                                            setService(option.value);
+                                            setIsServiceMenuOpen(false);
+                                        }}
+                                    >
+                                        {option.label}
+                                    </button>
+                                ))}
+                            </div>
+                        ) : null}
+                    </div>
                     <button
                         type="button"
                         className={autoRefresh ? "auto-refresh active" : "auto-refresh"}
