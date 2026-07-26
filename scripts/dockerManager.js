@@ -44,7 +44,7 @@ const startQdrantContainer = async () => {
     
     // Check if port 6333 is already responding (indicating Qdrant is active)
     try {
-        const response = await fetch("http://localhost:6333/api/v1/collections", { method: "GET" });
+        const response = await fetch("http://127.0.0.1:6333/api/v1/collections", { method: "GET" });
         if (response.ok || response.status === 404 || response.status === 200) {
             console.log(logger.green("✓ Qdrant service is already active on port 6333."));
             return true;
