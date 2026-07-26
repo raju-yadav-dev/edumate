@@ -134,28 +134,59 @@ export async function loginAdmin(data) {
     return parseResponse(response, "Unable to sign in as admin.");
 }
 
-export async function uploadAdminDocument({ file, title, category, institution, department, version, notes }) {
-    const token = getAdminAccessToken();
-    const formData = new FormData();
+export function uploadAdminDocument({ file, title, category, institution, department, version, notes }, onProgress) {
+    return new Promise((resolve, reject) => {
+        const token = getAdminAccessToken();
+        const formData = new FormData();
 
-    formData.append("document", file);
-    formData.append("title", title || "");
-    formData.append("category", category);
-    formData.append("institution", institution || "");
-    formData.append("department", department || "");
-    formData.append("version", version || "");
-    formData.append("notes", notes || "");
+        formData.append("document", file);
+        formData.append("title", title || "");
+        formData.append("category", category);
+        formData.append("institution", institution || "");
+        formData.append("department", department || "");
+        formData.append("version", version || "");
+        formData.append("notes", notes || "");
 
-    const response = await fetch(DOCUMENT_API_BASE_URL, {
-        method: "POST",
-        headers: token ? {
-            Authorization: `Bearer ${token}`
-        } : {},
-        body: formData
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", DOCUMENT_API_BASE_URL);
+
+        if (token) {
+            xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+        }
+
+        if (xhr.upload && onProgress) {
+            xhr.upload.addEventListener("progress", (event) => {
+                if (event.lengthComputable) {
+                    const percentage = Math.round((event.loaded / event.total) * 100);
+                    onProgress(percentage);
+                }
+            });
+        }
+
+        xhr.onload = () => {
+            let payload = {};
+            try {
+                payload = JSON.parse(xhr.responseText);
+            } catch (e) {}
+
+            if (xhr.status >= 200 && xhr.status < 300) {
+                resolve(payload);
+            } else {
+                const validationDetails = Array.isArray(payload.errors) ? ` ${payload.errors.join(" ")}` : "";
+                const error = new Error(`${payload.message || "Unable to upload document."}${validationDetails}`);
+                error.status = xhr.status;
+                reject(error);
+            }
+        };
+
+        xhr.onerror = () => {
+            reject(new Error("Network error occurred during upload."));
+        };
+
+        xhr.send(formData);
     });
-
-    return parseResponse(response, "Unable to upload document.");
 }
+
 
 export async function replaceAdminDocument(documentId, { file, title, category, institution, department, version, notes } = {}) {
     const token = getAdminAccessToken();

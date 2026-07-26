@@ -1,6 +1,7 @@
 import "./App.css";
 
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import { useEffect } from "react";
 
 import Home from "./pages/Home/Home";
 import Login from "./pages/Login/Login";
@@ -11,11 +12,43 @@ import Chat from "./pages/Chat/Chat";
 import AdminLogin from "./Admin/Login/AdminLogin";
 import AdminConsole from "./Admin/Console/AdminConsole";
 
+function TitleUpdater() {
+    const location = useLocation();
+
+    useEffect(() => {
+        const path = location.pathname;
+        let title = "Edumate";
+
+        if (path === "/") {
+            title = "Edumate | Home";
+        } else if (path === "/chat") {
+            title = "Edumate | Chat";
+        } else if (path === "/login") {
+            title = "Edumate | Login";
+        } else if (path === "/register") {
+            title = "Edumate | Register";
+        } else if (path === "/forgot-password") {
+            title = "Edumate | Reset Password";
+        } else if (path === "/profile") {
+            title = "Edumate | Profile";
+        } else if (path.startsWith("/admin/panel")) {
+            title = "Edumate | Admin Panel";
+        } else if (path.startsWith("/admin")) {
+            title = "Edumate | Admin Login";
+        }
+
+        document.title = title;
+    }, [location]);
+
+    return null;
+}
+
 function App() {
 
     return (
 
         <BrowserRouter>
+            <TitleUpdater />
 
             <Routes>
 

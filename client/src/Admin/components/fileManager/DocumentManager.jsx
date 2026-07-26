@@ -279,7 +279,7 @@ function DocumentManager(props) {
             </div>
 
             {/* Hidden upload form keeps the top Upload Files button functional. */}
-            <div className="document-upload-portal">
+            <div className={`document-upload-portal${props.upload.file ? " active" : ""}`}>
                 <UploadDialog {...props} />
             </div>
 
@@ -293,6 +293,7 @@ function DocumentManager(props) {
                 onRename={props.onRename}
                 onMove={props.onMove}
                 onDelete={props.onDelete}
+                onCreateFolder={props.onCreateFolder}
             />
 
         </section>

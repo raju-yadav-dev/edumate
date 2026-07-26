@@ -6,7 +6,8 @@ import {
     Eye as PreviewEye,
     Trash2,
     Edit2,
-    FolderSymlink
+    FolderSymlink,
+    UploadCloud
 } from "lucide-react";
 
 function ContextMenu({
@@ -17,17 +18,20 @@ function ContextMenu({
     onRename,
     onMove,
     onDelete,
+    onCreateFolder
 }) {
-    if (!menu?.file) {
+    if (!menu) {
         return null;
     }
 
     const copyPath = () => {
-        navigator.clipboard?.writeText(
-            menu.file.filePath ||
-            menu.file.originalName ||
-            ""
-        );
+        if (menu.file) {
+            navigator.clipboard?.writeText(
+                menu.file.filePath ||
+                menu.file.originalName ||
+                ""
+            );
+        }
     };
 
     return (
@@ -39,44 +43,72 @@ function ContextMenu({
             }}
             onMouseLeave={onClose}
         >
+            {menu.file ? (
+                <>
+                    <button onClick={() => { onOpen(menu.file); onClose(); }}>
+                        <PreviewEye size={16} />
+                        <span>Open</span>
+                    </button>
 
-            <button onClick={() => onOpen(menu.file)}>
-                <PreviewEye size={16} />
-                <span>Open</span>
-            </button>
+                    <button onClick={() => { copyPath(); onClose(); }}>
+                        <Copy size={16} />
+                        <span>Copy Path</span>
+                    </button>
 
-            <button onClick={copyPath}>
-                <Copy size={16} />
-                <span>Copy Path</span>
-            </button>
+                    <button onClick={() => { onRename(menu.file._id, menu.file.originalName || menu.file.title); onClose(); }}>
+                        <Edit2 size={16} />
+                        <span>Rename</span>
+                    </button>
 
-            <button onClick={() => { onRename(menu.file._id, menu.file.originalName || menu.file.title); onClose(); }}>
-                <Edit2 size={16} />
-                <span>Rename</span>
-            </button>
+                    <button onClick={() => { onMove(menu.file._id, menu.file.category); onClose(); }}>
+                        <FolderSymlink size={16} />
+                        <span>Move to Folder</span>
+                    </button>
 
-            <button onClick={() => { onMove(menu.file._id, menu.file.category); onClose(); }}>
-                <FolderSymlink size={16} />
-                <span>Move to Folder</span>
-            </button>
+                    <div className="context-divider" />
 
-            <div className="context-divider" />
+                    <button onClick={() => {
+                        document.querySelector(".upload-dropzone input")?.click();
+                        onClose();
+                    }}>
+                        <UploadCloud size={16} />
+                        <span>Upload File</span>
+                    </button>
 
-            <button onClick={() => onDownload(menu.file)}>
-                <Download size={16} />
-                <span>Download</span>
-            </button>
+                    <button onClick={() => { onDownload(menu.file); onClose(); }}>
+                        <Download size={16} />
+                        <span>Download</span>
+                    </button>
 
-            <button
-                className="danger"
-                onClick={() => onDelete(menu.file._id)}
-            >
-                <Trash2 size={16} />
-                <span>Delete</span>
-            </button>
+                    <button
+                        className="danger"
+                        onClick={() => { onDelete(menu.file._id); onClose(); }}
+                    >
+                        <Trash2 size={16} />
+                        <span>Delete</span>
+                    </button>
+                </>
+            ) : (
+                <>
+                    <button onClick={() => {
+                        document.querySelector(".upload-dropzone input")?.click();
+                        onClose();
+                    }}>
+                        <UploadCloud size={16} />
+                        <span>Upload File</span>
+                    </button>
 
+                    {onCreateFolder && (
+                        <button onClick={() => { onCreateFolder(); onClose(); }}>
+                            <FolderSymlink size={16} />
+                            <span>New Folder</span>
+                        </button>
+                    )}
+                </>
+            )}
         </div>
     );
 }
 
 export default ContextMenu;
+

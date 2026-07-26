@@ -298,6 +298,7 @@
     color:#d8ff1f;
     font-size:13px;
     font-weight:800;
+    padding-right: 110px; /* Prevent overlap with absolute actions */
 }
 
 .edu-chat-thread-title-row strong{
@@ -314,6 +315,7 @@
     line-height:1.36;
     -webkit-line-clamp:2;
     -webkit-box-orient:vertical;
+    padding-right: 60px; /* Prevent overlap with absolute actions */
 }
 
 .edu-chat-thread-meta-row{

@@ -168,6 +168,7 @@ function Admin({ mode = "auto" }) {
         notes: ""
     });
     const [isDropActive, setIsDropActive] = useState(false);
+    const [uploadProgress, setUploadProgress] = useState(null);
     const adminEmailRef = useRef(null);
     const adminPasswordRef = useRef(null);
 
@@ -320,7 +321,7 @@ function Admin({ mode = "auto" }) {
     const stats = [
         {
             label: "Documents",
-            value: supabaseStats.files ?? knowledgeStats.totalDocuments ?? documents.length,
+            value: knowledgeStats.totalDocuments ?? documents.length,
             note: "Total files",
             tone: "gold",
             Icon: Folder
@@ -452,7 +453,10 @@ function Admin({ mode = "auto" }) {
         try {
             setBusy(true);
             setError("");
-            await uploadAdminDocument(upload);
+            setUploadProgress(0);
+            await uploadAdminDocument(upload, (percent) => {
+                setUploadProgress(percent);
+            });
             setNotice("File uploaded successfully.");
             setUpload({
                 title: "",
@@ -469,6 +473,7 @@ function Admin({ mode = "auto" }) {
             setError(uploadError.message || "Unable to upload file.");
         } finally {
             setBusy(false);
+            setUploadProgress(null);
         }
     }
 
@@ -816,6 +821,7 @@ function Admin({ mode = "auto" }) {
                             documents={documents}
                             visibleFolderStorage={visibleFolderStorage}
                             upload={upload}
+                            uploadProgress={uploadProgress}
                             busy={busy}
                             isDropActive={isDropActive}
                             search={search}
