@@ -21,6 +21,7 @@
     "concurrently": "^8.2.2"
   },
   "dependencies": {
-    "undici": "^8.9.0"
+    "undici": "^8.9.0",
+    "@qdrant/js-client-rest": "^1.18.0"
   }
 }

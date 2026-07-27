@@ -78,6 +78,26 @@ const retrieveRelevantChunks = async ({
     }
 };
 
+const embeddingService = require("./embeddingService");
+
+/**
+ * High-level coordinate retrieval function that handles query embedding and user filters
+ * @param {Object} params
+ * @param {string} params.question
+ * @param {Object} params.user
+ * @param {number} [params.limit=AI_CONSTANTS.DEFAULT_RETRIEVAL_LIMIT]
+ * @returns {Promise<Array<Object>>}
+ */
+const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL_LIMIT }) => {
+    const queryEmbedding = await embeddingService.getQueryEmbedding(question);
+    const filter = {};
+    if (user?.institution) filter.institution = user.institution;
+    if (user?.department) filter.department = user.department;
+
+    return retrieveRelevantChunks({ queryEmbedding, limit, filter });
+};
+
 module.exports = {
-    retrieveRelevantChunks
+    retrieveRelevantChunks,
+    retrieve
 };

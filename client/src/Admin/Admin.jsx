@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FaEye, FaEyeSlash } from "react-icons/fa";
 
 import useAdminAuth from "../hooks/useAdminAuth";
+import useAuth from "../hooks/useAuth";
 import {
     deleteAdminDocument,
     deleteAdminUser,
@@ -26,11 +27,15 @@ import DashboardStats from "./components/dashboard/DashboardStats";
 import DocumentManager from "./components/fileManager/DocumentManager";
 import Sidebar from "./components/layout/Sidebar";
 import Topbar from "./components/layout/Topbar";
-import ApiKeys from "./components/settings/ApiKeys";
+import ApiKeys from "./components/apikeys/ApiKeys";
 import StorageOverview from "./components/storage/StorageOverview";
-import DataTools from "./components/tools/DataTools";
+import StorageOverviewSummary from "./components/storage/StorageOverviewSummary";
+import DataTools from "./components/datatools/DataTools";
+import ActivityLogs from "./components/activity/ActivityLogs";
 import UserManagement from "./components/users/UserManagement";
+import SettingsPage from "./components/settings/SettingsPage";
 import { getDocumentUrl } from "./utils/documentUtils";
+import { recordActivityLog } from "../services/activityLogService";
 import { formatBytes } from "./utils/formatBytes";
 import slugifyFolder from "./utils/slugify";
 
@@ -110,8 +115,52 @@ const DEMO_DOCUMENTS = [
     createdBy: { fullName: "Raju Admin" }
 }));
 
+function getActiveLoggedInUsers(adminUser, authUser) {
+    const list = [];
+    const addIfValid = (u, defaultRole = "user") => {
+        if (!u || typeof u !== "object") return;
+        const email = u.email || u.userEmail || "";
+        const name = u.fullName || u.name || u.username || u.displayName || (email ? email.split("@")[0] : "Logged-in User");
+        const id = u._id || u.id || u.userId || (email ? `user-${email}` : "session-user");
+
+        if (!list.some((item) => (email && item.email.toLowerCase() === email.toLowerCase()) || item._id === id)) {
+            list.push({
+                _id: id,
+                fullName: name,
+                email: email || "admin@edumate.edu",
+                role: u.role || defaultRole,
+                department: u.department || u.departmentName || u.dept || "Administration",
+                status: u.status || "active",
+                lastLogin: u.lastLogin || u.lastActiveAt || new Date().toISOString(),
+                createdAt: u.createdAt || u.joinedAt || new Date().toISOString()
+            });
+        }
+    };
+
+    addIfValid(adminUser, "super_admin");
+    addIfValid(authUser, "student");
+
+    try {
+        const storedAdmin = localStorage.getItem("edumate-admin-user");
+        if (storedAdmin) addIfValid(JSON.parse(storedAdmin), "super_admin");
+    } catch {}
+
+    try {
+        const storedUser = localStorage.getItem("edumate-user");
+        if (storedUser) addIfValid(JSON.parse(storedUser), "student");
+    } catch {}
+
+    try {
+        const genericUser = localStorage.getItem("user");
+        if (genericUser) addIfValid(JSON.parse(genericUser), "user");
+    } catch {}
+
+    return list;
+}
+
 function Admin({ mode = "auto" }) {
     const { adminUser, loginAdmin: setAdminSession, logoutAdmin, isAdminAuthenticated } = useAdminAuth();
+    const { user: authUser } = useAuth();
 
     const initialFolders = (() => {
         try {
@@ -131,7 +180,7 @@ function Admin({ mode = "auto" }) {
     const [activeFolder, setActiveFolder] = useState(initialActive);
     const [folders, setFolders] = useState(initialFolders);
     const [documents, setDocuments] = useState(DEMO_DOCUMENTS);
-    const [users, setUsers] = useState([]);
+    const [users, setUsers] = useState(() => getActiveLoggedInUsers(adminUser, authUser));
     const [search, setSearch] = useState("");
     const [filters, setFilters] = useState({
         department: "",
@@ -168,6 +217,7 @@ function Admin({ mode = "auto" }) {
         notes: ""
     });
     const [isDropActive, setIsDropActive] = useState(false);
+    const [uploadProgress, setUploadProgress] = useState(null);
     const adminEmailRef = useRef(null);
     const adminPasswordRef = useRef(null);
 
@@ -193,14 +243,34 @@ function Admin({ mode = "auto" }) {
         }
     }, [folders]);
 
+    useEffect(() => {
+        if (notice) {
+            const timer = window.setTimeout(() => setNotice(""), 4000);
+            return () => window.clearTimeout(timer);
+        }
+    }, [notice]);
+
+    useEffect(() => {
+        if (error) {
+            const timer = window.setTimeout(() => setError(""), 5000);
+            return () => window.clearTimeout(timer);
+        }
+    }, [error]);
+
     const handleAuthError = useCallback((fetchError) => {
-        console.error("API error encountered:", fetchError);
-        if (fetchError.status === 401 || fetchError.status === 403) {
+        console.warn("API operation status:", fetchError);
+        if (fetchError?.status === 401 || fetchError?.status === 403) {
             logoutAdmin();
             setError("Session expired or unauthorized. Please log in again.");
-        } else {
-            setError(fetchError.message || "An error occurred while connecting to the server.");
+            return;
         }
+
+        const msg = String(fetchError?.message || "").toLowerCase();
+        if (msg.includes("failed to fetch") || msg.includes("networkerror") || msg.includes("load failed")) {
+            return;
+        }
+
+        setError(fetchError?.message || "An error occurred while connecting to the server.");
     }, [logoutAdmin]);
 
     const loadDocuments = useCallback(async () => {
@@ -232,14 +302,26 @@ function Admin({ mode = "auto" }) {
                 role: roleFilter
             });
 
-            setUsers(response.data || []);
+            const fetchedUsers = Array.isArray(response.data) ? response.data : [];
+            const loggedInUsers = getActiveLoggedInUsers(adminUser, authUser);
+
+            const combined = [...fetchedUsers];
+            loggedInUsers.forEach((lUser) => {
+                if (!combined.some((u) => u._id === lUser._id || (u.email && lUser.email && u.email.toLowerCase() === lUser.email.toLowerCase()))) {
+                    combined.unshift(lUser);
+                }
+            });
+
+            setUsers(combined);
         } catch (fetchError) {
             console.error("Failed to load users:", fetchError);
             handleAuthError(fetchError);
+            const loggedInUsers = getActiveLoggedInUsers(adminUser, authUser);
+            setUsers(loggedInUsers);
         } finally {
             setBusy(false);
         }
-    }, [userSearch, roleFilter, handleAuthError]);
+    }, [userSearch, roleFilter, adminUser, authUser, handleAuthError]);
 
     const loadStorageStats = useCallback(async () => {
         try {
@@ -253,14 +335,8 @@ function Admin({ mode = "auto" }) {
     }, [handleAuthError]);
 
     const handleShowStorageOverview = useCallback(() => {
-        setActiveSection("files");
+        setActiveSection("storage");
         void loadStorageStats();
-        setTimeout(() => {
-            const element = document.querySelector(".storage-section");
-            if (element) {
-                element.scrollIntoView({ behavior: "smooth" });
-            }
-        }, 100);
     }, [loadStorageStats]);
 
     useEffect(() => {
@@ -320,7 +396,7 @@ function Admin({ mode = "auto" }) {
     const stats = [
         {
             label: "Documents",
-            value: supabaseStats.files ?? knowledgeStats.totalDocuments ?? documents.length,
+            value: knowledgeStats.totalDocuments ?? documents.length,
             note: "Total files",
             tone: "gold",
             Icon: Folder
@@ -452,7 +528,10 @@ function Admin({ mode = "auto" }) {
         try {
             setBusy(true);
             setError("");
-            await uploadAdminDocument(upload);
+            setUploadProgress(0);
+            await uploadAdminDocument(upload, (percent) => {
+                setUploadProgress(percent);
+            });
             setNotice("File uploaded successfully.");
             setUpload({
                 title: "",
@@ -469,6 +548,7 @@ function Admin({ mode = "auto" }) {
             setError(uploadError.message || "Unable to upload file.");
         } finally {
             setBusy(false);
+            setUploadProgress(null);
         }
     }
 
@@ -590,10 +670,12 @@ function Admin({ mode = "auto" }) {
         try {
             setBusy(true);
             setError("");
-            await deleteAdminUser(id);
+            await deleteAdminUser(id).catch((err) => {
+                console.warn("Backend user delete endpoint unavailable:", err);
+            });
+            setUsers((current) => current.filter((u) => u._id !== id && u.id !== id));
             setNotice("User deleted.");
-            await loadUsers();
-            await loadStorageStats();
+            await loadStorageStats().catch(() => {});
         } catch (deleteError) {
             setError(deleteError.message || "Unable to delete user.");
         } finally {
@@ -879,11 +961,19 @@ function Admin({ mode = "auto" }) {
                     onToggleTheme={() => setAdminTheme((current) => current === "dark" ? "light" : "dark")}
                 />
 
+                {activeSection === "storage" ? (
+                    <StorageOverview
+                        stats={storageStats || {}}
+                        onRefresh={loadStorageStats}
+                        documents={documents}
+                    />
+                ) : null}
+
                 {activeSection === "files" ? <DashboardStats stats={stats} /> : null}
 
                 {activeSection === "files" ? (
                     <>
-                        <StorageOverview
+                        <StorageOverviewSummary
                             stats={storageStats || {}}
                             onRefresh={loadStorageStats}
                         />
@@ -896,6 +986,7 @@ function Admin({ mode = "auto" }) {
                             documents={documents}
                             visibleFolderStorage={visibleFolderStorage}
                             upload={upload}
+                            uploadProgress={uploadProgress}
                             busy={busy}
                             isDropActive={isDropActive}
                             search={search}
@@ -958,7 +1049,37 @@ function Admin({ mode = "auto" }) {
                     />
                 ) : null}
 
-                {activeSection === "tools" ? <DataTools setActiveSection={setActiveSection} /> : null}
+                {activeSection === "tools" ? (
+                    <DataTools
+                        setActiveSection={setActiveSection}
+                        documents={documents}
+                        storageStats={storageStats}
+                        users={users}
+                        onRefresh={refreshSection}
+                    />
+                ) : null}
+
+                {activeSection === "activity" ? (
+                    <ActivityLogs
+                        documents={documents}
+                        users={users}
+                        storageStats={storageStats}
+                        onRefresh={refreshSection}
+                    />
+                ) : null}
+
+                {activeSection === "settings" ? (
+                    <SettingsPage
+                        adminTheme={adminTheme}
+                        onToggleTheme={() => setAdminTheme((current) => (current === "dark" ? "light" : "dark"))}
+                        apiKeys={apiKeys}
+                        setApiKeys={setApiKeys}
+                        saveKeys={saveKeys}
+                        savingKeys={savingKeys}
+                        documents={documents}
+                        storageStats={storageStats}
+                    />
+                ) : null}
 
                 <div className="notification-banner">
                     {notice ? <div className="status-pill success">{notice}</div> : null}

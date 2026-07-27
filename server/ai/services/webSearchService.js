@@ -29,6 +29,22 @@ const UNTRUSTED_DOMAINS = [
 ];
 
 /**
+ * Get the university website domain based on user profile settings
+ * @param {Object} user
+ * @returns {string}
+ */
+const getUniversityDomain = (user) => {
+    if (process.env.UNIVERSITY_DOMAIN) {
+        return process.env.UNIVERSITY_DOMAIN;
+    }
+    const inst = String(user?.institution || "").toLowerCase().trim();
+    if (inst.includes("heritage") || inst.includes("hit") || inst.includes("kolkata")) {
+        return "heritageit.edu";
+    }
+    return "heritageit.edu"; // Default fallback
+};
+
+/**
  * Filter results based on trusted/untrusted domains
  * @param {string} urlStr 
  * @returns {boolean}
@@ -129,18 +145,16 @@ const searchJina = async (query) => {
 };
 
 /**
- * Execute a hybrid web search with fallback mechanisms and domain verification
- * @param {string} query - The search query
- * @returns {Promise<Array<Object>>} - Filtered and trusted search results
+ * Coordinate provider searches with transparent error failover
+ * @param {string} query
+ * @returns {Promise<Array<Object>>}
  */
-const searchWeb = async (query) => {
+const executeWebSearch = async (query) => {
     if (!query || !query.trim()) {
         return [];
     }
 
-    console.log(`Starting web search for query: "${query}"`);
-    
-    // Attempt DuckDuckGo HTML first (reliable, keyless)
+    // Try DuckDuckGo first
     let results = await searchDuckDuckGo(query);
 
     // Fallback to Jina if DDG returned no results
@@ -148,18 +162,47 @@ const searchWeb = async (query) => {
         results = await searchJina(query);
     }
 
-    // Filter results to only trust list
-    const filteredResults = results.filter(res => isTrustedUrl(res.url));
+    return results;
+};
 
-    // If filtering left us with nothing, fall back to allow standard results
-    // but rank trusted ones first
-    const outputResults = filteredResults.length > 0 ? filteredResults : results;
+/**
+ * Search only the official university website
+ * @param {string} query
+ * @param {Object} user
+ * @returns {Promise<Array<Object>>}
+ */
+const searchUniversityWebsite = async (query, user) => {
+    const domain = getUniversityDomain(user);
+    const restrictedQuery = `site:${domain} ${query}`;
+    console.log(`Executing university site-restricted search: "${restrictedQuery}"`);
+    const results = await executeWebSearch(restrictedQuery);
+    return results.slice(0, 5);
+};
 
-    // Return the top 5 results
-    return outputResults.slice(0, 5);
+/**
+ * Search general web and filter results to trusted domains only
+ * @param {string} query
+ * @returns {Promise<Array<Object>>}
+ */
+const searchTrustedWeb = async (query) => {
+    console.log(`Executing general trusted search for query: "${query}"`);
+    const results = await executeWebSearch(query);
+    const filtered = results.filter(res => isTrustedUrl(res.url));
+    const output = filtered.length > 0 ? filtered : results;
+    return output.slice(0, 5);
+};
+
+/**
+ * Legacy searchWeb export for backwards compatibility
+ */
+const searchWeb = async (query) => {
+    const results = await executeWebSearch(query);
+    return results.slice(0, 5);
 };
 
 module.exports = {
+    searchUniversityWebsite,
+    searchTrustedWeb,
     searchWeb,
     isTrustedUrl
 };

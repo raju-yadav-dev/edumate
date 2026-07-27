@@ -1,21 +1,25 @@
 const Chat = require("../../models/Chat");
-const { classifyIntent, classifyQuestionType, QUESTION_TYPES } = require("../../services/intentService");
+const { classifyQuestionType, QUESTION_TYPES } = require("../../services/intentService");
 const { decide } = require("../../services/decisionEngine");
 const mapService = require("../../services/mapService");
 const responseValidator = require("../../services/responseValidator");
-const responseFormatter = require("../../services/responseFormatter");
-const { SOURCE_LABELS } = responseFormatter;
 const AI_CONSTANTS = require("../constants/aiConstants");
 
 // AI module services
-const gemini = require("../config/gemini");
-const embeddingService = require("./embeddingService");
-const retrievalService = require("./retrievalService");
+const llmService = require("./llmService");
 const rerankService = require("./rerankService");
-const promptService = require("./promptService");
 const conversationService = require("./conversationService");
-const citationService = require("./citationService");
+const intentDetectionService = require("./intentDetectionService");
+const entityExtractionService = require("./entityExtractionService");
+const queryRewriterService = require("./queryRewriterService");
+const clarificationService = require("./clarificationService");
+const retrievalService = require("./retrievalService");
 const webSearchService = require("./webSearchService");
+const promptService = require("./promptService");
+const responseFormattingService = require("./responseFormattingService");
+const { SOURCE_LABELS } = responseFormattingService;
+const citationService = require("./citationService");
+const suggestionsService = require("./suggestionsService");
 
 const deterministicGreeting = (user) => ({
     answer: `Hello ${user?.fullName || "there"}. I can help with institutional questions, documents, campus services, routes, and academic support.`,
@@ -37,75 +41,6 @@ const buildGuestUser = () => ({
     department: ""
 });
 
-const shouldClarifyFees = (question) => {
-    const normalized = question.toLowerCase();
-    return /\b(fee|fees|tuition|payment|cost)\b/.test(normalized) &&
-        !/\b(btech|b\.tech|mtech|m\.tech|mba|bca|mca|bba|ba|bsc|msc|course|program|department)\b/.test(normalized);
-};
-
-const shouldClarifyRoute = (question) => {
-    const normalized = question.toLowerCase();
-    return /\b(route|directions|how to reach|distance|travel|nearby)\b/.test(normalized) &&
-        !/\b(from|to|near|current location|station|airport|bus stand|college)\b/.test(normalized);
-};
-
-const clarificationAnswer = (question) => {
-    if (shouldClarifyFees(question)) {
-        return {
-            answer: "Which course or program do you want the fee structure for? For example: B.Tech CSE, BCA, MBA, hostel fee, admission fee, or semester fee.",
-            confidence: "high",
-            sources: [
-                {
-                    type: "system",
-                    title: "EduMate Clarification",
-                    reference: "fee-course-required"
-                }
-            ]
-        };
-    }
-
-    if (shouldClarifyRoute(question)) {
-        return {
-            answer: "Please share your starting point and destination so I can compare possible routes, travel time, and approximate cost. Example: from Howrah Station to the college.",
-            confidence: "high",
-            sources: [
-                {
-                    type: "system",
-                    title: "EduMate Clarification",
-                    reference: "route-origin-destination-required"
-                }
-            ]
-        };
-    }
-
-    return null;
-};
-
-const getOrCreateChat = async ({ user, conversationId, question }) => {
-    if (!user?._id) {
-        return null;
-    }
-
-    if (conversationId) {
-        const existingChat = await Chat.findOne({
-            _id: conversationId,
-            user: user._id,
-            status: "active"
-        });
-        if (existingChat) {
-            return existingChat;
-        }
-    }
-
-    return Chat.create({
-        title: question.slice(0, 80),
-        user: user._id,
-        institution: user.institution || "",
-        createdBy: user._id,
-        updatedBy: user._id
-    });
-};
-
 /**
  * Handles chatbot queries with RAG matching using Gemini 2.5 Flash and Qdrant
  */
@@ -120,10 +55,6 @@ const askQuestion = async ({ user, question, conversationId }) => {
         throw error;
     }
 
-    const intentResult = classifyIntent(normalizedQuestion);
-    const questionType = classifyQuestionType(normalizedQuestion, intentResult.intent);
-    const decision = decide(intentResult);
-
     // 1. Retrieve dialogue history memory context
     const { historyText } = await conversationService.getRecentMemory({
         userId: activeUser._id,
@@ -131,114 +62,214 @@ const askQuestion = async ({ user, question, conversationId }) => {
         maxTokens: 1500
     });
 
+    // 2. Intent Detection
+    const intentResult = await intentDetectionService.detectIntent(normalizedQuestion);
+    const decision = decide(intentResult);
+
+    // 3. Entity Extraction
+    const entities = await entityExtractionService.extractEntities(normalizedQuestion);
+
+    // 4. Clarification Handling
+    const clarification = clarificationService.checkClarification({
+        intent: intentResult.intent,
+        entities,
+        question: normalizedQuestion
+    });
+
+    if (clarification) {
+        const responseTimeMs = Date.now() - startedAt;
+        const chat = await conversationService.saveMessageTurn({
+            user: activeUser,
+            conversationId,
+            question: normalizedQuestion,
+            response: clarification,
+            intent: intentResult.intent,
+            confidence: intentResult.confidence,
+            provider: "system",
+            responseTimeMs
+        });
+
+        const suggestions = await suggestionsService.generateSuggestions({
+            question: normalizedQuestion,
+            answer: clarification.answer
+        });
+
+        return {
+            conversationId: chat?._id || conversationId || null,
+            mode: activeUser._id ? "authenticated" : "guest",
+            message: clarification.answer,
+            intent: intentResult.intent,
+            intentConfidence: intentResult.confidence,
+            confidence: clarification.confidence,
+            sources: clarification.sources,
+            sourceLabel: SOURCE_LABELS.UNIVERSITY,
+            provider: "system",
+            responseTimeMs,
+            suggestions
+        };
+    }
+
+    // 5. Query Rewriting
+    const rewrittenQuery = await queryRewriterService.rewriteQuery({
+        question: normalizedQuestion,
+        historyText
+    });
+    console.log(`Original: "${normalizedQuestion}" | Rewritten: "${rewrittenQuery}"`);
+
     let retrievedChunks = [];
+    let universitySiteResults = [];
     let webResults = [];
-    let activeQuestionType = questionType;
+    let activeQuestionType = QUESTION_TYPES.UNIVERSITY_SPECIFIC;
     let sourceLabel = SOURCE_LABELS.UNIVERSITY;
     let formatted;
     let provider = "system";
 
-    const clarification = clarificationAnswer(normalizedQuestion);
-
-    if (clarification) {
-        formatted = clarification;
-    } else if (decision.service === "deterministic") {
+    if (decision.service === "deterministic") {
         formatted = deterministicGreeting(activeUser);
     } else if (decision.service === "map") {
         const mapResult = await mapService.resolveLocationRequest({
-            question: normalizedQuestion,
+            question: rewrittenQuery,
             user: activeUser
         });
 
         formatted = mapResult.found
-            ? responseFormatter.formatAnswer({
+            ? responseFormattingService.formatAnswer({
                 answer: mapResult.answer,
                 confidence: "high",
                 sources: mapResult.sources,
                 sourceLabel: SOURCE_LABELS.UNIVERSITY
             })
-            : responseFormatter.formatUnavailable({ reason: mapResult.answer });
+            : responseFormattingService.formatUnavailable({ reason: mapResult.answer });
     } else {
-        // Perform RAG and Web Search Pipeline
-        try {
-            // A. Generate embedding for query
-            const queryEmbedding = await embeddingService.getQueryEmbedding(normalizedQuestion);
+        // Perform 3-Tier Fallback Search Pipeline
+        const isUniversityRelated = classifyQuestionType(rewrittenQuery, intentResult.intent) !== QUESTION_TYPES.GENERAL_KNOWLEDGE;
 
-            // B. Semantic retrieval search
-            const filter = {};
-            if (activeUser.institution) filter.institution = activeUser.institution;
-            if (activeUser.department) filter.department = activeUser.department;
+        if (isUniversityRelated) {
+            console.log(`RAG Tier 1: Querying local Qdrant database...`);
+            try {
+                // Tier 1: Search Qdrant
+                const chunks = await retrievalService.retrieve({
+                    question: rewrittenQuery,
+                    user: activeUser,
+                    limit: AI_CONSTANTS.DEFAULT_RETRIEVAL_LIMIT
+                });
 
-            const chunks = await retrievalService.retrieveRelevantChunks({
-                queryEmbedding,
-                limit: AI_CONSTANTS.DEFAULT_RETRIEVAL_LIMIT,
-                filter
-            });
+                // Rerank retrieved chunks
+                const reranked = await rerankService.rerank(rewrittenQuery, chunks);
+                const maxScore = reranked.length > 0 ? Math.max(...reranked.map(c => c.score)) : 0;
+                console.log(`Local KB Search Max Score: ${maxScore.toFixed(3)}`);
 
-            // C. Rerank retrieved chunks
-            const reranked = await rerankService.rerank(normalizedQuestion, chunks);
-            
-            // Calculate max score from reranked chunks
-            const maxScore = reranked.length > 0 ? Math.max(...reranked.map(c => c.score)) : 0;
-
-            console.log(`RAG Max Similarity Score: ${maxScore.toFixed(3)} for query: "${normalizedQuestion}"`);
-
-            // D. Confidence based decision rules
-            if (maxScore > 0.80) {
-                // High confidence university resource match
-                retrievedChunks = reranked.filter((chunk) => chunk.score >= AI_CONSTANTS.SIMILARITY_THRESHOLD);
-                webResults = [];
-                activeQuestionType = QUESTION_TYPES.UNIVERSITY_SPECIFIC;
-                sourceLabel = SOURCE_LABELS.UNIVERSITY;
-            } else if (maxScore >= 0.50 && maxScore <= 0.80) {
-                // Medium confidence -> Hybrid RAG (Combine university resource + web search)
-                retrievedChunks = reranked.filter((chunk) => chunk.score >= AI_CONSTANTS.SIMILARITY_THRESHOLD);
-                webResults = await webSearchService.searchWeb(normalizedQuestion);
-                activeQuestionType = QUESTION_TYPES.HYBRID;
-                sourceLabel = SOURCE_LABELS.COMBINED;
-            } else {
-                // Low confidence -> Web Search Only
-                retrievedChunks = [];
-                webResults = await webSearchService.searchWeb(normalizedQuestion);
+                if (maxScore >= AI_CONSTANTS.SIMILARITY_THRESHOLD) {
+                    console.log(`→ Found in local documents with score ${maxScore.toFixed(3)}`);
+                    retrievedChunks = reranked.filter((chunk) => chunk.score >= AI_CONSTANTS.SIMILARITY_THRESHOLD);
+                    activeQuestionType = QUESTION_TYPES.UNIVERSITY_SPECIFIC;
+                    sourceLabel = SOURCE_LABELS.UNIVERSITY;
+                } else {
+                    console.log(`→ Local score is below threshold (${maxScore.toFixed(3)} < ${AI_CONSTANTS.SIMILARITY_THRESHOLD}). Moving to Tier 2...`);
+                    // Tier 2: Search Official University Website
+                    universitySiteResults = await webSearchService.searchUniversityWebsite(rewrittenQuery, activeUser);
+                    
+                    if (universitySiteResults.length > 0) {
+                        console.log("→ Found on official university website.");
+                        activeQuestionType = QUESTION_TYPES.UNIVERSITY_SPECIFIC;
+                        sourceLabel = SOURCE_LABELS.UNIVERSITY;
+                    } else {
+                        console.log("→ Not found on official website. Moving to Tier 3...");
+                        // Tier 3: Search Trusted Internet Sources
+                        webResults = await webSearchService.searchTrustedWeb(rewrittenQuery);
+                        activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
+                        sourceLabel = SOURCE_LABELS.WEB;
+                    }
+                }
+            } catch (searchError) {
+                console.error("Local KB/Website search pipeline failed, falling back to Trusted Web:", searchError);
+                webResults = await webSearchService.searchTrustedWeb(rewrittenQuery);
                 activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
                 sourceLabel = SOURCE_LABELS.WEB;
             }
-        } catch (e) {
-            console.error("Hybrid RAG pipeline failed:", e);
-            // Fallback to web search if Qdrant is down or embedding fails
+        } else {
+            console.log(`Query is not university related. Searching general trusted web directly...`);
+            webResults = await webSearchService.searchTrustedWeb(rewrittenQuery);
+            activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
+            sourceLabel = SOURCE_LABELS.WEB;
+        }
+
+        // Format Citations
+        const sources = citationService.formatCitations(retrievedChunks, universitySiteResults, webResults);
+
+        // Enrich citations with signed download URLs
+        const docIds = sources
+            .filter(src => src.type === "document" && src.metadata?.documentId)
+            .map(src => src.metadata.documentId);
+
+        let signedUrlsMap = {};
+        if (docIds.length > 0) {
             try {
-                webResults = await webSearchService.searchWeb(normalizedQuestion);
-                activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
-                sourceLabel = SOURCE_LABELS.WEB;
-            } catch (err) {
-                console.error("Web search fallback failed:", err);
+                const Document = require("../../models/Document");
+                const supabase = require("../../config/supabase");
+                const BUCKET = process.env.SUPABASE_STORAGE_BUCKET || process.env.SUPABASE_BUCKET;
+
+                const docs = await Document.find({ _id: { $in: docIds } }).lean();
+                const paths = docs.map(d => d.storagePath).filter(Boolean);
+                
+                if (paths.length > 0) {
+                    const { data, error } = await supabase.storage
+                        .from(BUCKET)
+                        .createSignedUrls(paths, Number(process.env.SUPABASE_SIGNED_URL_TTL_SECONDS) || 3600);
+                    
+                    if (!error && data) {
+                        const pathSignedUrlMap = {};
+                        data.forEach(item => {
+                            if (item.signedUrl) {
+                                pathSignedUrlMap[item.path] = item.signedUrl;
+                            }
+                        });
+
+                        docs.forEach(d => {
+                            if (pathSignedUrlMap[d.storagePath]) {
+                                signedUrlsMap[d._id.toString()] = pathSignedUrlMap[d.storagePath];
+                            }
+                        });
+                    }
+                }
+            } catch (enrichError) {
+                console.error("Failed to enrich citations with signed URLs:", enrichError);
             }
         }
 
-        const sources = citationService.formatCitations(retrievedChunks, webResults);
+        // Attach download/view URLs to sources
+        sources.forEach(src => {
+            if (src.type === "document" && src.metadata?.documentId) {
+                const url = signedUrlsMap[src.metadata.documentId.toString()];
+                if (url) {
+                    src.downloadUrl = url;
+                }
+            }
+        });
 
-        // If we require verified context but have no sources, mark as unavailable
+        // If context is required but empty, format unavailable
         if (decision.requiresVerifiedContext && sources.length === 0) {
-            formatted = responseFormatter.formatUnavailable({
+            formatted = responseFormattingService.formatUnavailable({
                 reason: AI_CONSTANTS.FALLBACK_RESPONSE
             });
         } else {
-            // E. Assemble message prompts
+            // Build Prompt Messages
             const messages = promptService.buildPromptMessages({
-                question: normalizedQuestion,
+                question: rewrittenQuery,
                 intent: intentResult.intent,
                 retrievedChunks,
+                universitySiteResults,
                 webResults,
                 historyText,
                 user: activeUser,
                 questionType: activeQuestionType
             });
 
-            // F. Call Gemini completion endpoint
-            const textResponse = await gemini.generateCompletion(messages);
-            provider = "gemini-flash";
+            // Call Unified LLM Service
+            const textResponse = await llmService.generateCompletion(messages);
+            provider = process.env.LLM_PROVIDER === "ollama" ? "ollama" : "gemini-flash";
 
-            // G. Validate response against hallucinations
+            // Validate response against hallucinations
             const validation = responseValidator.validateResponse({
                 intent: intentResult.intent,
                 retrievedContext: { chunks: retrievedChunks, sources },
@@ -248,47 +279,34 @@ const askQuestion = async ({ user, question, conversationId }) => {
             });
 
             formatted = validation.valid
-                ? responseFormatter.formatAnswer({
+                ? responseFormattingService.formatAnswer({
                     answer: textResponse,
                     confidence: validation.confidence,
                     sources,
                     sourceLabel
                 })
-                : responseFormatter.formatUnavailable({ reason: validation.reason });
+                : responseFormattingService.formatUnavailable({ reason: validation.reason });
         }
     }
 
-    // 3. Save conversation exchanges to MongoDB thread
-    const chat = await getOrCreateChat({
+    // 6. Save conversation turn to database
+    const responseTimeMs = Date.now() - startedAt;
+    const chat = await conversationService.saveMessageTurn({
         user: activeUser,
         conversationId,
-        question: normalizedQuestion
+        question: normalizedQuestion,
+        response: formatted,
+        intent: intentResult.intent,
+        confidence: intentResult.confidence,
+        provider,
+        responseTimeMs
     });
 
-    const responseTimeMs = Date.now() - startedAt;
-
-    if (chat) {
-        chat.messages.push({
-            role: "user",
-            content: normalizedQuestion,
-            intent: intentResult.intent,
-            confidence: intentResult.confidence,
-            provider: "user"
-        });
-
-        chat.messages.push({
-            role: "assistant",
-            content: formatted.answer,
-            intent: intentResult.intent,
-            confidence: formatted.confidence === "high" ? 0.9 : formatted.confidence === "medium" ? 0.65 : 0.25,
-            sources: formatted.sources,
-            provider,
-            responseTimeMs
-        });
-
-        chat.updatedBy = activeUser._id;
-        await chat.save();
-    }
+    // 7. Generate Follow-up Suggestions
+    const suggestions = await suggestionsService.generateSuggestions({
+        question: normalizedQuestion,
+        answer: formatted.answer
+    });
 
     return {
         conversationId: chat?._id || conversationId || null,
@@ -300,7 +318,8 @@ const askQuestion = async ({ user, question, conversationId }) => {
         sources: formatted.sources,
         sourceLabel: formatted.sourceLabel || sourceLabel,
         provider,
-        responseTimeMs
+        responseTimeMs,
+        suggestions
     };
 };
 
@@ -320,7 +339,7 @@ const getChatDetails = async ({ user, conversationId }) => {
     const chat = await Chat.findOne({ _id: conversationId, user: user._id, status: "active" });
     if (!chat) {
         const error = new Error("Chat not found.");
-        error.statusCode = 404;
+        error.statusCode = 424;
         throw error;
     }
     return chat;
@@ -333,7 +352,7 @@ const renameChat = async ({ user, conversationId, title }) => {
     const chat = await Chat.findOne({ _id: conversationId, user: user._id, status: "active" });
     if (!chat) {
         const error = new Error("Chat not found.");
-        error.statusCode = 404;
+        error.statusCode = 424;
         throw error;
     }
     chat.title = title.trim().slice(0, 80);
@@ -349,7 +368,7 @@ const deleteChat = async ({ user, conversationId }) => {
     const chat = await Chat.findOne({ _id: conversationId, user: user._id, status: "active" });
     if (!chat) {
         const error = new Error("Chat not found.");
-        error.statusCode = 404;
+        error.statusCode = 424;
         throw error;
     }
     chat.status = "deleted";
@@ -365,7 +384,7 @@ const regenerateResponse = async ({ user, conversationId }) => {
     const chat = await Chat.findOne({ _id: conversationId, user: user._id, status: "active" });
     if (!chat) {
         const error = new Error("Chat not found.");
-        error.statusCode = 404;
+        error.statusCode = 424;
         throw error;
     }
 
@@ -410,32 +429,10 @@ const getSuggestedQuestions = async ({ user, conversationId }) => {
         }
     }
 
-    const suggestionsPrompt = require("../utils/promptBuilder").getSuggestedQuestionsPrompt();
-    const messages = [
-        { role: "system", content: suggestionsPrompt.system },
-        { role: "user", content: suggestionsPrompt.formatUser(lastQuery, lastResponse) }
-    ];
-
-    try {
-        const rawContent = await gemini.generateCompletion(messages, { temperature: 0.7 });
-        const lines = rawContent
-            .split("\n")
-            .map((line) => line.trim().replace(/^[-*0-9.\s]+/, ""))
-            .filter(Boolean)
-            .slice(0, 3);
-
-        if (lines.length > 0) {
-            return lines;
-        }
-    } catch (e) {
-        console.error("Error generating suggested questions:", e);
-    }
-
-    return [
-        "What other documents are uploaded?",
-        "Can I get details on admission criteria?",
-        "What are the fee details for this department?"
-    ];
+    return suggestionsService.generateSuggestions({
+        question: lastQuery,
+        answer: lastResponse
+    });
 };
 
 module.exports = {

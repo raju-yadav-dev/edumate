@@ -23,6 +23,18 @@ function MessageBubble({
     const isUser = message.role === "user";
     const hasCitations = Array.isArray(message.sources) && message.sources.length > 0;
 
+    const handleCitationClick = (citation) => {
+        if (message.onCitationClick) {
+            message.onCitationClick(citation);
+            return;
+        }
+
+        const url = citation.downloadUrl || (citation.type === "web" || citation.type === "university_website" ? citation.reference : null);
+        if (url) {
+            window.open(url, "_blank", "noopener,noreferrer");
+        }
+    };
+
     return (
         <article className={`edu-chat-message ${isUser ? "edu-chat-message-user" : "edu-chat-message-assistant"}`}>
             <div className="edu-chat-message-avatar" aria-hidden="true">
@@ -82,7 +94,7 @@ function MessageBubble({
                             <p className="edu-chat-section-label">Sources</p>
                             <div className="edu-chat-citation-grid">
                                 {message.sources.map((citation) => (
-                                    <CitationCard key={`${citation.title}-${citation.page}-${citation.section}`} citation={citation} onClick={() => message.onCitationClick?.(citation)} />
+                                    <CitationCard key={`${citation.title}-${citation.page}-${citation.section}`} citation={citation} onClick={() => handleCitationClick(citation)} />
                                 ))}
                             </div>
                         </div>

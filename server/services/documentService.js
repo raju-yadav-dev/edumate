@@ -8,6 +8,7 @@ const BUCKET = process.env.SUPABASE_STORAGE_BUCKET || process.env.SUPABASE_BUCKE
 
 const DOCUMENT_CATEGORIES = Object.freeze([
     "admissions",
+    "academics",
     "fees",
     "hostel",
     "departments",

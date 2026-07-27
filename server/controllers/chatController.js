@@ -1,4 +1,4 @@
-const chatService = require("../services/chatService");
+const chatService = require("../services/chatService"); // reload nodemon - ollama integration
 const asyncHandler = require("../utils/asyncHandler");
 const { sendSuccess } = require("../utils/response");
 

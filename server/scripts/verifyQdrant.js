@@ -7,7 +7,7 @@ const colors = require("./colors");
  * @returns {Promise<boolean>}
  */
 const verifyQdrant = async (maxAttempts = 10) => {
-    const url = process.env.QDRANT_URL || "http://localhost:6333";
+    const url = process.env.QDRANT_URL || "http://127.0.0.1:6333";
     console.log(colors.cyan(`Connecting to Qdrant service at: ${url}...`));
 
     let attempts = 0;
@@ -22,7 +22,7 @@ const verifyQdrant = async (maxAttempts = 10) => {
             await ensureCollection();
             return true;
         } catch (err) {
-            console.log(colors.yellow(`⚠️ Qdrant status check: Connection attempt ${attempts}/${maxAttempts} failed. Retrying in 2 seconds...`));
+            console.log(colors.yellow(`⚠️ Qdrant status check: Connection attempt ${attempts}/${maxAttempts} failed: ${err.message}. Retrying in 2 seconds...`));
             if (attempts < maxAttempts) {
                 await new Promise((resolve) => setTimeout(resolve, 2000));
             }

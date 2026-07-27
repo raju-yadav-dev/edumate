@@ -2,6 +2,7 @@ import { UploadCloud } from "lucide-react";
 
 function UploadDialog({
     upload,
+    uploadProgress = null,
     busy,
     isDropActive,
     onDrop,
@@ -11,6 +12,18 @@ function UploadDialog({
     onSubmit,
     setUpload
 }) {
+    const handleCancel = () => {
+        setUpload({
+            title: "",
+            category: upload.category,
+            file: null,
+            institution: "",
+            department: "",
+            version: "1",
+            notes: ""
+        });
+    };
+
     return (
         <form className="upload-area" onSubmit={onSubmit}>
             <label
@@ -40,14 +53,19 @@ function UploadDialog({
                 <input type="number" min="1" placeholder="Version" value={upload.version} onChange={(event) => setUpload((current) => ({ ...current, version: event.target.value }))} />
                 <input type="text" placeholder="Tags / Notes" value={upload.notes} onChange={(event) => setUpload((current) => ({ ...current, notes: event.target.value }))} />
             </div>
+            {uploadProgress !== null && (
+                <div className="upload-progress-container">
+                    <div className="upload-progress-bar" style={{ width: `${uploadProgress}%` }}></div>
+                    <span className="upload-progress-text">{uploadProgress}% Uploaded</span>
+                </div>
+            )}
 
             <div className="upload-actions">
-                <button type="button" className="upload-cancel" onClick={() => onFile(null)} disabled={busy}>
+                <button type="button" className="upload-cancel" onClick={handleCancel} disabled={busy}>
                     Cancel
                 </button>
                 <button type="submit" className="upload-submit" disabled={busy}>
-                    <UploadCloud size={16} />
-                    Upload
+                    {busy ? "Uploading..." : "Upload"}
                 </button>
             </div>
         </form>
@@ -55,3 +73,4 @@ function UploadDialog({
 }
 
 export default UploadDialog;
+

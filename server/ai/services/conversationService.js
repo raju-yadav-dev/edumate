@@ -76,7 +76,67 @@ const summarizeHistory = async (historyText) => {
     }
 };
 
+const getOrCreateChat = async ({ user, conversationId, question }) => {
+    if (!user?._id) {
+        return null;
+    }
+
+    if (conversationId) {
+        const existingChat = await Chat.findOne({
+            _id: conversationId,
+            user: user._id,
+            status: "active"
+        });
+        if (existingChat) {
+            return existingChat;
+        }
+    }
+
+    return Chat.create({
+        title: question.slice(0, 80),
+        user: user._id,
+        institution: user.institution || "",
+        createdBy: user._id,
+        updatedBy: user._id
+    });
+};
+
+const saveMessageTurn = async ({ user, conversationId, question, response, intent, confidence, provider, responseTimeMs }) => {
+    const chat = await getOrCreateChat({
+        user,
+        conversationId,
+        question
+    });
+
+    if (chat) {
+        chat.messages.push({
+            role: "user",
+            content: question,
+            intent: intent,
+            confidence: confidence,
+            provider: "user"
+        });
+
+        chat.messages.push({
+            role: "assistant",
+            content: response.answer || response,
+            intent: intent,
+            confidence: response.confidence === "high" ? 0.9 : response.confidence === "medium" ? 0.65 : 0.25,
+            sources: response.sources || [],
+            provider,
+            responseTimeMs
+        });
+
+        chat.updatedBy = user._id;
+        await chat.save();
+    }
+
+    return chat;
+};
+
 module.exports = {
     getRecentMemory,
-    summarizeHistory
+    summarizeHistory,
+    getOrCreateChat,
+    saveMessageTurn
 };

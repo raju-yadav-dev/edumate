@@ -59,7 +59,14 @@ function FileTable({
 
             {/* ================= TABLE BODY ================= */}
 
-            <div className="file-rows">
+            <div 
+                className="file-rows"
+                onContextMenu={(event) => {
+                    if (event.target.classList.contains("file-rows") || event.target.classList.contains("empty-state")) {
+                        onContextMenu?.(event, null);
+                    }
+                }}
+            >
 
                 {busy && documents.length === 0 && (
                     <div className="empty-state">

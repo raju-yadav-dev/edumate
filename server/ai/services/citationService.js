@@ -1,10 +1,11 @@
 /**
- * Formats vector search chunks and web search results into clean, deduplicated citation source objects
+ * Formats vector search chunks, university website results, and general web results into clean, deduplicated citation source objects
  * @param {Array<Object>} retrievedChunks
+ * @param {Array<Object>} universitySiteResults
  * @param {Array<Object>} webResults
  * @returns {Array<Object>} - Formatted citation array
  */
-const formatCitations = (retrievedChunks = [], webResults = []) => {
+const formatCitations = (retrievedChunks = [], universitySiteResults = [], webResults = []) => {
     const citations = [];
 
     if (retrievedChunks && retrievedChunks.length > 0) {
@@ -13,12 +14,39 @@ const formatCitations = (retrievedChunks = [], webResults = []) => {
             citations.push({
                 type: "document",
                 title: metadata.originalName || "University Document",
+                page: String(metadata.pageNumber || 1),
+                section: metadata.category ? String(metadata.category).replace(/_/g, " ") : "General",
+                similarity: chunk.score !== undefined ? Math.max(0, Math.min(100, Math.round(chunk.score * 100))) : 100,
                 reference: `Page ${metadata.pageNumber || 1}`,
                 metadata: {
+                    documentId: metadata.documentId || "",
                     category: metadata.category || "",
                     department: metadata.department || "",
                     institution: metadata.institution || "",
                     similarity: chunk.score !== undefined ? Math.max(0, Math.min(100, Math.round(chunk.score * 100))) : 100
+                }
+            });
+        });
+    }
+
+    if (universitySiteResults && universitySiteResults.length > 0) {
+        universitySiteResults.forEach((result) => {
+            let domain = "University Website";
+            try {
+                if (result.url) {
+                    domain = new URL(result.url).hostname;
+                }
+            } catch {
+                // Ignore parsing errors
+            }
+
+            citations.push({
+                type: "university_website",
+                title: result.title || "University Page",
+                reference: result.url || "",
+                metadata: {
+                    snippet: result.snippet || "",
+                    domain
                 }
             });
         });

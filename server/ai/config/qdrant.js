@@ -1,13 +1,39 @@
+// Wrap global fetch to strip out incompatible custom Undici dispatchers in Node.js 26+
+if (globalThis.fetch) {
+    const originalFetch = globalThis.fetch;
+    try {
+        globalThis.fetch = function (input, init) {
+            if (init && init.dispatcher) {
+                const { dispatcher, ...restInit } = init;
+                return originalFetch.call(this, input, restInit);
+            }
+            return originalFetch.apply(this, arguments);
+        };
+    } catch (e) {
+        try {
+            globalThis.fetch = function (url, options) {
+                if (options && options.dispatcher) {
+                    try {
+                        delete options.dispatcher;
+                    } catch (err) {}
+                }
+                return originalFetch.apply(this, arguments);
+            };
+        } catch (err) {}
+    }
+}
+
 const { QdrantClient } = require("@qdrant/js-client-rest");
 
-const qdrantUrl = process.env.QDRANT_URL || "http://localhost:6333";
+const qdrantUrl = process.env.QDRANT_URL || "http://127.0.0.1:6333";
 const qdrantApiKey = process.env.QDRANT_API_KEY || undefined;
 const collectionName = process.env.QDRANT_COLLECTION || "edumate";
 
 // Initialize Qdrant Client
 const client = new QdrantClient({
     url: qdrantUrl,
-    apiKey: qdrantApiKey
+    apiKey: qdrantApiKey,
+    checkCompatibility: false
 });
 
 /**

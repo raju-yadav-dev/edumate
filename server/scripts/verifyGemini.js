@@ -1,11 +1,32 @@
 const gemini = require("../ai/config/gemini");
+const ollama = require("../ai/config/ollama");
 const colors = require("./colors");
 
 /**
- * Validates the Gemini API key against Google's endpoints by generating a test embedding
+ * Validates the configured AI connection (Ollama or Gemini) by generating a test embedding
  * @returns {Promise<boolean>}
  */
 const verifyGemini = async () => {
+    const isOllama = process.env.LLM_PROVIDER === "ollama";
+    
+    if (isOllama) {
+        console.log(colors.cyan("Verifying Ollama connection and model..."));
+        try {
+            await ollama.verifyConnection();
+            const testEmbedding = await ollama.generateEmbedding("verification ping");
+            if (Array.isArray(testEmbedding) && testEmbedding.length > 0) {
+                console.log(colors.green("✓ Ollama connection validated successfully."));
+                return true;
+            }
+            throw new Error("Ollama Embedding payload resolved with an invalid structure.");
+        } catch (err) {
+            console.error(colors.red(`❌ Error: Ollama connection check failed: ${err.message}`));
+            console.log(colors.yellow(`💡 Suggestion: Ensure Ollama is running and the model '${process.env.OLLAMA_MODEL || "qwen2.5:3b"}' is pulled.`));
+            console.log(colors.cyan(`   Run: ollama pull ${process.env.OLLAMA_MODEL || "qwen2.5:3b"}`));
+            return false;
+        }
+    }
+
     console.log(colors.cyan("Verifying Google Gemini API connection..."));
     
     try {

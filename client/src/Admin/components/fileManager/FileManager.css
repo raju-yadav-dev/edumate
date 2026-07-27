@@ -2,12 +2,13 @@
     position: relative;
     width: 100%;
     min-width: 0;
-    min-height: 100vh;
+    min-height: auto;
+    height: auto;
     padding: 18px 16px 0;
     display: grid;
     grid-template-rows: auto minmax(0, 1fr);
     gap: 14px;
-    overflow: hidden;
+    overflow: visible;
 }
 
 /* The reference keeps uploads in the top action bar and reserves the whole
@@ -17,16 +18,43 @@
 }
 
 .document-upload-portal {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(4, 7, 12, 0.75);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
     opacity: 0;
     pointer-events: none;
+    transition: opacity 0.25s ease;
+}
+
+.document-upload-portal.active {
+    opacity: 1;
+    pointer-events: auto;
 }
 
 .document-upload-portal .upload-area {
-    display: block;
+    width: 100%;
+    max-width: 480px;
+    background: #0d1520;
+    border: 1px solid var(--admin-line);
+    border-radius: 12px;
+    padding: 24px;
+    display: grid;
+    gap: 16px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+    transform: translateY(20px);
+    transition: transform 0.25s ease;
+}
+
+.document-upload-portal.active .upload-area {
+    transform: translateY(0);
 }
 
 .document-manager-head {
@@ -78,8 +106,8 @@
 
 .document-layout {
     min-width: 0;
-    min-height: 0;
-    height: clamp(500px,800px, 920px);
+    min-height: 600px;
+    height: auto;
     display: grid;
     grid-template-columns: 216px minmax(0, 1fr);
     border: 1px solid var(--admin-line);
@@ -250,6 +278,60 @@
 .upload-dropzone small { overflow: hidden; color: var(--admin-muted); text-overflow: ellipsis; white-space: nowrap; }
 .upload-meta-grid { display: grid; gap: 8px; }
 .upload-meta-grid input { min-height: 38px; padding: 0 10px; border-radius: 8px; }
+
+/* Upload Modal Action Buttons and Progress Bar */
+.upload-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 14px;
+}
+
+.upload-cancel {
+    min-height: 38px;
+    padding: 0 16px;
+    border-radius: 8px;
+    border: 1px solid var(--admin-line);
+    background: transparent;
+    color: var(--admin-text);
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.upload-cancel:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: var(--admin-text);
+}
+
+.upload-progress-container {
+    width: 100%;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 999px;
+    height: 18px;
+    position: relative;
+    overflow: hidden;
+    margin-top: 10px;
+}
+
+.upload-progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, var(--admin-gold) 0%, #ffc107 100%);
+    border-radius: 999px;
+    transition: width 0.1s ease;
+}
+
+.upload-progress-text {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 10px;
+    font-weight: 600;
+    color: #fff;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
 
 @media (max-width: 900px) {
     .document-manager-head { align-items: flex-start; flex-direction: column; }
