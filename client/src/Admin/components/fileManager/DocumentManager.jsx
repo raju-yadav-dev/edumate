@@ -16,6 +16,7 @@ import ContextMenu from "./ContextMenu";
 import FileTable from "./FileTable";
 import FolderTree from "./FolderTree";
 import UploadDialog from "./UploadDialog";
+import PreviewPanel from "./PreviewPanel";
 import "./FileManager.css";
 
 function DocumentManager(props) {
@@ -23,8 +24,14 @@ function DocumentManager(props) {
     const [viewMode, setViewMode] = useState("list");
     const [showFilters, setShowFilters] = useState(false);
     const [sortMode, setSortMode] = useState("date-desc");
+    const [singleDocumentFilterId, setSingleDocumentFilterId] = useState(null);
+
     const sortedDocuments = useMemo(() => {
-        const copy = [...props.documents];
+        let copy = [...props.documents];
+
+        if (singleDocumentFilterId) {
+            copy = copy.filter((doc) => doc._id === singleDocumentFilterId);
+        }
 
         copy.sort((first, second) => {
             if (sortMode === "name-asc") {
@@ -39,7 +46,25 @@ function DocumentManager(props) {
         });
 
         return copy;
-    }, [props.documents, sortMode]);
+    }, [props.documents, sortMode, singleDocumentFilterId]);
+
+    function handleSelectFolder(value) {
+        setSingleDocumentFilterId(null);
+        props.onSelectFolder(value);
+    }
+
+    function handleSelectTableDoc(doc) {
+        setSingleDocumentFilterId(null);
+        props.setSelectedDocument(doc);
+    }
+
+    function handleSelectTreeDoc(doc) {
+        props.setSelectedDocument(doc);
+        setSingleDocumentFilterId(doc._id);
+        if (doc.category) {
+            props.onSelectFolder(doc.category);
+        }
+    }
 
     function downloadSelected() {
         props.documents
@@ -104,7 +129,10 @@ function DocumentManager(props) {
                     <button
                         type="button"
                         className="secondary-action"
-                        onClick={props.onRefresh}
+                        onClick={() => {
+                            setSingleDocumentFilterId(null);
+                            props.onRefresh();
+                        }}
                     >
                         <RefreshCcw size={16} />
                         Refresh
@@ -116,13 +144,17 @@ function DocumentManager(props) {
 
             {/* ================= MAIN LAYOUT ================= */}
 
-            <div className="document-layout">
+            <div className={props.selectedDocument ? "document-layout has-preview" : "document-layout"}>
 
                 {/* ========== LEFT SIDEBAR ========== */}
 
                 <aside className="document-sidebar">
 
-                    <FolderTree {...props} />
+                    <FolderTree
+                        {...props}
+                        onSelectFolder={handleSelectFolder}
+                        onSelectTreeDoc={handleSelectTreeDoc}
+                    />
 
                 </aside>
 
@@ -141,9 +173,10 @@ function DocumentManager(props) {
                             <input
                                 placeholder={`Search in ${props.activeFolderLabel}...`}
                                 value={props.search}
-                                onChange={(event) =>
-                                    props.setSearch(event.target.value)
-                                }
+                                onChange={(event) => {
+                                    setSingleDocumentFilterId(null);
+                                    props.setSearch(event.target.value);
+                                }}
                             />
 
                         </div>
@@ -227,7 +260,14 @@ function DocumentManager(props) {
                             <option value="size-desc">Largest first</option>
                         </select>
 
-                        <button type="button" className="secondary-action" onClick={props.onReset}>
+                        <button
+                            type="button"
+                            className="secondary-action"
+                            onClick={() => {
+                                setSingleDocumentFilterId(null);
+                                props.onReset();
+                            }}
+                        >
                             Clear
                         </button>
 
@@ -256,7 +296,7 @@ function DocumentManager(props) {
                         {...props}
                         documents={sortedDocuments}
                         viewMode={viewMode}
-                        onSelectDocument={props.setSelectedDocument}
+                        onSelectDocument={handleSelectTableDoc}
                         selectedDocument={props.selectedDocument}
                     />
 
@@ -276,12 +316,26 @@ function DocumentManager(props) {
 
                 </section>
 
+                {/* ========== RIGHT SIDEBAR (PREVIEW) ========== */}
+                {props.selectedDocument && (
+                    <aside className="document-preview-sidebar">
+                        <PreviewPanel
+                            file={props.selectedDocument}
+                            onClose={() => props.setSelectedDocument(null)}
+                            onOpen={props.onOpenDocument}
+                            onDownload={props.onDownload}
+                        />
+                    </aside>
+                )}
+
             </div>
 
             {/* Hidden upload form keeps the top Upload Files button functional. */}
             <div className={`document-upload-portal${props.upload.file ? " active" : ""}`}>
                 <UploadDialog {...props} />
             </div>
+
+
 
             {/* Floating Context Menu */}
 

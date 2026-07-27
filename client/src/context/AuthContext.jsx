@@ -40,11 +40,23 @@ function AuthProvider({ children }) {
     }, [accessToken]);
 
     const login = (userData, token) => {
+        if (userData) {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(userData));
+        } else {
+            localStorage.removeItem(STORAGE_KEY);
+        }
+        if (token) {
+            localStorage.setItem(TOKEN_KEY, token);
+        } else {
+            localStorage.removeItem(TOKEN_KEY);
+        }
         setUser(userData);
         setAccessToken(token || null);
     };
 
     const logout = () => {
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(TOKEN_KEY);
         setUser(null);
         setAccessToken(null);
     };

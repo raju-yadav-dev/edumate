@@ -625,7 +625,7 @@ function Admin({ mode = "auto" }) {
 
         const matchedFolder = folders.find(
             f => f.label.toLowerCase() === newCategoryLabel.trim().toLowerCase() ||
-                 f.value.toLowerCase() === newCategoryLabel.trim().toLowerCase()
+                f.value.toLowerCase() === newCategoryLabel.trim().toLowerCase()
         );
         const newCategory = matchedFolder ? matchedFolder.value : slugifyFolder(newCategoryLabel);
 
@@ -709,7 +709,7 @@ function Admin({ mode = "auto" }) {
         window.open(url, "_blank", "noopener,noreferrer");
     }
 
-    function handleDownload(file) {
+    async function handleDownload(file) {
         const url = getDocumentUrl(file);
 
         if (!url) {
@@ -717,11 +717,28 @@ function Admin({ mode = "auto" }) {
             return;
         }
 
-        const anchor = document.createElement("a");
-        anchor.href = url;
-        anchor.download = file.originalName || "document";
-        anchor.rel = "noreferrer";
-        anchor.click();
+        try {
+            setBusy(true);
+            const response = await fetch(url);
+            if (!response.ok) throw new Error("Failed to fetch file content.");
+            const blob = await response.blob();
+            const blobUrl = window.URL.createObjectURL(blob);
+
+            const anchor = document.createElement("a");
+            anchor.href = blobUrl;
+            anchor.download = file.originalName || "document.pdf";
+            document.body.appendChild(anchor);
+            anchor.click();
+            document.body.removeChild(anchor);
+
+            // Clean up the object URL
+            window.URL.revokeObjectURL(blobUrl);
+        } catch (err) {
+            console.error("Blob download failed, using fallback navigation:", err);
+            window.open(url, "_blank", "noopener,noreferrer");
+        } finally {
+            setBusy(false);
+        }
     }
 
     function toggleSelectedDocument(id) {
@@ -794,6 +811,69 @@ function Admin({ mode = "auto" }) {
         setActiveFolder(value);
         setUpload((current) => ({ ...current, category: value }));
         setNotice(`Folder ${folderName.trim()} created.`);
+    }
+
+    async function handleRenameFolder(folderValue) {
+        const folder = folders.find((f) => f.value === folderValue);
+        if (!folder) return;
+
+        const newName = window.prompt("Rename folder to:", folder.label);
+        if (!newName || newName.trim() === "") return;
+
+        const nextFolders = folders.map((f) => {
+            if (f.value === folderValue) {
+                return { ...f, label: newName.trim() };
+            }
+            return f;
+        });
+
+        setFolders(nextFolders);
+        window.localStorage.setItem("edumate-admin-folders", JSON.stringify(nextFolders));
+        setNotice(`Folder renamed to ${newName.trim()}.`);
+    }
+
+    async function handleDeleteFolder(folderValue) {
+        const folder = folders.find((f) => f.value === folderValue);
+        if (!folder) return;
+
+        const filesToMove = documents.filter((doc) => doc.category === folderValue);
+
+        let confirmMsg = `Delete folder "${folder.label}"?`;
+        if (filesToMove.length > 0) {
+            confirmMsg += ` This will move all ${filesToMove.length} file(s) inside this folder to Admissions.`;
+        }
+
+        if (!window.confirm(confirmMsg)) {
+            return;
+        }
+
+        try {
+            setBusy(true);
+            const defaultFolder = folders.find((f) => f.value !== folderValue)?.value || "admissions";
+
+            if (filesToMove.length > 0) {
+                for (const doc of filesToMove) {
+                    await moveDocument(doc._id, defaultFolder);
+                }
+            }
+
+            const nextFolders = folders.filter((f) => f.value !== folderValue);
+            setFolders(nextFolders);
+            window.localStorage.setItem("edumate-admin-folders", JSON.stringify(nextFolders));
+
+            if (activeFolder === folderValue) {
+                setActiveFolder(defaultFolder);
+                setUpload((current) => ({ ...current, category: defaultFolder }));
+            }
+
+            setNotice(`Folder "${folder.label}" deleted.`);
+            await loadDocuments();
+            await loadStorageStats();
+        } catch (err) {
+            setError(err.message || "Failed to delete folder.");
+        } finally {
+            setBusy(false);
+        }
     }
 
     function handleReset() {
@@ -925,6 +1005,8 @@ function Admin({ mode = "auto" }) {
                                 setUpload((current) => ({ ...current, category: value }));
                             }}
                             onCreateFolder={handleCreateFolder}
+                            onRenameFolder={handleRenameFolder}
+                            onDeleteFolder={handleDeleteFolder}
                             onDrop={handleUploadDrop}
                             onDragOver={handleUploadDragOver}
                             onDragLeave={handleUploadDragLeave}

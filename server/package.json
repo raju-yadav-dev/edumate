@@ -11,8 +11,8 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "@supabase/supabase-js": "^2.110.8",
     "@qdrant/js-client-rest": "^1.18.0",
+    "@supabase/supabase-js": "^2.110.8",
     "bcrypt": "^6.0.0",
     "compression": "^1.8.1",
     "cookie-parser": "^1.4.7",

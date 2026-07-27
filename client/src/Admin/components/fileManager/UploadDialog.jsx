@@ -53,7 +53,6 @@ function UploadDialog({
                 <input type="number" min="1" placeholder="Version" value={upload.version} onChange={(event) => setUpload((current) => ({ ...current, version: event.target.value }))} />
                 <input type="text" placeholder="Tags / Notes" value={upload.notes} onChange={(event) => setUpload((current) => ({ ...current, notes: event.target.value }))} />
             </div>
-
             {uploadProgress !== null && (
                 <div className="upload-progress-container">
                     <div className="upload-progress-bar" style={{ width: `${uploadProgress}%` }}></div>

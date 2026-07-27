@@ -17,14 +17,15 @@ function AdminAuthProvider({ children }) {
 	}, [adminUser, adminAccessToken]);
 
 	const loginAdmin = (userData, token) => {
+		saveAdminSession(userData, token || null);
 		setAdminUser(userData);
 		setAdminAccessToken(token || null);
 	};
 
 	const logoutAdmin = () => {
+		clearAdminSession();
 		setAdminUser(null);
 		setAdminAccessToken(null);
-		clearAdminSession();
 	};
 
 	return (

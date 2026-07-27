@@ -110,7 +110,7 @@ function PreviewPanel({ file, onClose, onOpen, onDownload }) {
 
                 <div className="metadata-item">
                     <small>Pages</small>
-                    <strong>{file.pages || "Unknown"}</strong>
+                    <strong>{file.metadata?.pages || file.pages || "Unknown"}</strong>
                 </div>
 
                 <div className="metadata-item">

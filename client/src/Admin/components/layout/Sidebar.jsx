@@ -46,7 +46,6 @@ function Sidebar({
                 aria-label="Close sidebar"
                 onClick={onCloseMobile}
             />
-
             <aside className={sidebarClassName}>
                 <div className="admin-brand">
                     <div className="brand-mark">
