@@ -132,6 +132,10 @@ const indexDocumentBackground = async (documentId, fileBuffer = null) => {
 
         document.embeddingStatus = "indexed";
         document.chunkCount = rawChunks.length;
+        document.metadata = {
+            ...(document.metadata || {}),
+            pages: parsed.numPages
+        };
         await document.save();
     } catch (err) {
         console.error(`indexingService Background Indexing failed for ${documentId}:`, err);

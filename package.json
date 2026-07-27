@@ -19,5 +19,8 @@
   },
   "devDependencies": {
     "concurrently": "^8.2.2"
+  },
+  "dependencies": {
+    "undici": "^8.9.0"
   }
 }

@@ -41,10 +41,15 @@ function UploadDialog({
                 <input type="text" placeholder="Tags / Notes" value={upload.notes} onChange={(event) => setUpload((current) => ({ ...current, notes: event.target.value }))} />
             </div>
 
-            <button type="submit" className="upload-submit" disabled={busy}>
-                <UploadCloud size={16} />
-                Upload
-            </button>
+            <div className="upload-actions">
+                <button type="button" className="upload-cancel" onClick={() => onFile(null)} disabled={busy}>
+                    Cancel
+                </button>
+                <button type="submit" className="upload-submit" disabled={busy}>
+                    <UploadCloud size={16} />
+                    Upload
+                </button>
+            </div>
         </form>
     );
 }

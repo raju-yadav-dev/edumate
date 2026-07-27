@@ -40,179 +40,179 @@ function Sidebar({
 
     return (
         <>
-        <button
-            type="button"
-            className={isMobileOpen ? "admin-sidebar-backdrop visible" : "admin-sidebar-backdrop"}
-            aria-label="Close sidebar"
-            onClick={onCloseMobile}
-        />
+            <button
+                type="button"
+                className={isMobileOpen ? "admin-sidebar-backdrop visible" : "admin-sidebar-backdrop"}
+                aria-label="Close sidebar"
+                onClick={onCloseMobile}
+            />
 
-        <aside className={sidebarClassName}>
+            <aside className={sidebarClassName}>
 
-            <div className="admin-brand">
-                <div className="brand-mark">
-                    <GraduationCap size={28} />
-                    <strong>EduMate</strong>
+                <div className="admin-brand">
+                    <div className="brand-mark">
+                        <GraduationCap size={28} />
+                        <strong>EduMate</strong>
+                    </div>
+
+                    <span>ADMIN CONSOLE</span>
+
+                    <button
+                        type="button"
+                        className="sidebar-collapse"
+                        onClick={() => setIsCollapsed((current) => !current)}
+                        aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+                    >
+                        {isCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
+                    </button>
                 </div>
 
-                <span>ADMIN CONSOLE</span>
+                <p className="nav-section-label">
+                    Main menu
+                </p>
 
-                <button
-                    type="button"
-                    className="sidebar-collapse"
-                    onClick={() => setIsCollapsed((current) => !current)}
-                    aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-                >
-                    {isCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
-                </button>
-            </div>
+                <nav className="admin-nav">
 
-            <p className="nav-section-label">
-                Main menu
-            </p>
+                    <button
+                        type="button"
+                        className={activeSection === "files" ? "active" : ""}
+                        onClick={() => setActiveSection("files")}
+                        title="File Manager"
+                    >
+                        <Folder />
+                        <span>File Manager</span>
+                    </button>
 
-            <nav className="admin-nav">
+                    <button
+                        type="button"
+                        className={activeSection === "users" ? "active" : ""}
+                        onClick={() => setActiveSection("users")}
+                        title="Users"
+                    >
+                        <Users />
+                        <span>Users</span>
+                    </button>
 
-                <button
-                    type="button"
-                    className={activeSection === "files" ? "active" : ""}
-                    onClick={() => setActiveSection("files")}
-                    title="File Manager"
-                >
-                    <Folder />
-                    <span>File Manager</span>
-                </button>
+                    <button
+                        type="button"
+                        className={activeSection === "keys" ? "active" : ""}
+                        onClick={() => setActiveSection("keys")}
+                        title="API Keys"
+                    >
+                        <KeyRound />
+                        <span>API Keys</span>
+                    </button>
 
-                <button
-                    type="button"
-                    className={activeSection === "users" ? "active" : ""}
-                    onClick={() => setActiveSection("users")}
-                    title="Users"
-                >
-                    <Users />
-                    <span>Users</span>
-                </button>
+                    <button
+                        type="button"
+                        className={activeSection === "tools" ? "active" : ""}
+                        onClick={() => setActiveSection("tools")}
+                        title="Data Tools"
+                    >
+                        <Database />
+                        <span>Data Tools</span>
+                    </button>
 
-                <button
-                    type="button"
-                    className={activeSection === "keys" ? "active" : ""}
-                    onClick={() => setActiveSection("keys")}
-                    title="API Keys"
-                >
-                    <KeyRound />
-                    <span>API Keys</span>
-                </button>
+                </nav>
 
-                <button
-                    type="button"
-                    className={activeSection === "tools" ? "active" : ""}
-                    onClick={() => setActiveSection("tools")}
-                    title="Data Tools"
-                >
-                    <Database />
-                    <span>Data Tools</span>
-                </button>
+                <p className="nav-section-label">
+                    System
+                </p>
 
-            </nav>
+                <nav className="admin-nav admin-system-nav">
 
-            <p className="nav-section-label">
-                System
-            </p>
+                    <button
+                        type="button"
+                        onClick={loadStorageStats}
+                        title="Storage Overview"
+                    >
+                        <Activity />
+                        <span>Storage Overview</span>
+                    </button>
 
-            <nav className="admin-nav admin-system-nav">
+                    <button
+                        type="button"
+                        onClick={refreshSection}
+                        title="Activity Logs"
+                    >
+                        <List />
+                        <span>Activity Logs</span>
+                    </button>
 
-                <button
-                    type="button"
-                    onClick={loadStorageStats}
-                    title="Storage Overview"
-                >
-                    <Activity />
-                    <span>Storage Overview</span>
-                </button>
+                    <button
+                        type="button"
+                        onClick={() => setActiveSection("keys")}
+                        title="Settings"
+                    >
+                        <Settings />
+                        <span>Settings</span>
+                    </button>
 
-                <button
-                    type="button"
-                    onClick={refreshSection}
-                    title="Activity Logs"
-                >
-                    <List />
-                    <span>Activity Logs</span>
-                </button>
+                </nav>
 
-                <button
-                    type="button"
-                    onClick={() => setActiveSection("keys")}
-                    title="Settings"
-                >
-                    <Settings />
-                    <span>Settings</span>
-                </button>
+                <div className="storage-box">
 
-            </nav>
+                    <h4>Storage Overview</h4>
 
-            <div className="storage-box">
+                    <div
+                        className="storage-circle"
+                        style={{
+                            background: `conic-gradient(var(--admin-gold) ${storagePercent}%, rgba(255,255,255,.06) 0)`
+                        }}
+                    >
 
-                <h4>Storage Overview</h4>
+                        <div className="storage-inner">
 
-                <div
-                    className="storage-circle"
-                    style={{
-                        background: `conic-gradient(var(--admin-gold) ${storagePercent}%, rgba(255,255,255,.06) 0)`
-                    }}
-                >
+                            <h2>
+                                {formatBytes(usedStorage)}
+                            </h2>
 
-                    <div className="storage-inner">
+                            <p>
+                                of {formatBytes(storageLimit)} used
+                            </p>
 
-                        <h2>
-                            {formatBytes(usedStorage)}
-                        </h2>
-
-                        <p>
-                            of {formatBytes(storageLimit)} used
-                        </p>
+                        </div>
 
                     </div>
 
+                    <strong>
+                        {storagePercent.toFixed(0)}% Used
+                    </strong>
+
+                    <div className="storage-breakdown">
+
+                        <span>
+                            <small>MongoDB</small>
+                            <b>{formatBytes(mongoStats.used)}</b>
+                        </span>
+
+                        <span>
+                            <small>Supabase</small>
+                            <b>{formatBytes(supabaseStats.used)}</b>
+                        </span>
+
+                        <span>
+                            <small>Available</small>
+                            <b>{formatBytes(combinedStats.remaining)}</b>
+                        </span>
+
+                    </div>
+
+                    <button
+                        type="button"
+                        className="back-site"
+                        onClick={() => {
+                            logoutAdmin();
+                            window.location.assign("/");
+                        }}
+                    >
+                        <LogOut size={16} />
+                        <span>Back to Site</span>
+                    </button>
+
                 </div>
 
-                <strong>
-                    {storagePercent.toFixed(0)}% Used
-                </strong>
-
-                <div className="storage-breakdown">
-
-                    <span>
-                        <small>MongoDB</small>
-                        <b>{formatBytes(mongoStats.used)}</b>
-                    </span>
-
-                    <span>
-                        <small>Supabase</small>
-                        <b>{formatBytes(supabaseStats.used)}</b>
-                    </span>
-
-                    <span>
-                        <small>Available</small>
-                        <b>{formatBytes(combinedStats.remaining)}</b>
-                    </span>
-
-                </div>
-
-                <button
-                    type="button"
-                    className="back-site"
-                    onClick={() => {
-                        logoutAdmin();
-                        window.location.assign("/");
-                    }}
-                >
-                    <LogOut size={16} />
-                    <span>Back to Site</span>
-                </button>
-
-            </div>
-
-        </aside>
+            </aside>
         </>
     );
 }
