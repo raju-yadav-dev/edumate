@@ -89,7 +89,7 @@ const generateGeminiCompletion = async (messages, options = {}) => {
  */
 const generateOllamaCompletion = async (messages, options = {}) => {
     const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
-    const model = process.env.OLLAMA_MODEL || "qwen2.5:3b";
+    const model = process.env.OLLAMA_MODEL || "llama3.2:3b";
 
     const formattedMessages = messages.map(msg => ({
         role: msg.role === "system" ? "system" : msg.role === "assistant" ? "assistant" : "user",
@@ -132,7 +132,7 @@ const generateCompletion = async (messages, options = {}) => {
 
     if (provider === "ollama") {
         try {
-            console.log(`[LLM Service] Attempting completion via Ollama (Model: ${process.env.OLLAMA_MODEL || "qwen2.5:3b"})...`);
+            console.log(`[LLM Service] Attempting completion via Ollama (Model: ${process.env.OLLAMA_MODEL || "llama3.2:3b"})...`);
             return await generateOllamaCompletion(messages, options);
         } catch (error) {
             console.error(`[LLM Service] Ollama generation failed/unavailable: "${error.message}".`);

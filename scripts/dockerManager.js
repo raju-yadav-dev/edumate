@@ -35,6 +35,52 @@ const isDockerComposeInstalled = () => {
     }
 };
 
+const isDockerDaemonRunning = () => {
+    try {
+        execSync("docker info", { stdio: "ignore", shell: true });
+        return true;
+    } catch (e) {
+        return false;
+    }
+};
+
+const startDockerDaemon = async () => {
+    if (process.platform !== "win32") {
+        return false;
+    }
+
+    const defaultPath = "C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe";
+    const fs = require("fs");
+    if (!fs.existsSync(defaultPath)) {
+        return false;
+    }
+
+    console.log(logger.cyan("Docker daemon is not running. Attempting to launch Docker Desktop automatically..."));
+    try {
+        const { spawn } = require("child_process");
+        const child = spawn(defaultPath, [], {
+            detached: true,
+            stdio: "ignore"
+        });
+        child.unref();
+
+        // Wait and poll for the daemon to start (up to 30 attempts, 2 seconds each)
+        for (let i = 1; i <= 30; i++) {
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+            if (isDockerDaemonRunning()) {
+                console.log(logger.green("✓ Docker Desktop daemon has started successfully."));
+                return true;
+            }
+            if (i % 5 === 0) {
+                console.log(logger.yellow(`  Waiting for Docker daemon to initialize... (Attempt ${i}/30)`));
+            }
+        }
+    } catch (err) {
+        console.error(logger.red(`❌ Failed to automatically launch Docker Desktop: ${err.message}`));
+    }
+    return false;
+};
+
 /**
  * Checks if Qdrant is already responding, otherwise boots it via Docker Compose
  * @returns {Promise<boolean>} - True if running or successfully command-sent, false otherwise
@@ -57,6 +103,15 @@ const startQdrantContainer = async () => {
         console.log(logger.yellow("⚠️ Warning: Qdrant is not active and Docker CLI is not installed on this system."));
         console.log(logger.yellow("Automated local service bootstrapping skipped. Ensure Qdrant runs manually."));
         return false;
+    }
+
+    // Ensure Docker Daemon is active
+    if (!isDockerDaemonRunning()) {
+        const daemonStarted = await startDockerDaemon();
+        if (!daemonStarted) {
+            console.log(logger.yellow("⚠️ Docker daemon is not active. Automated bootstrapping skipped. Please start Docker manually."));
+            return false;
+        }
     }
 
     const composeCmd = isDockerComposeInstalled();

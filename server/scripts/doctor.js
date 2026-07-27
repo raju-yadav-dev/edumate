@@ -67,11 +67,17 @@ const runDoctor = async () => {
 
         console.log();
 
-        // 7. Verify Gemini API connectivity
+        // 7. Verify Gemini/Ollama API connectivity
+        const isOllama = process.env.LLM_PROVIDER === "ollama";
+        const providerName = isOllama ? "Ollama" : "Google Gemini";
         const geminiOk = await verifyGemini();
         if (!geminiOk) {
             hasErrors = true;
-            console.log(colors.yellow("💡 Suggestion: Confirm GEMINI_API_KEY is active and correct."));
+            if (isOllama) {
+                console.log(colors.yellow(`💡 Suggestion: Ensure Ollama is running and the model '${process.env.OLLAMA_MODEL || "llama3.2:3b"}' is pulled.`));
+            } else {
+                console.log(colors.yellow("💡 Suggestion: Confirm GEMINI_API_KEY is active and correct."));
+            }
         }
 
         console.log();

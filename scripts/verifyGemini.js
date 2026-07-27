@@ -21,8 +21,8 @@ const verifyGemini = async () => {
             throw new Error("Ollama Embedding payload resolved with an invalid structure.");
         } catch (err) {
             console.error(logger.red(`❌ Error: Ollama connection check failed: ${err.message}`));
-            console.log(logger.yellow(`💡 Suggestion: Ensure Ollama is running and the model '${process.env.OLLAMA_MODEL || "qwen2.5:3b"}' is pulled.`));
-            console.log(logger.cyan(`   Run: ollama pull ${process.env.OLLAMA_MODEL || "qwen2.5:3b"}`));
+            console.log(logger.yellow(`💡 Suggestion: Ensure Ollama is running and the model '${process.env.OLLAMA_MODEL || "llama3.2:3b"}' is pulled.`));
+            console.log(logger.cyan(`   Run: ollama pull ${process.env.OLLAMA_MODEL || "llama3.2:3b"}`));
             return false;
         }
     }

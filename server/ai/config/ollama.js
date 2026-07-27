@@ -48,7 +48,7 @@ const startOllamaService = () => {
  */
 const generateEmbedding = async (text) => {
     const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
-    const model = process.env.OLLAMA_EMBEDDING_MODEL || process.env.OLLAMA_MODEL || "qwen2.5:3b";
+    const model = process.env.OLLAMA_EMBEDDING_MODEL || process.env.OLLAMA_MODEL || "llama3.2:3b";
 
     try {
         const response = await fetch(`${baseUrl}/api/embed`, {
@@ -102,7 +102,7 @@ const generateEmbedding = async (text) => {
  */
 const generateEmbeddingsBatch = async (texts) => {
     const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
-    const model = process.env.OLLAMA_EMBEDDING_MODEL || process.env.OLLAMA_MODEL || "qwen2.5:3b";
+    const model = process.env.OLLAMA_EMBEDDING_MODEL || process.env.OLLAMA_MODEL || "llama3.2:3b";
 
     try {
         const response = await fetch(`${baseUrl}/api/embed`, {
@@ -140,7 +140,7 @@ const generateEmbeddingsBatch = async (texts) => {
  */
 const verifyConnection = async () => {
     const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
-    const model = process.env.OLLAMA_MODEL || "qwen2.5:3b";
+    const model = process.env.OLLAMA_MODEL || "llama3.2:3b";
 
     let isRunning = await pingOllama(baseUrl);
     if (!isRunning) {

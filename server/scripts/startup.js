@@ -63,9 +63,11 @@ const startApp = async () => {
     console.log();
 
     // 6. Verify Gemini API Key
+    const isOllama = process.env.LLM_PROVIDER === "ollama";
+    const providerName = isOllama ? "Ollama" : "Google Gemini";
     const geminiOk = await verifyGemini();
     if (!geminiOk) {
-        console.error(colors.red("❌ Startup blocked: Google Gemini API connection check failed."));
+        console.error(colors.red(`❌ Startup blocked: ${providerName} connection check failed.`));
         process.exit(1);
     }
 

@@ -18,8 +18,8 @@ const printBanner = () => {
 const printDashboard = (stats = {}) => {
     const isOllama = process.env.LLM_PROVIDER === "ollama";
     const aiProviderName = isOllama ? "Ollama" : "Gemini";
-    const aiModelName = isOllama ? `${process.env.OLLAMA_MODEL || "qwen2.5:3b"} (Ollama)` : "Gemini 2.5 Flash";
-    const embeddingModelName = isOllama ? `${process.env.OLLAMA_EMBEDDING_MODEL || process.env.OLLAMA_MODEL || "qwen2.5:3b"} (Ollama)` : "Gemini text-embedding-004";
+    const aiModelName = isOllama ? `${process.env.OLLAMA_MODEL || "llama3.2:3b"} (Ollama)` : "Gemini 2.5 Flash";
+    const embeddingModelName = isOllama ? `${process.env.OLLAMA_EMBEDDING_MODEL || process.env.OLLAMA_MODEL || "llama3.2:3b"} (Ollama)` : "Gemini text-embedding-004";
 
     console.log(logger.cyan("══════════════════════════════════════════════"));
     console.log(logger.bold(logger.green("🚀 EduMate Development Environment")));

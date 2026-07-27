@@ -20,9 +20,20 @@ const { verifyGemini } = require("./verifyGemini");
 const { verifyQdrant } = require("./verifyQdrant");
 const { printBanner, printDashboard } = require("./banner");
 
+const pingOllama = async (baseUrl) => {
+    try {
+        const response = await fetch(`${baseUrl}/api/tags`);
+        return response.ok;
+    } catch (e) {
+        return false;
+    }
+};
+
 const startDev = async () => {
     printBanner();
     console.log(logger.cyan("🚀 Starting EduMate automated development launcher...\n"));
+
+    let ollamaProcess = null;
 
     // 1. Check Node and npm version
     verifyNodeVersion();
@@ -67,10 +78,58 @@ const startDev = async () => {
     }
     console.log();
 
-    // 7. Check Gemini API
-    const geminiOk = await verifyGemini();
-    if (!geminiOk) {
-        logger.error("❌ Startup blocked: Google Gemini API connection check failed.");
+    // 7. Start/Check Ollama if provider is ollama
+    if (process.env.LLM_PROVIDER === "ollama") {
+        const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
+        const isRunning = await pingOllama(baseUrl);
+        if (!isRunning) {
+            console.log(logger.cyan("Ollama not active. Starting local Ollama service ('ollama serve')..."));
+            ollamaProcess = spawn("ollama", ["serve"], {
+                stdio: "pipe",
+                shell: true
+            });
+            
+            let stdoutBuffer = "";
+            let stderrBuffer = "";
+            ollamaProcess.stdout.on("data", (chunk) => {
+                stdoutBuffer += chunk.toString();
+                const lines = stdoutBuffer.split("\n");
+                stdoutBuffer = lines.pop();
+                for (const line of lines) {
+                    const trimmed = line.trim();
+                    if (trimmed) console.log(`${logger.yellow("[Ollama]")} ${trimmed}`);
+                }
+            });
+            ollamaProcess.stderr.on("data", (chunk) => {
+                stderrBuffer += chunk.toString();
+                const lines = stderrBuffer.split("\n");
+                stderrBuffer = lines.pop();
+                for (const line of lines) {
+                    const trimmed = line.trim();
+                    if (trimmed) console.error(`${logger.red("[Ollama Error]")} ${trimmed}`);
+                }
+            });
+
+            ollamaProcess.on("close", (code) => {
+                console.log(logger.yellow(`Ollama process exited with code ${code}`));
+            });
+
+            // wait 2.5 seconds for service startup
+            await new Promise((resolve) => setTimeout(resolve, 2500));
+        } else {
+            console.log(logger.green("✓ Ollama service is already running."));
+        }
+    }
+
+    // Check Gemini / Ollama API
+    const isOllama = process.env.LLM_PROVIDER === "ollama";
+    const providerName = isOllama ? "Ollama" : "Google Gemini";
+    const aiOk = await verifyGemini();
+    if (!aiOk) {
+        logger.error(`❌ Startup blocked: ${providerName} connection check failed.`);
+        if (ollamaProcess) {
+            try { ollamaProcess.kill(); } catch (e) {}
+        }
         process.exit(1);
     }
     console.log();
@@ -137,7 +196,7 @@ const startDev = async () => {
     setupLogger(backendProcess, "Backend", logger.green);
     setupLogger(frontendProcess, "Frontend", logger.blue);
 
-    // Stop both if one exits or parent process exits
+    // Stop processes if one exits or parent process exits
     const cleanExit = () => {
         try {
             backendProcess.kill();
@@ -145,6 +204,11 @@ const startDev = async () => {
         try {
             frontendProcess.kill();
         } catch (e) {}
+        if (ollamaProcess) {
+            try {
+                ollamaProcess.kill();
+            } catch (e) {}
+        }
         process.exit();
     };
 
