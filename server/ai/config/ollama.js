@@ -14,7 +14,10 @@ const { spawn } = require("child_process");
  */
 const pingOllama = async (baseUrl) => {
     try {
-        const response = await fetch(`${baseUrl}/api/tags`);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2000);
+        const response = await fetch(`${baseUrl}/api/tags`, { signal: controller.signal });
+        clearTimeout(timeoutId);
         return response.ok;
     } catch (e) {
         return false;
@@ -51,16 +54,20 @@ const generateEmbedding = async (text) => {
     const model = process.env.OLLAMA_EMBEDDING_MODEL || process.env.OLLAMA_MODEL || "llama3.2:3b";
 
     try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
         const response = await fetch(`${baseUrl}/api/embed`, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json"
             },
+            signal: controller.signal,
             body: JSON.stringify({
                 model,
                 input: text
             })
         });
+        clearTimeout(timeoutId);
 
         if (response.ok) {
             const payload = await response.json();
@@ -72,16 +79,20 @@ const generateEmbedding = async (text) => {
         // Fall back to /api/embeddings if /api/embed fails
     }
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
     const response = await fetch(`${baseUrl}/api/embeddings`, {
         method: "POST",
         headers: {
             "Content-Type": "application/json"
         },
+        signal: controller.signal,
         body: JSON.stringify({
             model,
             prompt: text
         })
     });
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
         const errText = await response.text();
@@ -105,16 +116,20 @@ const generateEmbeddingsBatch = async (texts) => {
     const model = process.env.OLLAMA_EMBEDDING_MODEL || process.env.OLLAMA_MODEL || "llama3.2:3b";
 
     try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
         const response = await fetch(`${baseUrl}/api/embed`, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json"
             },
+            signal: controller.signal,
             body: JSON.stringify({
                 model,
                 input: texts
             })
         });
+        clearTimeout(timeoutId);
 
         if (response.ok) {
             const payload = await response.json();
@@ -160,7 +175,10 @@ const verifyConnection = async () => {
         throw new Error(`Ollama service at ${baseUrl} is unreachable. Please make sure Ollama is installed and running.`);
     }
 
-    const response = await fetch(`${baseUrl}/api/tags`);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
+    const response = await fetch(`${baseUrl}/api/tags`, { signal: controller.signal });
+    clearTimeout(timeoutId);
     const payload = await response.json();
     const models = (payload.models || []).map((m) => m.name);
 

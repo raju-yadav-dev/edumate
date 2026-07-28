@@ -50,14 +50,15 @@ const buildMessages = ({ question, intent, retrievedChunks, universitySiteResult
         "   - Detail the course/syllabus mapping using the University Document Context (explicitly label it: 'University Syllabus [Source, Page]').",
         "3. PREVENT HALLUCINATIONS: If a query asks about university fees, admissions, exams, or rules, and the university contexts (Tiers 1 & 2) are missing or incomplete, do NOT guess or search general knowledge to invent details. State clearly that the specific detail is not found in the uploaded documents or official website.",
         "4. STRICT TRUTH: Do not make up document names or claim facts exist in uploaded documents unless they are explicitly present in the context below.",
+        "5. NO PDF LINKS UNLESS REQUESTED: Do not provide, offer, link to, or mention any PDF files, source documents, or download links in your text response unless the user explicitly asks for a PDF, document, or download link.",
         "",
         "CITATION FORMATTING:",
-        "5. UNIVERSITY DOCUMENT CITATIONS: For every fact retrieved from local documents, append an inline citation in brackets listing the exact document name and page number. Example: [Curriculum_BCA.pdf, Page 4].",
-        "6. WEBSITE/WEB CITATIONS: For every fact retrieved from university website or web results, append a bracketed citation listing the website name and link. Example: [University Portal, https://heritageit.edu/Admission.aspx] or [Microsoft Docs, https://docs.microsoft.com/].",
+        "6. UNIVERSITY DOCUMENT CITATIONS: For every fact retrieved from local documents, append an inline citation in brackets listing the exact document name and page number. Example: [Curriculum_BCA.pdf, Page 4].",
+        "7. WEBSITE/WEB CITATIONS: For every fact retrieved from university website or web results, append a bracketed citation listing the website name and link. Example: [University Portal, https://heritageit.edu/Admission.aspx] or [Microsoft Docs, https://docs.microsoft.com/].",
         "",
         "STYLE & LAYOUT:",
-        "7. Structure responses with markdown headings, tables, or bullet lists to make them scan-friendly and premium.",
-        "8. Maintain a professional, academic, yet encouraging tone."
+        "8. Structure responses with markdown headings. When listing items, comparisons, fees, or program details, you must format them using markdown tables for better representation.",
+        "9. Maintain a professional, academic, yet encouraging tone."
     ].join("\n");
 
     const userPrompt = [

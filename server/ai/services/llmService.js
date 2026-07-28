@@ -96,29 +96,43 @@ const generateOllamaCompletion = async (messages, options = {}) => {
         content: msg.content
     }));
 
-    const response = await fetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-            model,
-            messages: formattedMessages,
-            stream: false,
-            options: {
-                temperature: options.temperature !== undefined ? options.temperature : 0.2,
-                num_predict: options.maxOutputTokens || 1000
-            }
-        })
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
 
-    if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`Ollama API error status ${response.status}: ${errText || "Unknown error"}`);
+    try {
+        const response = await fetch(`${baseUrl}/api/chat`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            signal: controller.signal,
+            body: JSON.stringify({
+                model,
+                messages: formattedMessages,
+                stream: false,
+                options: {
+                    temperature: options.temperature !== undefined ? options.temperature : 0.2,
+                    num_predict: options.maxOutputTokens || 1000
+                }
+            })
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`Ollama API error status ${response.status}: ${errText || "Unknown error"}`);
+        }
+
+        const payload = await response.json();
+        return payload.message?.content || "";
+    } catch (err) {
+        clearTimeout(timeoutId);
+        if (err.name === "AbortError") {
+            throw new Error("Ollama request timed out after 8 seconds.");
+        }
+        throw err;
     }
-
-    const payload = await response.json();
-    return payload.message?.content || "";
 };
 
 /**

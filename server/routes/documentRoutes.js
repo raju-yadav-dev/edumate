@@ -56,5 +56,10 @@ router.post(
     authorizeRoles("admin", "super_admin"),
     reindexDocument
 );
+router.post(
+    "/:documentId/embeddings/rebuild",
+    authorizeRoles("admin", "super_admin"),
+    reindexDocument
+);
 
 module.exports = router;
