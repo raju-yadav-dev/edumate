@@ -37,10 +37,11 @@ const buildQdrantFilter = (filter) => {
 const retrieveRelevantChunks = async ({
     queryEmbedding,
     limit = AI_CONSTANTS.DEFAULT_RETRIEVAL_LIMIT,
-    filter = {}
+    filter = {},
+    isRawFilter = false
 }) => {
     try {
-        const qdrantFilter = buildQdrantFilter(filter);
+        const qdrantFilter = isRawFilter ? filter : buildQdrantFilter(filter);
 
         const results = await client.search(collectionName, {
             vector: queryEmbedding,
@@ -90,11 +91,38 @@ const embeddingService = require("./embeddingService");
  */
 const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL_LIMIT }) => {
     const queryEmbedding = await embeddingService.getQueryEmbedding(question);
-    const filter = {};
-    if (user?.institution) filter.institution = user.institution;
-    if (user?.department) filter.department = user.department;
+    
+    // Construct robust Qdrant nested filter
+    const must = [];
 
-    return retrieveRelevantChunks({ queryEmbedding, limit, filter });
+    // Match user's institution OR general/empty values
+    if (user?.institution) {
+        must.push({
+            should: [
+                { key: "institution", match: { value: user.institution } },
+                { key: "institution", match: { value: "all" } },
+                { key: "institution", match: { value: "general" } },
+                { key: "institution", match: { value: "" } }
+            ]
+        });
+    }
+
+    // Match user's department OR general/empty values (essential for university-wide prospectus/admission docs)
+    if (user?.department) {
+        must.push({
+            should: [
+                { key: "department", match: { value: user.department } },
+                { key: "department", match: { value: "all" } },
+                { key: "department", match: { value: "general" } },
+                { key: "department", match: { value: "academic" } },
+                { key: "department", match: { value: "" } }
+            ]
+        });
+    }
+
+    const qdrantFilter = must.length > 0 ? { must } : undefined;
+
+    return retrieveRelevantChunks({ queryEmbedding, limit, filter: qdrantFilter, isRawFilter: true });
 };
 
 module.exports = {

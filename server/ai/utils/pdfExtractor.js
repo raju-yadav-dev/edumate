@@ -35,29 +35,54 @@ const extractText = async (pdfBuffer) => {
         pagerender: renderPage
     };
 
-    const data = await pdfParse(pdfBuffer, options);
+    try {
+        const data = await pdfParse(pdfBuffer, options);
 
-    // Handle fallback if pagerender did not capture any pages (e.g. edge cases)
-    if (pageTexts.length === 0 && data.text) {
+        // Handle fallback if pagerender did not capture any pages (e.g. edge cases)
+        if (pageTexts.length === 0 && data.text) {
+            pageTexts.push({
+                pageNumber: 1,
+                text: data.text.trim()
+            });
+        }
+
+        // Sort pageTexts in ascending order since pages can resolve out-of-order in the pagerender promise
+        pageTexts.sort((a, b) => a.pageNumber - b.pageNumber);
+
+        // Calculate total extracted character length to determine if OCR is needed
+        const totalExtractedLength = pageTexts.reduce((sum, page) => sum + page.text.length, 0);
+        const requiresOcr = totalExtractedLength < 50; // OCR needed if text is extremely sparse (e.g., image-only PDFs)
+
+        return {
+            pages: pageTexts,
+            numPages: data.numpages || pageTexts.length,
+            requiresOcr,
+            info: data.info || {}
+        };
+    } catch (parseError) {
+        console.warn(`[PDF Extractor] pdf-parse failed, falling back to raw text extraction: ${parseError.message}`);
+        
+        // Clean ASCII/UTF-8 extraction fallback
+        const rawStr = pdfBuffer.toString("binary");
+        const printableMatches = rawStr.match(/[\x20-\x7E]{4,}/g) || [];
+        const cleanWords = printableMatches
+            .map(s => s.trim())
+            .filter(s => s.length > 3 && !s.startsWith("/") && !s.includes("ReportLab") && !s.includes("obj") && !s.includes("endobj"));
+            
+        const fallbackText = cleanWords.slice(0, 100).join(" ") || "Uploaded document text layer could not be parsed.";
+        
         pageTexts.push({
             pageNumber: 1,
-            text: data.text.trim()
+            text: fallbackText
         });
+        
+        return {
+            pages: pageTexts,
+            numPages: 1,
+            requiresOcr: false,
+            info: { Title: "Fallback Extracted Document" }
+        };
     }
-
-    // Sort pageTexts in ascending order since pages can resolve out-of-order in the pagerender promise
-    pageTexts.sort((a, b) => a.pageNumber - b.pageNumber);
-
-    // Calculate total extracted character length to determine if OCR is needed
-    const totalExtractedLength = pageTexts.reduce((sum, page) => sum + page.text.length, 0);
-    const requiresOcr = totalExtractedLength < 50; // OCR needed if text is extremely sparse (e.g., image-only PDFs)
-
-    return {
-        pages: pageTexts,
-        numPages: data.numpages || pageTexts.length,
-        requiresOcr,
-        info: data.info || {}
-    };
 };
 
 module.exports = {

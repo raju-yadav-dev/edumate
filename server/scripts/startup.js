@@ -4,7 +4,7 @@ const { verifyEnvironment } = require("./verifyEnvironment");
 const { startQdrantContainer } = require("./dockerManager");
 const { verifyMongo } = require("./verifyMongo");
 const { verifySupabase } = require("./verifySupabase");
-const { verifyGemini } = require("./verifyGemini");
+const { verifyGroq } = require("./verifyGroq");
 const { verifyQdrant } = require("./verifyQdrant");
 const { printBanner, printDashboard } = require("./banner");
 const { spawn } = require("child_process");
@@ -62,13 +62,10 @@ const startApp = async () => {
 
     console.log();
 
-    // 6. Verify Gemini API Key
-    const isOllama = process.env.LLM_PROVIDER === "ollama";
-    const providerName = isOllama ? "Ollama" : "Google Gemini";
-    const geminiOk = await verifyGemini();
-    if (!geminiOk) {
-        console.error(colors.red(`❌ Startup blocked: ${providerName} connection check failed.`));
-        process.exit(1);
+    // 6. Verify Groq API Keys
+    const groqOk = await verifyGroq();
+    if (!groqOk) {
+        console.warn(colors.yellow("⚠️ WARNING: Groq API connection check failed. Chat bot completions will fail until valid keys are configured in .env or the admin settings panel."));
     }
 
     console.log();

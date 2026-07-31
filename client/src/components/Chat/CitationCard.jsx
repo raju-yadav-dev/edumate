@@ -14,7 +14,7 @@ function CitationCard({ citation, onClick }) {
                 {isWeb ? (
                     <span className="citation-web-url" title={citation.reference}>{citation.reference || "Web link"}</span>
                 ) : (
-                    <span>Page {citation.page || "1"} · {citation.section || "General"}</span>
+                    <span>{citation.page && String(citation.page).includes(",") ? "Pages" : "Page"} {citation.page || "1"} · {citation.section || "General"}</span>
                 )}
             </span>
 

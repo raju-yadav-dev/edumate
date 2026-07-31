@@ -11,13 +11,8 @@ if (fs.existsSync(envPath)) {
 
 // Auto-detect LLM provider if not set
 if (!process.env.LLM_PROVIDER) {
-    if (process.env.OLLAMA_MODEL || !process.env.GEMINI_API_KEY) {
-        process.env.LLM_PROVIDER = "ollama";
-        console.log(logger.yellow("💡 LLM_PROVIDER not set. Automatically detected and set to 'ollama'."));
-    } else {
-        process.env.LLM_PROVIDER = "gemini";
-        console.log(logger.cyan("💡 LLM_PROVIDER not set. Automatically defaulted to 'gemini'."));
-    }
+    process.env.LLM_PROVIDER = "groq";
+    console.log(logger.cyan("💡 LLM_PROVIDER not set. Automatically defaulted to 'groq'."));
 }
 
 const REQUIRED_VARS = [
@@ -30,7 +25,12 @@ const REQUIRED_VARS = [
     "QDRANT_COLLECTION"
 ];
 
-if (process.env.LLM_PROVIDER !== "ollama") {
+if (process.env.LLM_PROVIDER === "groq") {
+    const hasGroqKey = process.env.GROQ_API_KEY || process.env.GROQ_API_KEY_1;
+    if (!hasGroqKey) {
+        REQUIRED_VARS.push("GROQ_API_KEY");
+    }
+} else if (process.env.LLM_PROVIDER === "gemini") {
     REQUIRED_VARS.push("GEMINI_API_KEY");
 }
 

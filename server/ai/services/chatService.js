@@ -267,7 +267,7 @@ const askQuestion = async ({ user, question, conversationId }) => {
 
             // Call Unified LLM Service
             const textResponse = await llmService.generateCompletion(messages);
-            provider = process.env.LLM_PROVIDER === "ollama" ? "ollama" : "gemini-flash";
+            provider = "groq";
 
             // Validate response against hallucinations
             const validation = responseValidator.validateResponse({

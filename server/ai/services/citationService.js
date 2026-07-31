@@ -9,22 +9,57 @@ const formatCitations = (retrievedChunks = [], universitySiteResults = [], webRe
     const citations = [];
 
     if (retrievedChunks && retrievedChunks.length > 0) {
+        const docGroups = {};
         retrievedChunks.forEach((chunk) => {
             const metadata = chunk.metadata || {};
+            // Use documentId or originalName to uniquely identify the document
+            const docKey = metadata.documentId || metadata.originalName || "University Document";
+            
+            if (!docGroups[docKey]) {
+                docGroups[docKey] = {
+                    title: metadata.originalName || "University Document",
+                    pages: new Set(),
+                    category: metadata.category || "",
+                    maxScore: 0,
+                    metadata: {
+                        documentId: metadata.documentId || "",
+                        category: metadata.category || "",
+                        department: metadata.department || "",
+                        institution: metadata.institution || "",
+                        similarity: 0
+                    }
+                };
+            }
+            
+            if (metadata.pageNumber !== undefined && metadata.pageNumber !== null) {
+                docGroups[docKey].pages.add(Number(metadata.pageNumber));
+            } else {
+                docGroups[docKey].pages.add(1);
+            }
+            
+            const score = chunk.score !== undefined ? Math.max(0, Math.min(100, Math.round(chunk.score * 100))) : 100;
+            if (score > docGroups[docKey].maxScore) {
+                docGroups[docKey].maxScore = score;
+            }
+        });
+        
+        // Add grouped document citations
+        Object.values(docGroups).forEach(group => {
+            const sortedPages = Array.from(group.pages).sort((a, b) => a - b);
+            const pageRef = sortedPages.length > 1 
+                ? `Pages ${sortedPages.join(", ")}` 
+                : `Page ${sortedPages[0] || 1}`;
+                
+            group.metadata.similarity = group.maxScore;
+            
             citations.push({
                 type: "document",
-                title: metadata.originalName || "University Document",
-                page: String(metadata.pageNumber || 1),
-                section: metadata.category ? String(metadata.category).replace(/_/g, " ") : "General",
-                similarity: chunk.score !== undefined ? Math.max(0, Math.min(100, Math.round(chunk.score * 100))) : 100,
-                reference: `Page ${metadata.pageNumber || 1}`,
-                metadata: {
-                    documentId: metadata.documentId || "",
-                    category: metadata.category || "",
-                    department: metadata.department || "",
-                    institution: metadata.institution || "",
-                    similarity: chunk.score !== undefined ? Math.max(0, Math.min(100, Math.round(chunk.score * 100))) : 100
-                }
+                title: group.title,
+                page: sortedPages.join(", "),
+                section: group.category ? String(group.category).replace(/_/g, " ") : "General",
+                similarity: group.maxScore,
+                reference: pageRef,
+                metadata: group.metadata
             });
         });
     }
@@ -75,7 +110,7 @@ const formatCitations = (retrievedChunks = [], universitySiteResults = [], webRe
         });
     }
 
-    // Deduplicate citations
+    // Deduplicate any non-document citations by type, title and reference
     const unique = [];
     const seen = new Set();
 

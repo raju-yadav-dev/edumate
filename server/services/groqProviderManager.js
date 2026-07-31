@@ -1,27 +1,71 @@
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const settingsService = require("./settingsService");
 
+// Secure fetch selection to support both Node global fetch and node-fetch package
+const fetch = (() => {
+    try {
+        return require("node-fetch");
+    } catch {
+        return global.fetch;
+    }
+})();
+
 const sleep = (durationMs) => new Promise((resolve) => setTimeout(resolve, durationMs));
 
 const getConfiguredProviders = async () => {
-    const envProviders = [1, 2, 3].map((index) => ({
-        id: `groq_${index}`,
-        apiKey: process.env[`GROQ_API_KEY_${index}`],
-        status: "healthy"
-    }))
-        .filter((provider) => Boolean(provider.apiKey));
+    const providers = [];
 
-    if (envProviders.length > 0) {
-        return envProviders;
+    // 1. Check GROQ_API_KEY environment variable (supports comma-separated list)
+    if (process.env.GROQ_API_KEY) {
+        const keys = process.env.GROQ_API_KEY.split(",")
+            .map(k => k.trim())
+            .filter(Boolean);
+        keys.forEach((key, index) => {
+            providers.push({
+                id: `groq_env_${index + 1}`,
+                apiKey: key,
+                status: "healthy"
+            });
+        });
     }
 
-    const settings = await settingsService.getApiKeys();
+    // 2. Check numbered environment variables GROQ_API_KEY_1, GROQ_API_KEY_2, etc.
+    for (let i = 1; i <= 10; i++) {
+        const key = process.env[`GROQ_API_KEY_${i}`];
+        if (key) {
+            const trimmed = key.trim();
+            if (trimmed && !providers.some(p => p.apiKey === trimmed)) {
+                providers.push({
+                    id: `groq_env_numbered_${i}`,
+                    apiKey: trimmed,
+                    status: "healthy"
+                });
+            }
+        }
+    }
 
-    return (settings.groqApiKeys || []).map((apiKey, index) => ({
-        id: `groq_admin_${index + 1}`,
-        apiKey,
-        status: "healthy"
-    }));
+    // 3. Check settings from database if no environment keys are defined
+    if (providers.length === 0) {
+        try {
+            const settings = await settingsService.getApiKeys();
+            if (settings && settings.groqApiKeys) {
+                settings.groqApiKeys
+                    .map(k => k.trim())
+                    .filter(Boolean)
+                    .forEach((apiKey, index) => {
+                        providers.push({
+                            id: `groq_admin_${index + 1}`,
+                            apiKey,
+                            status: "healthy"
+                        });
+                    });
+            }
+        } catch (err) {
+            console.error("[Groq Provider Manager] Failed to load API keys from settings:", err.message);
+        }
+    }
+
+    return providers;
 };
 
 const requestCompletion = async ({ provider, messages, timeoutMs }) => {
@@ -36,7 +80,7 @@ const requestCompletion = async ({ provider, messages, timeoutMs }) => {
                 "Content-Type": "application/json"
             },
             body: JSON.stringify({
-                model: process.env.GROQ_MODEL || "llama-3.1-70b-versatile",
+                model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
                 messages,
                 temperature: 0.2,
                 max_tokens: 900
@@ -92,6 +136,12 @@ const generateCompletion = async ({ messages, maxAttemptsPerProvider = 2, timeou
                     message: error.message,
                     statusCode: error.statusCode || null
                 });
+
+                // Immediately failover on rate limits (429) or invalid auth error codes (400, 401, 403)
+                if (error.statusCode === 429 || error.statusCode === 401 || error.statusCode === 403 || error.statusCode === 400) {
+                    console.warn(`[Groq Provider Manager] Provider ${provider.id} failed with status ${error.statusCode}. Rotating immediately...`);
+                    break;
+                }
 
                 await sleep(250 * attempt);
             }

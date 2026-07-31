@@ -10,7 +10,7 @@ const AI_CONSTANTS = Object.freeze({
 
     // Vector Similarity Search
     SIMILARITY_THRESHOLD: 0.50,
-    DEFAULT_RETRIEVAL_LIMIT: 6,
+    DEFAULT_RETRIEVAL_LIMIT: 12,
 
     // RAG fallback response
     FALLBACK_RESPONSE: "I am sorry, but that information could not be found in the uploaded university documents.",

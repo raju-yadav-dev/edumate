@@ -16,7 +16,7 @@ const { verifyEnvironment } = require("./verifyEnvironment");
 const { startQdrantContainer } = require("./dockerManager");
 const { verifyMongo } = require("./verifyMongo");
 const { verifySupabase } = require("./verifySupabase");
-const { verifyGemini } = require("./verifyGemini");
+const { verifyGroq } = require("./verifyGroq");
 const { verifyQdrant } = require("./verifyQdrant");
 const { printBanner, printDashboard } = require("./banner");
 
@@ -121,16 +121,10 @@ const startDev = async () => {
         }
     }
 
-    // Check Gemini / Ollama API
-    const isOllama = process.env.LLM_PROVIDER === "ollama";
-    const providerName = isOllama ? "Ollama" : "Google Gemini";
-    const aiOk = await verifyGemini();
+    // Check Groq API
+    const aiOk = await verifyGroq();
     if (!aiOk) {
-        logger.error(`❌ Startup blocked: ${providerName} connection check failed.`);
-        if (ollamaProcess) {
-            try { ollamaProcess.kill(); } catch (e) {}
-        }
-        process.exit(1);
+        logger.warn("⚠️ WARNING: Groq API connection check failed. Chat bot completions will fail until valid keys are configured in .env or the admin settings panel.");
     }
     console.log();
 

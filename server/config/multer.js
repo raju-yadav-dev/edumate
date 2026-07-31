@@ -34,7 +34,7 @@ const upload = multer({
 
     limits: {
 
-        fileSize: 25 * 1024 * 1024 // 25 MB
+        fileSize: Number(process.env.MAX_FILE_SIZE)
 
     },
 

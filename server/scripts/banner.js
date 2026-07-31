@@ -16,10 +16,10 @@ const printBanner = () => {
 };
 
 const printDashboard = (stats) => {
-    const isOllama = process.env.LLM_PROVIDER === "ollama";
-    const aiProviderName = isOllama ? "Ollama" : "Gemini";
-    const aiModelName = isOllama ? `${process.env.OLLAMA_MODEL || "llama3.2:3b"} (Ollama)` : "Gemini 2.5 Flash";
-    const embeddingModelName = isOllama ? `${process.env.OLLAMA_EMBEDDING_MODEL || process.env.OLLAMA_MODEL || "llama3.2:3b"} (Ollama)` : "Gemini text-embedding-004";
+    const aiProviderName = "Groq";
+    const aiModelName = process.env.GROQ_MODEL || "llama-3.3-70b-versatile (Groq)";
+    const embeddingProvider = process.env.EMBEDDING_PROVIDER || "gemini";
+    const embeddingModelName = embeddingProvider === "ollama" ? `${process.env.EMBEDDING_MODEL || "nomic-embed-text"} (Ollama)` : "Gemini text-embedding-004";
 
     console.log(colors.cyan("══════════════════════════════════════════════"));
     console.log(colors.bold(colors.green("            🚀 EduMate AI Server")));

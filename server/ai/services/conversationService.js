@@ -1,7 +1,6 @@
 const Chat = require("../../models/Chat");
 const tokenizer = require("../utils/tokenizer");
 const promptBuilder = require("../utils/promptBuilder");
-const gemini = require("../config/gemini");
 
 /**
  * Retrieves and trims recent message memory for a conversation thread

@@ -16,7 +16,7 @@ const { verifyNodeVersion, verifyNpmVersion, verifyDependencies } = require("./d
 const { verifyEnvironment } = require("./verifyEnvironment");
 const { verifyMongo } = require("./verifyMongo");
 const { verifySupabase } = require("./verifySupabase");
-const { verifyGemini } = require("./verifyGemini");
+const { verifyGroq } = require("./verifyGroq");
 const { verifyQdrant } = require("./verifyQdrant");
 const { checkInternet } = require("./healthCheck");
 const { printBanner } = require("./banner");
@@ -93,17 +93,11 @@ const runDoctor = async () => {
         }
         console.log();
 
-        // 8. Verify Gemini/Ollama API connectivity
-        const isOllama = process.env.LLM_PROVIDER === "ollama";
-        const providerName = isOllama ? "Ollama" : "Google Gemini";
-        const geminiOk = await verifyGemini();
-        if (!geminiOk) {
+        // 8. Verify Groq API connectivity
+        const groqOk = await verifyGroq();
+        if (!groqOk) {
             hasErrors = true;
-            if (isOllama) {
-                logger.warn(`💡 Suggestion: Ensure Ollama is running and the model '${process.env.OLLAMA_MODEL || "llama3.2:3b"}' is pulled.`);
-            } else {
-                logger.warn("💡 Suggestion: Confirm GEMINI_API_KEY is active and correct.");
-            }
+            logger.warn("💡 Suggestion: Confirm GROQ_API_KEY is active and correct in settings or environment.");
         }
         console.log();
 
