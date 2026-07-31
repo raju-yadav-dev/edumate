@@ -14,21 +14,21 @@ const buildMessages = ({ question, intent, retrievedChunks, universitySiteResult
     // Format retrieved university document chunks
     const sourceContext = retrievedChunks && retrievedChunks.length > 0
         ? retrievedChunks.map((chunk, index) => 
-            `[University Source #${index + 1}: ${chunk.metadata.originalName || "Document"}, Page: ${chunk.metadata.pageNumber || 1}, Category: ${chunk.metadata.category || "General"}]\nContent: ${chunk.content}`
+            `[${chunk.metadata.originalName || "Document"}, Page: ${chunk.metadata.pageNumber || 1}, Category: ${chunk.metadata.category || "General"}]\nContent: ${chunk.content}`
           ).join("\n\n")
         : "No matching university documents found in the database.";
 
     // Format university website search results
     const siteContext = universitySiteResults && universitySiteResults.length > 0
         ? universitySiteResults.map((result, index) =>
-            `[University Website Source #${index + 1}: ${result.title}, URL: ${result.url}]\nSnippet: ${result.snippet}`
+            `[${result.title}, URL: ${result.url}]\nSnippet: ${result.snippet}`
           ).join("\n\n")
         : "No university website context provided.";
 
     // Format web search results
     const webContext = webResults && webResults.length > 0
         ? webResults.map((result, index) =>
-            `[Web Source #${index + 1}: ${result.title}, URL: ${result.url}]\nSnippet: ${result.snippet}`
+            `[${result.title}, URL: ${result.url}]\nSnippet: ${result.snippet}`
           ).join("\n\n")
         : "No web search context provided.";
 

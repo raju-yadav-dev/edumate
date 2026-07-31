@@ -561,40 +561,82 @@ function Chat() {
             };
         }));
 
+        const assistantMessageId = safeId("msg");
+        const initialAssistantMessage = {
+            id: assistantMessageId,
+            role: "assistant",
+            content: "",
+            timestamp: formatTimestamp(new Date()),
+            confidence: "medium",
+            sources: [],
+            bookmarked: false,
+            reaction: null
+        };
+
+        setThreads((currentThreads) => currentThreads.map((thread) => {
+            if (thread.id !== activeThreadId) {
+                return thread;
+            }
+            return {
+                ...thread,
+                messages: [...thread.messages, initialAssistantMessage]
+            };
+        }));
+
         try {
-            const response = await askEduMate({
+            await askEduMate({
                 question: attachments.length ? `${trimmedQuestion}\n\nAttachments: ${attachments.map((file) => file.name).join(", ")}` : trimmedQuestion,
                 conversationId,
-                signal: controller.signal
-            });
-
-            if (response.data?.conversationId) {
-                setConversationId(response.data.conversationId);
-            }
-
-            const assistantMessage = {
-                id: safeId("msg"),
-                role: "assistant",
-                content: response.data?.message || "I could not generate a response.",
-                timestamp: formatTimestamp(new Date()),
-                confidence: response.data?.confidence || "medium",
-                sources: response.data?.sources || buildAssistantSources(),
-                bookmarked: false,
-                reaction: null
-            };
-
-            setThreads((currentThreads) => currentThreads.map((thread) => {
-                if (thread.id !== activeThreadId) {
-                    return thread;
+                signal: controller.signal,
+                onChunk: (event) => {
+                    if (event.type === "chunk") {
+                        setThreads((currentThreads) => currentThreads.map((thread) => {
+                            if (thread.id !== activeThreadId) {
+                                return thread;
+                            }
+                            return {
+                                ...thread,
+                                messages: thread.messages.map((m) => {
+                                    if (m.id === assistantMessageId) {
+                                        return {
+                                            ...m,
+                                            content: m.content + event.content
+                                        };
+                                    }
+                                    return m;
+                                })
+                            };
+                        }));
+                    } else if (event.type === "done") {
+                        if (event.conversationId) {
+                            setConversationId(event.conversationId);
+                        }
+                        setThreads((currentThreads) => currentThreads.map((thread) => {
+                            if (thread.id !== activeThreadId) {
+                                return thread;
+                            }
+                            return {
+                                ...thread,
+                                messages: thread.messages.map((m) => {
+                                    if (m.id === assistantMessageId) {
+                                        return {
+                                            ...m,
+                                            content: event.message || m.content,
+                                            sources: event.sources || [],
+                                            confidence: event.confidence || "medium"
+                                        };
+                                    }
+                                    return m;
+                                }),
+                                preview: event.message || thread.preview,
+                                updatedLabel: formatThreadLabel(new Date())
+                            };
+                        }));
+                    } else if (event.type === "error") {
+                        throw new Error(event.message || "An error occurred during generation.");
+                    }
                 }
-
-                return {
-                    ...thread,
-                    messages: [...thread.messages, assistantMessage],
-                    preview: assistantMessage.content,
-                    updatedLabel: formatThreadLabel(new Date())
-                };
-            }));
+            });
         } catch (error) {
             if (error?.name === "AbortError") {
                 setThreads((currentThreads) => currentThreads.map((thread) => {
@@ -604,16 +646,16 @@ function Chat() {
 
                     return {
                         ...thread,
-                        messages: [
-                            ...thread.messages,
-                            {
-                                id: safeId("msg"),
-                                role: "assistant",
-                                content: "Generation stopped.",
-                                timestamp: formatTimestamp(new Date()),
-                                confidence: "low"
+                        messages: thread.messages.map((m) => {
+                            if (m.id === assistantMessageId) {
+                                return {
+                                    ...m,
+                                    content: m.content ? `${m.content}\n\n[Generation stopped.]` : "Generation stopped.",
+                                    confidence: "low"
+                                };
                             }
-                        ]
+                            return m;
+                        })
                     };
                 }));
 
@@ -627,16 +669,17 @@ function Chat() {
 
                 return {
                     ...thread,
-                    messages: [
-                        ...thread.messages,
-                        {
-                            id: safeId("msg"),
-                            role: "assistant",
-                            content: error?.message || "EduMate is unavailable right now. Please retry.",
-                            timestamp: formatTimestamp(new Date()),
-                            confidence: "low"
+                    messages: thread.messages.map((m) => {
+                        if (m.id === assistantMessageId) {
+                            const errorMsg = error?.message || "EduMate is unavailable right now. Please retry.";
+                            return {
+                                ...m,
+                                content: m.content ? `${m.content}\n\n[Error: ${errorMsg}]` : errorMsg,
+                                confidence: "low"
+                            };
                         }
-                    ]
+                        return m;
+                    })
                 };
             }));
         } finally {
@@ -719,10 +762,11 @@ function Chat() {
                         </div>
                     ) : (
                         <div className="edu-chat-thread" aria-label="Conversation">
-                            {visibleMessages.map((message) => (
+                            {visibleMessages.map((message, index) => (
                                 <MessageBubble
                                     key={message.id}
                                     message={message}
+                                    prevMessage={index > 0 ? visibleMessages[index - 1] : null}
                                     onCopy={handleCopy}
                                     onRegenerate={() => {
                                         const previousUser = [...(activeThread?.messages || [])].reverse().find((entry) => entry.role === "user");

@@ -44,7 +44,7 @@ const buildGuestUser = () => ({
 /**
  * Handles chatbot queries with RAG matching using Gemini 2.5 Flash and Qdrant
  */
-const askQuestion = async ({ user, question, conversationId }) => {
+const askQuestion = async ({ user, question, conversationId, onChunk, signal }) => {
     const startedAt = Date.now();
     const normalizedQuestion = String(question || "").trim();
     const activeUser = user || buildGuestUser();
@@ -266,7 +266,14 @@ const askQuestion = async ({ user, question, conversationId }) => {
             });
 
             // Call Unified LLM Service
-            const textResponse = await llmService.generateCompletion(messages);
+            let textResponse = "";
+            if (onChunk) {
+                textResponse = await llmService.generateStream(messages, (chunk) => {
+                    onChunk(chunk);
+                }, { signal });
+            } else {
+                textResponse = await llmService.generateCompletion(messages);
+            }
             provider = "groq";
 
             // Validate response against hallucinations

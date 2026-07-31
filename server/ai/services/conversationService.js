@@ -1,6 +1,7 @@
 const Chat = require("../../models/Chat");
 const tokenizer = require("../utils/tokenizer");
 const promptBuilder = require("../utils/promptBuilder");
+const llmService = require("./llmService");
 
 /**
  * Retrieves and trims recent message memory for a conversation thread
@@ -67,7 +68,7 @@ const summarizeHistory = async (historyText) => {
     ];
 
     try {
-        return await gemini.generateCompletion(messages, { temperature: 0.1, maxOutputTokens: 300 });
+        return await llmService.generateCompletion(messages, { timeoutMs: 15000 });
     } catch (e) {
         console.error("Memory Summarization Error:", e.message);
         // Fallback: Return truncated raw text

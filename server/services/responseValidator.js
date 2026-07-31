@@ -24,7 +24,9 @@ const validateResponse = ({ intent, retrievedContext, generatedAnswer, providerS
     const citedDocs = new Set();
     while ((match = citationRegex.exec(generatedAnswer)) !== null) {
         const citationContent = match[1];
-        const docName = citationContent.split(",")[0].trim().toLowerCase();
+        let docName = citationContent.split(",")[0].trim().toLowerCase();
+        // Strip prefixes like "university source #1: ", "source: ", etc.
+        docName = docName.replace(/^(university\s+)?source\s*(#\d+)?\s*[:-]\s*/, "");
         if (!docName.includes("http") && !docName.includes("www") && docName.endsWith(".pdf")) {
             citedDocs.add(docName);
         }

@@ -156,7 +156,143 @@ const generateCompletion = async ({ messages, maxAttemptsPerProvider = 2, timeou
     };
 };
 
+async function* readLines(stream) {
+    let buffer = "";
+    const decoder = new (require("util").TextDecoder || global.TextDecoder)("utf-8");
+
+    for await (const chunk of stream) {
+        const text = typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: true });
+        buffer += text;
+        const lines = buffer.split("\n");
+        buffer = lines.pop(); // save the partial line
+        for (const line of lines) {
+            yield line;
+        }
+    }
+
+    if (buffer) {
+        yield buffer;
+    }
+}
+
+const requestStream = async ({ provider, messages, onChunk, timeoutMs, signal }) => {
+    const controller = new AbortController();
+    
+    // Link abort signal if provided
+    if (signal) {
+        signal.addEventListener("abort", () => controller.abort());
+        if (signal.aborted) {
+            controller.abort();
+        }
+    }
+    
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+        const response = await fetch(GROQ_API_URL, {
+            method: "POST",
+            headers: {
+                Authorization: `Bearer ${provider.apiKey}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
+                messages,
+                temperature: 0.2,
+                max_tokens: 900,
+                stream: true
+            }),
+            signal: controller.signal
+        });
+
+        if (!response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            const error = new Error(payload.error?.message || "Groq provider request failed.");
+            error.statusCode = response.status;
+            throw error;
+        }
+
+        let fullText = "";
+        for await (const line of readLines(response.body)) {
+            const trimmed = line.trim();
+            if (!trimmed || !trimmed.startsWith("data: ")) continue;
+            const dataStr = trimmed.slice(6);
+            if (dataStr === "[DONE]") continue;
+
+            try {
+                const parsed = JSON.parse(dataStr);
+                const content = parsed.choices?.[0]?.delta?.content || "";
+                if (content) {
+                    fullText += content;
+                    onChunk(content);
+                }
+            } catch (err) {
+                // Ignore partial JSON parsing errors
+            }
+        }
+
+        return {
+            content: fullText,
+            provider: provider.id,
+            rawUsage: null
+        };
+    } finally {
+        clearTimeout(timeout);
+    }
+};
+
+const generateStream = async ({ messages, onChunk, maxAttemptsPerProvider = 2, timeoutMs = 20000, signal }) => {
+    const providers = await getConfiguredProviders();
+    const failures = [];
+
+    if (providers.length === 0) {
+        return {
+            success: false,
+            content: "",
+            provider: "none",
+            failures: ["No Groq provider API keys are configured."]
+        };
+    }
+
+    for (const provider of providers) {
+        for (let attempt = 1; attempt <= maxAttemptsPerProvider; attempt += 1) {
+            try {
+                const completion = await requestStream({ provider, messages, onChunk, timeoutMs, signal });
+
+                return {
+                    success: true,
+                    ...completion,
+                    failures
+                };
+            } catch (error) {
+                failures.push({
+                    provider: provider.id,
+                    attempt,
+                    message: error.message,
+                    statusCode: error.statusCode || null
+                });
+
+                // Immediately failover on rate limits (429) or invalid auth error codes (400, 401, 403)
+                if (error.statusCode === 429 || error.statusCode === 401 || error.statusCode === 403 || error.statusCode === 400) {
+                    console.warn(`[Groq Provider Manager] Provider ${provider.id} failed with status ${error.statusCode}. Rotating immediately...`);
+                    break;
+                }
+
+                await sleep(250 * attempt);
+            }
+        }
+    }
+
+    return {
+        success: false,
+        content: "",
+        provider: "none",
+        failures
+    };
+};
+
 module.exports = {
     generateCompletion,
+    generateStream,
     getConfiguredProviders
 };

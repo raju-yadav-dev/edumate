@@ -10,8 +10,60 @@ import ConfidenceBadge from "./ConfidenceBadge";
 import CitationCard from "./CitationCard";
 import MessageActions from "./MessageActions";
 
+function isCitationsOnlyRequest(prevMessage) {
+    if (!prevMessage || prevMessage.role !== "user") return false;
+    const query = String(prevMessage.content || "").toLowerCase().trim();
+    
+    return (
+        query === "give the supportive document" ||
+        query === "give supportive document" ||
+        query === "give supportive documents" ||
+        query === "show supportive documents" ||
+        query === "give the document" ||
+        query === "give document" ||
+        query === "give documents" ||
+        query === "show document" ||
+        query === "show documents" ||
+        query === "give the source" ||
+        query === "give source" ||
+        query === "give sources" ||
+        query === "show sources" ||
+        query === "give source documents" ||
+        query === "show source documents" ||
+        query === "give pdf" ||
+        query === "show pdf" ||
+        query === "give pdfs" ||
+        query === "show pdfs" ||
+        query === "citation" ||
+        query === "citations" ||
+        query === "reference" ||
+        query === "references" ||
+        query === "show citation" ||
+        query === "show citations" ||
+        query === "give citation" ||
+        query === "give citations" ||
+        query === "show reference" ||
+        query === "show references" ||
+        query === "give reference" ||
+        query === "give references" ||
+        query === "give the pdf file" ||
+        query === "give the pdf files" ||
+        query === "show the pdf file" ||
+        query === "show the pdf files" ||
+        query.includes("supportive document") ||
+        query.includes("supportive doc") ||
+        query.startsWith("give document") ||
+        query.startsWith("show document") ||
+        query.startsWith("give pdf") ||
+        query.startsWith("show pdf") ||
+        query.startsWith("give source") ||
+        query.startsWith("show source")
+    );
+}
+
 function MessageBubble({
     message,
+    prevMessage,
     onCopy,
     onRegenerate,
     onShare,
@@ -21,7 +73,41 @@ function MessageBubble({
     onDownloadPdf
 }) {
     const isUser = message.role === "user";
-    const hasCitations = Array.isArray(message.sources) && message.sources.length > 0;
+    const showCitations = (() => {
+        if (!Array.isArray(message.sources) || message.sources.length === 0) {
+            return false;
+        }
+
+        if (prevMessage && prevMessage.role === "user") {
+            const query = String(prevMessage.content || "").toLowerCase();
+            return (
+                query.includes("supportive document") ||
+                query.includes("supportive doc") ||
+                query.includes("give document") ||
+                query.includes("show document") ||
+                query.includes("give source") ||
+                query.includes("show source") ||
+                query.includes("citation") ||
+                query.includes("reference") ||
+                query.includes("where did you get") ||
+                query.includes("which document") ||
+                query.includes("pdf file") ||
+                query.includes("source file") ||
+                query.includes("document name") ||
+                query.includes("support doc") ||
+                query.includes("attached doc")
+            );
+        }
+
+        return false;
+    })();
+
+    const displayContent = (() => {
+        if (!isUser && showCitations && isCitationsOnlyRequest(prevMessage)) {
+            return "Here are the supportive documents:";
+        }
+        return message.content;
+    })();
 
     const handleCitationClick = (citation) => {
         if (message.onCitationClick) {
@@ -85,11 +171,11 @@ function MessageBubble({
                                 }
                             }}
                         >
-                            {message.content}
+                            {displayContent}
                         </ReactMarkdown>
                     </div>
 
-                    {hasCitations ? (
+                    {showCitations ? (
                         <div className="edu-chat-citations">
                             <p className="edu-chat-section-label">Sources</p>
                             <div className="edu-chat-citation-grid">

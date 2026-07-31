@@ -35,9 +35,15 @@ const DOCUMENT_CATEGORIES = Object.freeze([
 ]);
 
 const sanitizeCategory = (category) => {
-    const normalizedCategory = String(category || "others").toLowerCase().trim().replace(/\s+/g, "_");
+    if (!category) return "others";
+    const normalizedCategory = String(category)
+        .toLowerCase()
+        .trim()
+        .replace(/[^a-z0-9_-]/g, "")
+        .replace(/[-\s]+/g, "_")
+        .replace(/_+/g, "_");
 
-    return DOCUMENT_CATEGORIES.includes(normalizedCategory) ? normalizedCategory : "others";
+    return normalizedCategory || "others";
 };
 
 const getChecksum = (buffer) => crypto.createHash("sha256").update(buffer).digest("hex");

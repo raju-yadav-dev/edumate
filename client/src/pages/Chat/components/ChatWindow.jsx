@@ -39,6 +39,7 @@ export default function ChatWindow() {
                                 <ChatMessage
                                     key={index}
                                     message={message}
+                                    prevMessage={index > 0 ? messages[index - 1] : null}
                                     onRegenerate={regenerate}
                                     isLast={isLast}
                                 />

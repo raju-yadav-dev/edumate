@@ -158,6 +158,14 @@ function getActiveLoggedInUsers(adminUser, authUser) {
     return list;
 }
 
+function formatFolderLabel(value) {
+    if (!value) return "";
+    return value
+        .split(/[_-]/)
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" ");
+}
+
 function Admin({ mode = "auto" }) {
     const { adminUser, loginAdmin: setAdminSession, logoutAdmin, isAdminAuthenticated } = useAdminAuth();
     const { user: authUser } = useAuth();
@@ -256,6 +264,27 @@ function Admin({ mode = "auto" }) {
             return () => window.clearTimeout(timer);
         }
     }, [error]);
+
+    useEffect(() => {
+        if (storageStats?.categoryCounts) {
+            const countsKeys = Object.keys(storageStats.categoryCounts);
+            
+            setFolders((currentFolders) => {
+                let updated = false;
+                const nextFolders = [...currentFolders];
+
+                countsKeys.forEach((key) => {
+                    if (key && !nextFolders.some((f) => f.value === key)) {
+                        const label = formatFolderLabel(key);
+                        nextFolders.push({ label, value: key });
+                        updated = true;
+                    }
+                });
+
+                return updated ? nextFolders : currentFolders;
+            });
+        }
+    }, [storageStats]);
 
     const handleAuthError = useCallback((fetchError) => {
         console.warn("API operation status:", fetchError);

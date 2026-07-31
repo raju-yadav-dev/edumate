@@ -101,8 +101,87 @@ function parseMarkdown(text) {
     return parsedLines.join("");
 }
 
-export default function ChatMessage({ message, onRegenerate, isLast }) {
+function isCitationsOnlyRequest(prevMessage) {
+    if (!prevMessage || prevMessage.role !== "user") return false;
+    const query = String(prevMessage.content || "").toLowerCase().trim();
+    
+    return (
+        query === "give the supportive document" ||
+        query === "give supportive document" ||
+        query === "give supportive documents" ||
+        query === "show supportive documents" ||
+        query === "give the document" ||
+        query === "give document" ||
+        query === "give documents" ||
+        query === "show document" ||
+        query === "show documents" ||
+        query === "give the source" ||
+        query === "give source" ||
+        query === "give sources" ||
+        query === "show sources" ||
+        query === "give source documents" ||
+        query === "show source documents" ||
+        query === "give pdf" ||
+        query === "show pdf" ||
+        query === "give pdfs" ||
+        query === "show pdfs" ||
+        query === "citation" ||
+        query === "citations" ||
+        query === "reference" ||
+        query === "references" ||
+        query === "show citation" ||
+        query === "show citations" ||
+        query === "give citation" ||
+        query === "give citations" ||
+        query === "show reference" ||
+        query === "show references" ||
+        query === "give reference" ||
+        query === "give references" ||
+        query === "give the pdf file" ||
+        query === "give the pdf files" ||
+        query === "show the pdf file" ||
+        query === "show the pdf files" ||
+        query.includes("supportive document") ||
+        query.includes("supportive doc") ||
+        query.startsWith("give document") ||
+        query.startsWith("show document") ||
+        query.startsWith("give pdf") ||
+        query.startsWith("show pdf") ||
+        query.startsWith("give source") ||
+        query.startsWith("show source")
+    );
+}
+
+export default function ChatMessage({ message, prevMessage, onRegenerate, isLast }) {
     const isAssistant = message.role === "assistant";
+    const showCitations = (() => {
+        if (!Array.isArray(message.sources) || message.sources.length === 0) {
+            return false;
+        }
+
+        if (prevMessage && prevMessage.role === "user") {
+            const query = String(prevMessage.content || "").toLowerCase();
+            return (
+                query.includes("supportive document") ||
+                query.includes("supportive doc") ||
+                query.includes("give document") ||
+                query.includes("show document") ||
+                query.includes("give source") ||
+                query.includes("show source") ||
+                query.includes("citation") ||
+                query.includes("reference") ||
+                query.includes("where did you get") ||
+                query.includes("which document") ||
+                query.includes("pdf file") ||
+                query.includes("source file") ||
+                query.includes("document name") ||
+                query.includes("support doc") ||
+                query.includes("attached doc")
+            );
+        }
+
+        return false;
+    })();
 
     const getSourceLabel = () => {
         if (message.sourceLabel) {
@@ -126,6 +205,9 @@ export default function ChatMessage({ message, onRegenerate, isLast }) {
     const sourceLabel = getSourceLabel();
 
     const getCleanContent = () => {
+        if (showCitations && isCitationsOnlyRequest(prevMessage)) {
+            return "Here are the supportive documents:";
+        }
         let content = message.content || "";
         if (sourceLabel && content.startsWith(sourceLabel)) {
             content = content.substring(sourceLabel.length).replace(/^\s+/, "");
@@ -153,8 +235,7 @@ export default function ChatMessage({ message, onRegenerate, isLast }) {
                         className="message-rich-text"
                         dangerouslySetInnerHTML={{ __html: formattedContent }}
                     />
-                    
-                    {isAssistant && message.sources && message.sources.length > 0 && (
+                    {isAssistant && showCitations && (
                         <SourceCitation sources={message.sources} />
                     )}
                 </div>
