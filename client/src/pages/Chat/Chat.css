@@ -929,11 +929,18 @@
     opacity:.55;
 }
 
+.edu-chat-send-button.is-stop{
+    background:linear-gradient(135deg, #f87171, #ef4444);
+    color:#ffffff;
+}
+
+.edu-chat-send-button.is-stop:hover{
+    background:linear-gradient(135deg, #ef4444, #dc2626);
+    transform:translateY(-1px);
+}
+
 .edu-chat-stop-button{
-    grid-column:1 / -1;
-    min-height:38px;
-    background:rgba(248,113,113,.16);
-    color:#fecaca;
+    display:none;
 }
 
 .edu-chat-file-preview-list{
@@ -1388,6 +1395,14 @@
 [data-theme="light"] .edu-chat-send-button:hover{ filter:brightness(1.04); }
 
 [data-theme="light"] .edu-chat-send-button:disabled{ color:#8791a6; background:#e4e7f1; box-shadow:none; }
+[data-theme="light"] .edu-chat-send-button.is-stop{
+    background:linear-gradient(110deg, #f87171, #ef4444);
+    color:#ffffff;
+    box-shadow:0 10px 24px rgba(239, 68, 68, .2);
+}
+[data-theme="light"] .edu-chat-send-button.is-stop:hover{
+    background:linear-gradient(110deg, #ef4444, #dc2626);
+}
 [data-theme="light"] .edu-chat-avatar-fallback{ color:#fff; background:linear-gradient(135deg,#756cff,#69c9f7); }
 
 /* Message controls and source references previously used browser-default buttons. */

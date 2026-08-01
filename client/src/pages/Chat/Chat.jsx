@@ -520,9 +520,10 @@ function Chat() {
     }, [user]);
 
     const sendMessage = useCallback(async (question) => {
+        let currentThreadId = activeThreadId;
         const trimmedQuestion = question.trim();
 
-        if (!trimmedQuestion || loading || !activeThreadId) {
+        if ((!trimmedQuestion && attachments.length === 0) || loading) {
             return;
         }
 
@@ -540,26 +541,38 @@ function Chat() {
         const userMessage = {
             id: safeId("msg"),
             role: "user",
-            content: trimmedQuestion,
+            content: trimmedQuestion || (attachments.length ? `[Attached ${attachments.length} file(s)]` : ""),
             timestamp: formatTimestamp(now)
         };
 
-        setThreads((currentThreads) => currentThreads.map((thread) => {
-            if (thread.id !== activeThreadId) {
-                return thread;
-            }
+        if (!currentThreadId) {
+            const newThread = createBlankThread();
+            currentThreadId = newThread.id;
+            newThread.title = trimmedQuestion ? trimmedQuestion.slice(0, 42) : "New chat";
+            newThread.preview = trimmedQuestion || (attachments.length ? `Attached ${attachments.length} file(s)` : "");
+            newThread.hasFiles = attachments.length > 0;
+            newThread.messages = [userMessage];
 
-            const nextTitle = thread.title === "New chat" ? trimmedQuestion.slice(0, 42) : thread.title;
+            setThreads((currentThreads) => [newThread, ...currentThreads]);
+            setActiveThreadId(currentThreadId);
+        } else {
+            setThreads((currentThreads) => currentThreads.map((thread) => {
+                if (thread.id !== currentThreadId) {
+                    return thread;
+                }
 
-            return {
-                ...thread,
-                title: nextTitle,
-                preview: trimmedQuestion,
-                updatedLabel: formatThreadLabel(now),
-                hasFiles: thread.hasFiles || attachments.length > 0,
-                messages: [...thread.messages, userMessage]
-            };
-        }));
+                const nextTitle = thread.title === "New chat" ? (trimmedQuestion ? trimmedQuestion.slice(0, 42) : "New chat") : thread.title;
+
+                return {
+                    ...thread,
+                    title: nextTitle,
+                    preview: trimmedQuestion || (attachments.length ? `Attached ${attachments.length} file(s)` : ""),
+                    updatedLabel: formatThreadLabel(now),
+                    hasFiles: thread.hasFiles || attachments.length > 0,
+                    messages: [...thread.messages, userMessage]
+                };
+            }));
+        }
 
         const assistantMessageId = safeId("msg");
         const initialAssistantMessage = {
@@ -574,7 +587,7 @@ function Chat() {
         };
 
         setThreads((currentThreads) => currentThreads.map((thread) => {
-            if (thread.id !== activeThreadId) {
+            if (thread.id !== currentThreadId) {
                 return thread;
             }
             return {
@@ -591,7 +604,7 @@ function Chat() {
                 onChunk: (event) => {
                     if (event.type === "chunk") {
                         setThreads((currentThreads) => currentThreads.map((thread) => {
-                            if (thread.id !== activeThreadId) {
+                            if (thread.id !== currentThreadId) {
                                 return thread;
                             }
                             return {
@@ -612,7 +625,7 @@ function Chat() {
                             setConversationId(event.conversationId);
                         }
                         setThreads((currentThreads) => currentThreads.map((thread) => {
-                            if (thread.id !== activeThreadId) {
+                            if (thread.id !== currentThreadId) {
                                 return thread;
                             }
                             return {
@@ -640,7 +653,7 @@ function Chat() {
         } catch (error) {
             if (error?.name === "AbortError") {
                 setThreads((currentThreads) => currentThreads.map((thread) => {
-                    if (thread.id !== activeThreadId) {
+                    if (thread.id !== currentThreadId) {
                         return thread;
                     }
 
@@ -663,7 +676,7 @@ function Chat() {
             }
 
             setThreads((currentThreads) => currentThreads.map((thread) => {
-                if (thread.id !== activeThreadId) {
+                if (thread.id !== currentThreadId) {
                     return thread;
                 }
 

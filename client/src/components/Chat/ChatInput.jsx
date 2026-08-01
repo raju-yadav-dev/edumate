@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 
-import { FiArrowRight, FiPaperclip, FiSmile, FiUpload, FiX } from "react-icons/fi";
+import { FiArrowRight, FiPaperclip, FiSmile, FiUpload, FiX, FiSquare } from "react-icons/fi";
 
 import FilePreview from "./FilePreview";
 
@@ -56,7 +56,9 @@ function ChatInput({
     const handleKeyDown = (event) => {
         if (event.key === "Enter" && !event.shiftKey) {
             event.preventDefault();
-            onSubmit();
+            if (!isLoading) {
+                onSubmit();
+            }
         }
     };
 
@@ -124,16 +126,27 @@ function ChatInput({
                         <span>Shift + Enter for new line</span>
                     </div>
 
-                    <button type="submit" className="edu-chat-send-button" disabled={isLoading || !value.trim()}>
-                        <FiArrowRight />
-                        <span>Send</span>
-                    </button>
-
                     {isLoading ? (
-                        <button type="button" className="edu-chat-stop-button" onClick={onStopGenerating}>
-                            Stop generating
+                        <button
+                            type="button"
+                            className="edu-chat-send-button is-stop"
+                            onClick={onStopGenerating}
+                            title="Stop generating"
+                        >
+                            <FiSquare style={{ fill: "currentColor" }} />
+                            <span>Stop</span>
                         </button>
-                    ) : null}
+                    ) : (
+                        <button
+                            type="submit"
+                            className="edu-chat-send-button"
+                            disabled={!value.trim() && attachments.length === 0}
+                            title="Send message"
+                        >
+                            <FiArrowRight />
+                            <span>Send</span>
+                        </button>
+                    )}
                 </div>
             </div>
 
