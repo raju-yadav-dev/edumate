@@ -124,7 +124,8 @@ const saveMessageTurn = async ({ user, conversationId, question, response, inten
             confidence: response.confidence === "high" ? 0.9 : response.confidence === "medium" ? 0.65 : 0.25,
             sources: response.sources || [],
             provider,
-            responseTimeMs
+            responseTimeMs,
+            mapData: response.mapData || null
         });
 
         chat.updatedBy = user._id;

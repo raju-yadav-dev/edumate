@@ -60,6 +60,10 @@ const messageSchema = new mongoose.Schema(
             type: Number,
             default: 0
         },
+        mapData: {
+            type: mongoose.Schema.Types.Mixed,
+            default: null
+        },
         createdAt: {
             type: Date,
             default: Date.now

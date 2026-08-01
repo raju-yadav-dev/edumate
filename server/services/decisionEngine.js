@@ -1,6 +1,24 @@
 const { INTENTS, INSTITUTIONAL_INTENTS } = require("../constants/intents");
 
-const decide = ({ intent }) => {
+const decide = ({ intent, question }) => {
+    const q = String(question || "").toLowerCase();
+    const mapKeywords = [
+        "distance", "route", "directions", "navigation", "nearest", "nearby", 
+        "travel time", "how do i reach", "how far", "bus", "metro", "train", 
+        "airport", "hospital", "restaurant", "hostel", "pg", "parking",
+        "navigate", "reach", "map", "cab", "taxi", "fare", "fuel cost"
+    ];
+
+    const hasMapKeyword = mapKeywords.some(kw => q.includes(kw));
+
+    if (hasMapKeyword) {
+        return {
+            service: "map",
+            requiresVerifiedContext: true,
+            allowLlmFallback: false
+        };
+    }
+
     if (intent === INTENTS.GREETING) {
         return {
             service: "deterministic",
@@ -9,7 +27,15 @@ const decide = ({ intent }) => {
         };
     }
 
-    if ([INTENTS.NEARBY_PLACES, INTENTS.LOCATION, INTENTS.TRAVEL_ROUTE, INTENTS.DISTANCE, INTENTS.TRAVEL_COST, INTENTS.ETA].includes(intent)) {
+    if ([
+        INTENTS.NEARBY_PLACES, 
+        INTENTS.LOCATION, 
+        INTENTS.TRAVEL_ROUTE, 
+        INTENTS.DISTANCE, 
+        INTENTS.TRAVEL_COST, 
+        INTENTS.ETA,
+        INTENTS.TRANSPORT
+    ].includes(intent)) {
         return {
             service: "map",
             requiresVerifiedContext: true,

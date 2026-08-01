@@ -14,6 +14,7 @@ const apiRoutes = require("./routes/apiRoutes");
 const { notFound, errorHandler } = require("./middleware/errorMiddleware");
 const uploadRoutes = require("./routes/uploadRoutes");
 const storageRoutes = require("./routes/storageRoutes");
+const mapRoutes = require("./routes/mapRoutes");
 
 const app = express();
 
@@ -86,6 +87,7 @@ app.use("/api/documents", documentRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/storage", storageRoutes);
 app.use("/api/upload", uploadRoutes);
+app.use("/api/map", mapRoutes);
 
 // ==============================
 // Test Route

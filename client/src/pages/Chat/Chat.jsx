@@ -223,6 +223,7 @@ function Chat() {
     const [hasSubmittedInitialPrompt, setHasSubmittedInitialPrompt] = useState(false);
     const abortRef = useRef(null);
     const bottomRef = useRef(null);
+    const [gpsCoords, setGpsCoords] = useState(null);
 
     useEffect(() => {
         localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(threads));
@@ -519,10 +520,11 @@ function Chat() {
         return fullName.split(/\s+/)[0] || "Raju";
     }, [user]);
 
-    const sendMessage = useCallback(async (question) => {
+    const sendMessage = useCallback(async (question, overrideCoords = null) => {
+        let currentThreadId = activeThreadId;
         const trimmedQuestion = question.trim();
 
-        if (!trimmedQuestion || loading || !activeThreadId) {
+        if ((!trimmedQuestion && attachments.length === 0) || loading) {
             return;
         }
 
@@ -540,26 +542,38 @@ function Chat() {
         const userMessage = {
             id: safeId("msg"),
             role: "user",
-            content: trimmedQuestion,
+            content: trimmedQuestion || (attachments.length ? `[Attached ${attachments.length} file(s)]` : ""),
             timestamp: formatTimestamp(now)
         };
 
-        setThreads((currentThreads) => currentThreads.map((thread) => {
-            if (thread.id !== activeThreadId) {
-                return thread;
-            }
+        if (!currentThreadId) {
+            const newThread = createBlankThread();
+            currentThreadId = newThread.id;
+            newThread.title = trimmedQuestion ? trimmedQuestion.slice(0, 42) : "New chat";
+            newThread.preview = trimmedQuestion || (attachments.length ? `Attached ${attachments.length} file(s)` : "");
+            newThread.hasFiles = attachments.length > 0;
+            newThread.messages = [userMessage];
 
-            const nextTitle = thread.title === "New chat" ? trimmedQuestion.slice(0, 42) : thread.title;
+            setThreads((currentThreads) => [newThread, ...currentThreads]);
+            setActiveThreadId(currentThreadId);
+        } else {
+            setThreads((currentThreads) => currentThreads.map((thread) => {
+                if (thread.id !== currentThreadId) {
+                    return thread;
+                }
 
-            return {
-                ...thread,
-                title: nextTitle,
-                preview: trimmedQuestion,
-                updatedLabel: formatThreadLabel(now),
-                hasFiles: thread.hasFiles || attachments.length > 0,
-                messages: [...thread.messages, userMessage]
-            };
-        }));
+                const nextTitle = thread.title === "New chat" ? (trimmedQuestion ? trimmedQuestion.slice(0, 42) : "New chat") : thread.title;
+
+                return {
+                    ...thread,
+                    title: nextTitle,
+                    preview: trimmedQuestion || (attachments.length ? `Attached ${attachments.length} file(s)` : ""),
+                    updatedLabel: formatThreadLabel(now),
+                    hasFiles: thread.hasFiles || attachments.length > 0,
+                    messages: [...thread.messages, userMessage]
+                };
+            }));
+        }
 
         const assistantMessageId = safeId("msg");
         const initialAssistantMessage = {
@@ -574,7 +588,7 @@ function Chat() {
         };
 
         setThreads((currentThreads) => currentThreads.map((thread) => {
-            if (thread.id !== activeThreadId) {
+            if (thread.id !== currentThreadId) {
                 return thread;
             }
             return {
@@ -587,11 +601,13 @@ function Chat() {
             await askEduMate({
                 question: attachments.length ? `${trimmedQuestion}\n\nAttachments: ${attachments.map((file) => file.name).join(", ")}` : trimmedQuestion,
                 conversationId,
+                latitude: overrideCoords?.lat || gpsCoords?.lat,
+                longitude: overrideCoords?.lng || gpsCoords?.lng,
                 signal: controller.signal,
                 onChunk: (event) => {
                     if (event.type === "chunk") {
                         setThreads((currentThreads) => currentThreads.map((thread) => {
-                            if (thread.id !== activeThreadId) {
+                            if (thread.id !== currentThreadId) {
                                 return thread;
                             }
                             return {
@@ -612,7 +628,7 @@ function Chat() {
                             setConversationId(event.conversationId);
                         }
                         setThreads((currentThreads) => currentThreads.map((thread) => {
-                            if (thread.id !== activeThreadId) {
+                            if (thread.id !== currentThreadId) {
                                 return thread;
                             }
                             return {
@@ -623,7 +639,9 @@ function Chat() {
                                             ...m,
                                             content: event.message || m.content,
                                             sources: event.sources || [],
-                                            confidence: event.confidence || "medium"
+                                            confidence: event.confidence || "medium",
+                                            mapData: event.mapData || null,
+                                            requiresLocationPermission: event.requiresLocationPermission || false
                                         };
                                     }
                                     return m;
@@ -640,7 +658,7 @@ function Chat() {
         } catch (error) {
             if (error?.name === "AbortError") {
                 setThreads((currentThreads) => currentThreads.map((thread) => {
-                    if (thread.id !== activeThreadId) {
+                    if (thread.id !== currentThreadId) {
                         return thread;
                     }
 
@@ -663,7 +681,7 @@ function Chat() {
             }
 
             setThreads((currentThreads) => currentThreads.map((thread) => {
-                if (thread.id !== activeThreadId) {
+                if (thread.id !== currentThreadId) {
                     return thread;
                 }
 
@@ -687,7 +705,24 @@ function Chat() {
             abortRef.current = null;
             setAttachments([]);
         }
-    }, [activeThreadId, attachments, conversationId, loading]);
+    }, [activeThreadId, attachments, conversationId, loading, gpsCoords]);
+
+    const handleLocationAction = useCallback(async (messageId, action) => {
+        const thread = threads.find(t => t.id === activeThreadId);
+        if (!thread) return;
+        const msg = thread.messages.find(m => m.id === messageId);
+        if (!msg || !msg.mapData || !msg.mapData.destination) return;
+
+        const destName = msg.mapData.destination.name;
+
+        if (action.type === "gps") {
+            const coords = { lat: action.lat, lng: action.lng };
+            setGpsCoords(coords);
+            await sendMessage(`How can I reach ${destName} from my current location`, coords);
+        } else if (action.type === "manual") {
+            await sendMessage(`How can I reach ${destName} from ${action.value}`);
+        }
+    }, [threads, activeThreadId, sendMessage]);
 
     useEffect(() => {
         if (initialPrompt && !hasSubmittedInitialPrompt) {
@@ -777,6 +812,7 @@ function Chat() {
                                     onRate={handleRate}
                                     onExportMarkdown={handleExportMarkdown}
                                     onDownloadPdf={handleDownloadPdf}
+                                    onLocationAction={handleLocationAction}
                                 />
                             ))}
 

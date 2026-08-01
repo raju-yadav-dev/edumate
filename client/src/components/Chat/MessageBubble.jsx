@@ -3,12 +3,16 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import rehypeHighlight from "rehype-highlight";
+import { useState } from "react";
 
-import { Bot, UserRound } from "lucide-react";
+import { Bot, UserRound, MapPin, Navigation } from "lucide-react";
 
 import ConfidenceBadge from "./ConfidenceBadge";
 import CitationCard from "./CitationCard";
 import MessageActions from "./MessageActions";
+import MapView from "../Map/MapView";
+import RouteCard from "../Map/RouteCard";
+import DirectionsPanel from "../Map/DirectionsPanel";
 
 function isCitationsOnlyRequest(prevMessage) {
     if (!prevMessage || prevMessage.role !== "user") return false;
@@ -61,6 +65,182 @@ function isCitationsOnlyRequest(prevMessage) {
     );
 }
 
+/* Map Block sub-component */
+function MapBlock({ mapData, onLocationAction }) {
+    const [activeRouteIndex, setActiveRouteIndex] = useState(0);
+    const [manualLocation, setManualLocation] = useState("");
+    const [requestingGeo, setRequestingGeo] = useState(false);
+    const [geoError, setGeoError] = useState("");
+
+    if (mapData.type === "permission_request") {
+        const handleRequestGeo = () => {
+            setRequestingGeo(true);
+            setGeoError("");
+            
+            if (!navigator.geolocation) {
+                setGeoError("Geolocation is not supported by your browser.");
+                setRequestingGeo(false);
+                return;
+            }
+            
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    setRequestingGeo(false);
+                    if (onLocationAction) {
+                        onLocationAction({
+                            type: "gps",
+                            lat: position.coords.latitude,
+                            lng: position.coords.longitude
+                        });
+                    }
+                },
+                (error) => {
+                    console.error("Geolocation error:", error);
+                    let errMsg = "Location permission denied.";
+                    if (error.code === 1) errMsg = "Location permission denied.";
+                    else if (error.code === 2) errMsg = "Position unavailable.";
+                    else if (error.code === 3) errMsg = "Request timed out.";
+                    setGeoError(errMsg);
+                    setRequestingGeo(false);
+                }
+            );
+        };
+
+        const handleManualSubmit = (e) => {
+            e.preventDefault();
+            if (!manualLocation.trim()) return;
+            if (onLocationAction) {
+                onLocationAction({
+                    type: "manual",
+                    value: manualLocation.trim()
+                });
+            }
+        };
+
+        return (
+            <div 
+                className="edu-location-permission-box"
+                style={{
+                    background: "var(--background-secondary, #f8fafc)",
+                    border: "1px solid var(--border-color, #e2e8f0)",
+                    borderRadius: "12px",
+                    padding: "16px",
+                    margin: "12px 0",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "12px"
+                }}
+            >
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--primary-color, #2563eb)" }}>
+                    <MapPin size={18} />
+                    <span style={{ fontWeight: "600", fontSize: "14px" }}>Location Access Required</span>
+                </div>
+                
+                <p style={{ margin: 0, fontSize: "13px", color: "var(--text-secondary, #475569)", lineHeight: "1.5" }}>
+                    To show route directions and costs, EduMate needs a starting point. Choose GPS access or type manually.
+                </p>
+
+                <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                    <button
+                        onClick={handleRequestGeo}
+                        disabled={requestingGeo}
+                        style={{
+                            padding: "8px 14px",
+                            borderRadius: "8px",
+                            border: "none",
+                            background: "var(--primary-color, #2563eb)",
+                            color: "#ffffff",
+                            fontSize: "13px",
+                            fontWeight: "500",
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "6px"
+                        }}
+                    >
+                        <Navigation size={14} />
+                        {requestingGeo ? "Requesting..." : "Allow Geolocation"}
+                    </button>
+                </div>
+
+                {geoError && (
+                    <div style={{ color: "#ef4444", fontSize: "12px", marginTop: "2px" }}>
+                        ⚠️ {geoError}
+                    </div>
+                )}
+
+                <form onSubmit={handleManualSubmit} style={{ display: "flex", gap: "8px", marginTop: "6px" }}>
+                    <input
+                        type="text"
+                        placeholder="Or enter start location manually (e.g. Airport)..."
+                        value={manualLocation}
+                        onChange={(e) => setManualLocation(e.target.value)}
+                        style={{
+                            flex: 1,
+                            padding: "8px 12px",
+                            borderRadius: "8px",
+                            border: "1px solid var(--border-color, #cbd5e1)",
+                            fontSize: "13px",
+                            background: "var(--background-primary, #ffffff)",
+                            color: "var(--text-primary, #0f172a)"
+                        }}
+                    />
+                    <button
+                        type="submit"
+                        disabled={!manualLocation.trim()}
+                        style={{
+                            padding: "8px 14px",
+                            borderRadius: "8px",
+                            border: "none",
+                            background: "var(--text-primary, #1e293b)",
+                            color: "#ffffff",
+                            fontSize: "13px",
+                            fontWeight: "500",
+                            cursor: "pointer"
+                        }}
+                    >
+                        Go
+                    </button>
+                </form>
+            </div>
+        );
+    }
+
+    return (
+        <div className="edu-map-payload-wrapper">
+            {mapData.type === "routing" && (
+                <>
+                    <MapView
+                        startLocation={mapData.startLocation}
+                        destination={mapData.destination}
+                        routes={mapData.routes}
+                        activeRouteIndex={activeRouteIndex}
+                        setActiveRouteIndex={setActiveRouteIndex}
+                        type="routing"
+                    />
+                    <RouteCard
+                        routes={mapData.routes}
+                        activeRouteIndex={activeRouteIndex}
+                        setActiveRouteIndex={setActiveRouteIndex}
+                        startLocation={mapData.startLocation}
+                        destination={mapData.destination}
+                    />
+                    <DirectionsPanel
+                        instructions={mapData.routes[activeRouteIndex]?.instructions}
+                    />
+                </>
+            )}
+            {mapData.type === "nearby" && (
+                <MapView
+                    center={mapData.center}
+                    places={mapData.places}
+                    type="nearby"
+                />
+            )}
+        </div>
+    );
+}
+
 function MessageBubble({
     message,
     prevMessage,
@@ -70,7 +250,8 @@ function MessageBubble({
     onBookmark,
     onRate,
     onExportMarkdown,
-    onDownloadPdf
+    onDownloadPdf,
+    onLocationAction
 }) {
     const isUser = message.role === "user";
     const showCitations = (() => {
@@ -174,6 +355,14 @@ function MessageBubble({
                             {displayContent}
                         </ReactMarkdown>
                     </div>
+
+                    {/* Interactive Map Block */}
+                    {!isUser && message.mapData && (
+                        <MapBlock 
+                            mapData={message.mapData} 
+                            onLocationAction={(action) => onLocationAction && onLocationAction(message.id, action)}
+                        />
+                    )}
 
                     {showCitations ? (
                         <div className="edu-chat-citations">

@@ -24,6 +24,8 @@ const askQuestion = asyncHandler(async (req, res) => {
                 user: req.user,
                 question: req.body.question,
                 conversationId: req.body.conversationId,
+                latitude: req.body.latitude,
+                longitude: req.body.longitude,
                 signal: controller.signal,
                 onChunk: (chunk) => {
                     res.write(`data: ${JSON.stringify({ type: "chunk", content: chunk })}\n\n`);
@@ -37,7 +39,9 @@ const askQuestion = asyncHandler(async (req, res) => {
                 sources: result.sources || [],
                 confidence: result.confidence || "medium",
                 suggestions: result.suggestions || [],
-                conversationId: result.conversationId
+                conversationId: result.conversationId,
+                mapData: result.mapData || null,
+                requiresLocationPermission: result.requiresLocationPermission || false
             })}\n\n`);
             if (typeof res.flush === "function") res.flush();
             res.end();
@@ -53,7 +57,9 @@ const askQuestion = asyncHandler(async (req, res) => {
     const result = await chatService.askQuestion({
         user: req.user,
         question: req.body.question,
-        conversationId: req.body.conversationId
+        conversationId: req.body.conversationId,
+        latitude: req.body.latitude,
+        longitude: req.body.longitude
     });
 
     return sendSuccess(res, 200, "EduMate response generated.", result);

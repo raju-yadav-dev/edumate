@@ -44,7 +44,7 @@ const buildGuestUser = () => ({
 /**
  * Handles chatbot queries with RAG matching using Gemini 2.5 Flash and Qdrant
  */
-const askQuestion = async ({ user, question, conversationId, onChunk, signal }) => {
+const askQuestion = async ({ user, question, conversationId, onChunk, signal, latitude, longitude }) => {
     const startedAt = Date.now();
     const normalizedQuestion = String(question || "").trim();
     const activeUser = user || buildGuestUser();
@@ -64,7 +64,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal }) 
 
     // 2. Intent Detection
     const intentResult = await intentDetectionService.detectIntent(normalizedQuestion);
-    const decision = decide(intentResult);
+    const decision = decide({ intent: intentResult.intent, question: normalizedQuestion });
 
     // 3. Entity Extraction
     const entities = await entityExtractionService.extractEntities(normalizedQuestion);
@@ -129,7 +129,8 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal }) 
     } else if (decision.service === "map") {
         const mapResult = await mapService.resolveLocationRequest({
             question: rewrittenQuery,
-            user: activeUser
+            user: activeUser,
+            userCoordinates: (latitude && longitude) ? { lat: Number(latitude), lng: Number(longitude) } : null
         });
 
         formatted = mapResult.found
@@ -140,49 +141,85 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal }) 
                 sourceLabel: SOURCE_LABELS.UNIVERSITY
             })
             : responseFormattingService.formatUnavailable({ reason: mapResult.answer });
+
+        if (mapResult.mapData) {
+            formatted.mapData = mapResult.mapData;
+        }
+        if (mapResult.requiresLocationPermission) {
+            formatted.requiresLocationPermission = true;
+        }
     } else {
         // Perform 3-Tier Fallback Search Pipeline
         const isUniversityRelated = classifyQuestionType(rewrittenQuery, intentResult.intent) !== QUESTION_TYPES.GENERAL_KNOWLEDGE;
 
         if (isUniversityRelated) {
-            console.log(`RAG Tier 1: Querying local Qdrant database...`);
+            console.log(`Smart Search Pipeline: Querying local Qdrant database, university website, and trusted web in parallel...`);
             try {
-                // Tier 1: Search Qdrant
-                const chunks = await retrievalService.retrieve({
+                // Tier 1 Promise: Local Qdrant Retrieval
+                const localRetrievePromise = retrievalService.retrieve({
                     question: rewrittenQuery,
                     user: activeUser,
                     limit: AI_CONSTANTS.DEFAULT_RETRIEVAL_LIMIT
+                }).then(async (chunks) => {
+                    const reranked = await rerankService.rerank(rewrittenQuery, chunks);
+                    const maxScore = reranked.length > 0 ? Math.max(...reranked.map(c => c.score)) : 0;
+                    console.log(`Local KB Search Max Score: ${maxScore.toFixed(3)}`);
+                    if (maxScore >= AI_CONSTANTS.SIMILARITY_THRESHOLD) {
+                        return reranked.filter((chunk) => chunk.score >= AI_CONSTANTS.SIMILARITY_THRESHOLD);
+                    }
+                    return [];
+                }).catch(err => {
+                    console.error("Local KB search failed:", err);
+                    return [];
                 });
 
-                // Rerank retrieved chunks
-                const reranked = await rerankService.rerank(rewrittenQuery, chunks);
-                const maxScore = reranked.length > 0 ? Math.max(...reranked.map(c => c.score)) : 0;
-                console.log(`Local KB Search Max Score: ${maxScore.toFixed(3)}`);
+                // Tier 2 Promise: University Official Website
+                const uniSearchPromise = webSearchService.searchUniversityWebsite(rewrittenQuery, activeUser)
+                    .catch(err => {
+                        console.error("University website search failed:", err);
+                        return [];
+                    });
 
-                if (maxScore >= AI_CONSTANTS.SIMILARITY_THRESHOLD) {
-                    console.log(`→ Found in local documents with score ${maxScore.toFixed(3)}`);
-                    retrievedChunks = reranked.filter((chunk) => chunk.score >= AI_CONSTANTS.SIMILARITY_THRESHOLD);
+                // Tier 3 Promise: General Trusted Web Search
+                const webSearchPromise = webSearchService.searchTrustedWeb(rewrittenQuery)
+                    .catch(err => {
+                        console.error("General web search failed:", err);
+                        return [];
+                    });
+
+                // Execute all searches in parallel
+                const [localChunks, uniResults, trustWebResults] = await Promise.all([
+                    localRetrievePromise,
+                    uniSearchPromise,
+                    webSearchPromise
+                ]);
+
+                retrievedChunks = localChunks;
+                universitySiteResults = uniResults;
+                webResults = trustWebResults;
+
+                // Dynamically classify question type and source label based on search outcome
+                const hasLocal = retrievedChunks.length > 0;
+                const hasWeb = universitySiteResults.length > 0 || webResults.length > 0;
+
+                if (hasLocal && hasWeb) {
+                    activeQuestionType = QUESTION_TYPES.HYBRID;
+                    sourceLabel = SOURCE_LABELS.UNIVERSITY;
+                } else if (hasLocal) {
                     activeQuestionType = QUESTION_TYPES.UNIVERSITY_SPECIFIC;
                     sourceLabel = SOURCE_LABELS.UNIVERSITY;
+                } else if (universitySiteResults.length > 0) {
+                    activeQuestionType = QUESTION_TYPES.UNIVERSITY_SPECIFIC;
+                    sourceLabel = SOURCE_LABELS.UNIVERSITY;
+                } else if (webResults.length > 0) {
+                    activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
+                    sourceLabel = SOURCE_LABELS.WEB;
                 } else {
-                    console.log(`→ Local score is below threshold (${maxScore.toFixed(3)} < ${AI_CONSTANTS.SIMILARITY_THRESHOLD}). Moving to Tier 2...`);
-                    // Tier 2: Search Official University Website
-                    universitySiteResults = await webSearchService.searchUniversityWebsite(rewrittenQuery, activeUser);
-                    
-                    if (universitySiteResults.length > 0) {
-                        console.log("→ Found on official university website.");
-                        activeQuestionType = QUESTION_TYPES.UNIVERSITY_SPECIFIC;
-                        sourceLabel = SOURCE_LABELS.UNIVERSITY;
-                    } else {
-                        console.log("→ Not found on official website. Moving to Tier 3...");
-                        // Tier 3: Search Trusted Internet Sources
-                        webResults = await webSearchService.searchTrustedWeb(rewrittenQuery);
-                        activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
-                        sourceLabel = SOURCE_LABELS.WEB;
-                    }
+                    activeQuestionType = QUESTION_TYPES.UNIVERSITY_SPECIFIC;
+                    sourceLabel = SOURCE_LABELS.UNIVERSITY;
                 }
             } catch (searchError) {
-                console.error("Local KB/Website search pipeline failed, falling back to Trusted Web:", searchError);
+                console.error("Parallel search pipeline encountered an unexpected error, falling back to General Web:", searchError);
                 webResults = await webSearchService.searchTrustedWeb(rewrittenQuery);
                 activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
                 sourceLabel = SOURCE_LABELS.WEB;
@@ -326,7 +363,9 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal }) 
         sourceLabel: formatted.sourceLabel || sourceLabel,
         provider,
         responseTimeMs,
-        suggestions
+        suggestions,
+        mapData: formatted.mapData || null,
+        requiresLocationPermission: formatted.requiresLocationPermission || false
     };
 };
 
