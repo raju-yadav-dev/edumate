@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { FiArrowRight, FiPaperclip, FiSmile, FiUpload, FiX, FiSquare } from "react-icons/fi";
 
@@ -23,19 +23,25 @@ function formatSize(size) {
 
 function ChatInput({
     value,
-    onChange,
     onSubmit,
     isLoading,
     onStopGenerating,
     onAttachFiles,
-    onAddEmoji,
     onClear,
     attachments,
     onRemoveAttachment
 }) {
+    const [text, setText] = useState(value || "");
     const textareaRef = useRef(null);
     const attachRef = useRef(null);
     const imageRef = useRef(null);
+
+    const [prevValue, setPrevValue] = useState(value);
+
+    if (value !== prevValue) {
+        setPrevValue(value);
+        setText(value || "");
+    }
 
     useEffect(() => {
         const textarea = textareaRef.current;
@@ -46,20 +52,34 @@ function ChatInput({
 
         textarea.style.height = "auto";
         textarea.style.height = `${Math.min(textarea.scrollHeight, 180)}px`;
-    }, [value]);
+    }, [text]);
 
     const handleSubmit = (event) => {
         event.preventDefault();
-        onSubmit();
+        if ((!text.trim() && attachments.length === 0) || isLoading) return;
+        onSubmit(text);
+        setText("");
     };
 
     const handleKeyDown = (event) => {
         if (event.key === "Enter" && !event.shiftKey) {
             event.preventDefault();
-            if (!isLoading) {
-                onSubmit();
+            if (!isLoading && (text.trim() || attachments.length > 0)) {
+                onSubmit(text);
+                setText("");
             }
         }
+    };
+
+    const handleClear = () => {
+        setText("");
+        if (onClear) {
+            onClear();
+        }
+    };
+
+    const handleAddEmoji = () => {
+        setText((prev) => `${prev}${prev ? " " : ""}😊`);
     };
 
     const handleAttachmentChange = (event) => {
@@ -94,8 +114,8 @@ function ChatInput({
                 <textarea
                     id="edu-chat-input"
                     ref={textareaRef}
-                    value={value}
-                    onChange={(event) => onChange(event.target.value)}
+                    value={text}
+                    onChange={(event) => setText(event.target.value)}
                     onKeyDown={handleKeyDown}
                     placeholder="Ask anything about your institution..."
                     aria-label="Ask anything about your institution"
@@ -112,11 +132,11 @@ function ChatInput({
                             <FiUpload />
                         </button>
 
-                        <button type="button" className="edu-chat-icon-button" onClick={onAddEmoji} aria-label="Insert emoji">
+                        <button type="button" className="edu-chat-icon-button" onClick={handleAddEmoji} aria-label="Insert emoji">
                             <FiSmile />
                         </button>
 
-                        <button type="button" className="edu-chat-icon-button" onClick={onClear} aria-label="Clear input">
+                        <button type="button" className="edu-chat-icon-button" onClick={handleClear} aria-label="Clear input">
                             <FiX />
                         </button>
                     </div>
@@ -140,7 +160,7 @@ function ChatInput({
                         <button
                             type="submit"
                             className="edu-chat-send-button"
-                            disabled={!value.trim() && attachments.length === 0}
+                            disabled={!text.trim() && attachments.length === 0}
                             title="Send message"
                         >
                             <FiArrowRight />

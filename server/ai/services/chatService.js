@@ -252,7 +252,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
                 if (paths.length > 0) {
                     const { data, error } = await supabase.storage
                         .from(BUCKET)
-                        .createSignedUrls(paths, Number(process.env.SUPABASE_SIGNED_URL_TTL_SECONDS) || 3600);
+                        .createSignedUrls(paths, Number(process.env.SUPABASE_SIGNED_URL_TTL_SECONDS) || 315360000);
                     
                     if (!error && data) {
                         const pathSignedUrlMap = {};
@@ -378,6 +378,100 @@ const listChats = async ({ user }) => {
         .sort({ updatedAt: -1 });
 };
 
+const enrichChatMessagesWithUrls = async (messages) => {
+    const docIds = [];
+    const docTitles = [];
+    messages.forEach(msg => {
+        if (msg.role === "assistant" && msg.sources) {
+            msg.sources.forEach(src => {
+                if (src.type === "document") {
+                    if (src.metadata?.documentId) {
+                        docIds.push(src.metadata.documentId);
+                    } else if (src.title) {
+                        docTitles.push(src.title);
+                    }
+                }
+            });
+        }
+    });
+
+    if (docIds.length === 0 && docTitles.length === 0) return;
+
+    try {
+        const mongoose = require("mongoose");
+        const Document = require("../../models/Document");
+        const supabase = require("../../config/supabase");
+        const BUCKET = process.env.SUPABASE_STORAGE_BUCKET || process.env.SUPABASE_BUCKET;
+
+        const orConditions = [];
+        if (docIds.length > 0) {
+            const validIds = docIds.filter(id => {
+                try {
+                    return mongoose.Types.ObjectId.isValid(id);
+                } catch {
+                    return false;
+                }
+            });
+            if (validIds.length > 0) {
+                orConditions.push({ _id: { $in: validIds } });
+            }
+        }
+        if (docTitles.length > 0) {
+            orConditions.push({ originalName: { $in: docTitles } });
+        }
+
+        if (orConditions.length === 0) return;
+
+        const docs = await Document.find({ $or: orConditions, status: { $ne: "deleted" } }).lean();
+        const paths = docs.map(d => d.storagePath).filter(Boolean);
+
+        if (paths.length > 0) {
+            const { data, error } = await supabase.storage
+                .from(BUCKET)
+                .createSignedUrls(paths, Number(process.env.SUPABASE_SIGNED_URL_TTL_SECONDS) || 315360000);
+
+            if (!error && data) {
+                const pathSignedUrlMap = {};
+                data.forEach(item => {
+                    if (item.signedUrl) {
+                        pathSignedUrlMap[item.path] = item.signedUrl;
+                    }
+                });
+
+                const lookup = {};
+                docs.forEach(d => {
+                    const signedUrl = pathSignedUrlMap[d.storagePath];
+                    if (signedUrl) {
+                        lookup[d._id.toString()] = signedUrl;
+                        lookup[d.originalName] = signedUrl;
+                    }
+                });
+
+                messages.forEach(msg => {
+                    if (msg.role === "assistant" && msg.sources) {
+                        msg.sources.forEach(src => {
+                            if (src.type === "document") {
+                                let url = null;
+                                if (src.metadata?.documentId) {
+                                    url = lookup[src.metadata.documentId.toString()];
+                                }
+                                if (!url && src.title) {
+                                    url = lookup[src.title];
+                                }
+                                if (url) {
+                                    src.downloadUrl = url;
+                                }
+                            }
+                        });
+                    }
+                });
+            }
+        }
+    } catch (e) {
+        console.error("Failed to enrich historical chat messages with signed URLs:", e);
+    }
+};
+
 const getChatDetails = async ({ user, conversationId }) => {
     if (!user?._id || !conversationId) {
         throw new Error("Invalid parameters.");
@@ -388,7 +482,9 @@ const getChatDetails = async ({ user, conversationId }) => {
         error.statusCode = 424;
         throw error;
     }
-    return chat;
+    const chatObj = chat.toObject();
+    await enrichChatMessagesWithUrls(chatObj.messages);
+    return chatObj;
 };
 
 const renameChat = async ({ user, conversationId, title }) => {

@@ -824,9 +824,10 @@ function Chat() {
 
                 <div className="edu-chat-footer">
                     <ChatInput
+                        key={activeThreadId}
                         value={input}
                         onChange={setInput}
-                        onSubmit={() => void sendMessage(input)}
+                        onSubmit={(val) => void sendMessage(val)}
                         isLoading={loading}
                         onStopGenerating={handleStopGenerating}
                         onAttachFiles={handleAttachFiles}

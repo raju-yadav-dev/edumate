@@ -58,7 +58,7 @@ const getSignedUrlForDoc = async (storagePath) => {
     try {
         const { data, error } = await supabase.storage
             .from(BUCKET)
-            .createSignedUrl(storagePath, Number(process.env.SUPABASE_SIGNED_URL_TTL_SECONDS) || 3600);
+            .createSignedUrl(storagePath, Number(process.env.SUPABASE_SIGNED_URL_TTL_SECONDS) || 315360000);
         return data?.signedUrl || "";
     } catch (e) {
         console.error("Error creating signed URL:", e);
@@ -190,7 +190,7 @@ const listDocuments = async ({ query, user }) => {
         try {
             const { data, error } = await supabase.storage
                 .from(BUCKET)
-                .createSignedUrls(paths, Number(process.env.SUPABASE_SIGNED_URL_TTL_SECONDS) || 3600);
+                .createSignedUrls(paths, Number(process.env.SUPABASE_SIGNED_URL_TTL_SECONDS) || 315360000);
             if (!error && data) {
                 data.forEach(item => {
                     if (item.signedUrl) {
