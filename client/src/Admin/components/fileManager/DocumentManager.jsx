@@ -7,7 +7,10 @@ import {
     RefreshCcw,
     Search,
     Trash2,
-    UploadCloud
+    UploadCloud,
+    Copy,
+    Scissors,
+    Clipboard
 } from "lucide-react";
 import { useMemo, useState } from "react";
 
@@ -104,6 +107,39 @@ function DocumentManager(props) {
                     >
                         <FolderPlus size={16} />
                         New Folder
+                    </button>
+
+                    <button
+                        type="button"
+                        className="secondary-action"
+                        onClick={() => props.onCopy()}
+                        disabled={!selectedCount}
+                        title="Copy selected file(s)"
+                    >
+                        <Copy size={16} />
+                        Copy
+                    </button>
+
+                    <button
+                        type="button"
+                        className="secondary-action"
+                        onClick={() => props.onCut()}
+                        disabled={!selectedCount}
+                        title="Cut selected file(s)"
+                    >
+                        <Scissors size={16} />
+                        Cut
+                    </button>
+
+                    <button
+                        type="button"
+                        className="secondary-action"
+                        onClick={() => props.onPaste()}
+                        disabled={!props.clipboard || !props.clipboard.action}
+                        title="Paste file(s)"
+                    >
+                        <Clipboard size={16} />
+                        Paste
                     </button>
 
                     <button
@@ -348,6 +384,14 @@ function DocumentManager(props) {
                 onMove={props.onMove}
                 onDelete={props.onDelete}
                 onCreateFolder={props.onCreateFolder}
+                clipboard={props.clipboard}
+                onCopy={props.onCopy}
+                onCut={props.onCut}
+                onPaste={props.onPaste}
+                onSelectFolder={props.onSelectFolder}
+                onRenameFolder={props.onRenameFolder}
+                onDeleteFolder={props.onDeleteFolder}
+                onMoveFolder={props.onMoveFolder}
             />
 
         </section>

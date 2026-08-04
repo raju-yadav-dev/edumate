@@ -227,17 +227,15 @@ export async function rebuildAdminDocumentEmbeddings(documentId) {
     return parseResponse(response, "Unable to rebuild document embeddings.");
 }
 
-export async function listAdminDocuments({ search = "", category = "" } = {}) {
+export async function listAdminDocuments(query = {}) {
     const token = getAdminAccessToken();
     const params = new URLSearchParams();
 
-    if (search) {
-        params.set("search", search);
-    }
-
-    if (category) {
-        params.set("category", category);
-    }
+    Object.entries(query).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+            params.set(key, value);
+        }
+    });
 
     const response = await fetch(`${DOCUMENT_API_BASE_URL}?${params.toString()}`, {
         headers: token ? {
@@ -340,6 +338,21 @@ export async function moveAdminDocument(documentId, category) {
     });
 
     return parseResponse(response, "Unable to move document.");
+}
+
+export async function copyAdminDocument(documentId, category) {
+    const token = getAdminAccessToken();
+
+    const response = await fetch(`${DOCUMENT_API_BASE_URL}/${documentId}/copy`, {
+        method: "PUT",
+        headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({ category })
+    });
+
+    return parseResponse(response, "Unable to copy document.");
 }
 
 export async function saveProviderApiKeys({ groqApiKey, openRouteServiceKey }) {

@@ -153,7 +153,7 @@ const uploadDocument = async ({ file, body, user }) => {
 
 const listDocuments = async ({ query, user }) => {
     const page = Math.max(Number(query.page || 1), 1);
-    const limit = Math.min(Math.max(Number(query.limit || 20), 1), 100);
+    const limit = Math.min(Math.max(Number(query.limit || 20), 1), 10000);
     const skip = (page - 1) * limit;
 
     const filter = {
@@ -172,8 +172,10 @@ const listDocuments = async ({ query, user }) => {
         filter.$text = { $search: query.search };
     }
 
-    if (query.institution || user.institution) {
-        filter.institution = query.institution || user.institution;
+    if (query.institution) {
+        filter.institution = query.institution;
+    } else if (user.institution && query.ignoreInstitution !== "true" && query.ignoreInstitution !== true) {
+        filter.institution = user.institution;
     }
 
     const [documents, total] = await Promise.all([
@@ -435,6 +437,74 @@ const moveDocument = async ({ documentId, category, user }) => {
     };
 };
 
+const copyDocument = async ({ documentId, category, user }) => {
+    const targetCategory = sanitizeCategory(category);
+
+    const document = await Document.findOne({
+        _id: documentId,
+        status: { $ne: "deleted" }
+    });
+
+    if (!document) {
+        const error = new Error("Document not found.");
+        error.statusCode = 404;
+        throw error;
+    }
+
+    const extension = getSafeExtension(document.originalName);
+    const uniqueName = `${Date.now()}-${crypto.randomUUID()}${extension}`;
+    const newStoragePath = `${targetCategory}/${uniqueName}`;
+
+    const { error } = await supabase.storage
+        .from(BUCKET)
+        .copy(document.storagePath, newStoragePath);
+
+    if (error) {
+        const err = new Error(`Failed to copy file in storage: ${error.message}`);
+        err.statusCode = 500;
+        throw err;
+    }
+
+    const newDocument = await Document.create({
+        originalName: document.originalName,
+        storedName: uniqueName,
+        category: targetCategory,
+        institution: document.institution,
+        department: document.department,
+        mimeType: document.mimeType,
+        fileSize: document.fileSize,
+        checksum: document.checksum,
+        storagePath: newStoragePath,
+        metadata: {
+            ...(document.metadata || {}),
+            copiedFrom: document._id
+        },
+        versions: [
+            {
+                version: 1,
+                storedName: uniqueName,
+                storagePath: newStoragePath,
+                fileSize: document.fileSize,
+                checksum: document.checksum,
+                uploadedBy: user._id
+            }
+        ],
+        createdBy: user._id,
+        updatedBy: user._id
+    });
+
+    // Rebuild index in Qdrant
+    indexingService.indexDocumentBackground(newDocument._id).catch((err) => {
+        console.error(`Failed to trigger background indexing for copied document ${newDocument._id}:`, err);
+    });
+
+    const signedUrl = await getSignedUrlForDoc(newStoragePath);
+    return {
+        ...newDocument.toObject(),
+        signedUrl
+    };
+};
+
 const reindexDocument = async ({ documentId }) => {
     return indexingService.reindexDocument({ documentId });
 };
@@ -454,6 +524,7 @@ module.exports = {
     replaceDocument,
     renameDocument,
     moveDocument,
+    copyDocument,
     reindexDocument,
     rebuildAllEmbeddings,
     indexDocumentBackground,

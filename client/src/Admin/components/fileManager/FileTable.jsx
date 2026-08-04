@@ -7,27 +7,37 @@ import {
     RefreshCcw,
     Trash2,
     UploadCloud,
-    Eye
+    Eye,
+    FolderSymlink,
+    Folder,
+    Edit2
 } from "lucide-react";
 
 import { formatDate } from "../../utils/formatData";
 import { formatBytes } from "../../utils/formatBytes";
 import { getFileType, normalizeStatus } from "../../utils/documentUtils";
 
-function FileTable({
-    documents,
-    busy,
-    selectedIds,
-    onToggleSelected,
-    onSelectDocument,
-    selectedDocument,
-    onDownload,
-    onReplace,
-    onRebuild,
-    onDelete,
-    onContextMenu,
-    viewMode = "list"
-}) {
+function FileTable(props) {
+    const {
+        documents,
+        busy,
+        selectedIds,
+        onToggleSelected,
+        onSelectDocument,
+        selectedDocument,
+        onDownload,
+        onReplace,
+        onRebuild,
+        onDelete,
+        onContextMenu,
+        viewMode = "list",
+        folders = [],
+        activeFolder = "root",
+        onSelectFolder,
+        onRenameFolder,
+        onDeleteFolder,
+        onMoveFolder
+    } = props;
     return (
         <div className={viewMode === "grid" ? "file-table grid-view" : "file-table"}>
 
@@ -68,17 +78,119 @@ function FileTable({
                 }}
             >
 
-                {busy && documents.length === 0 && (
-                    <div className="empty-state">
-                        Loading document metadata...
-                    </div>
-                )}
+                {(() => {
+                    const activeFolderVal = activeFolder || "root";
+                    const subfolders = (folders || [])
+                        .filter(f => {
+                            if (activeFolderVal === "root" || activeFolderVal === "") {
+                                return !f.parent;
+                            }
+                            return f.parent === activeFolderVal;
+                        })
+                        .sort((a, b) => (a.label || "").localeCompare(b.label || ""));
 
-                {!busy && documents.length === 0 && (
-                    <div className="empty-state">
-                        No files in this folder yet.
-                    </div>
-                )}
+                    return (
+                        <>
+                            {subfolders.map((folder) => (
+                                <article
+                                    key={folder.value}
+                                    className="file-row folder-row"
+                                    onDoubleClick={() => onSelectFolder(folder.value)}
+                                    onClick={() => onSelectDocument?.(null)}
+                                    onContextMenu={(event) =>
+                                        onContextMenu(event, folder, true)
+                                    }
+                                >
+                                    <div className="table-checkbox">
+                                        {/* Empty space */}
+                                    </div>
+
+                                    <div className="table-icon">
+                                        <Folder className="folder-icon" style={{ color: "var(--admin-gold)" }} />
+                                    </div>
+
+                                    <button
+                                        type="button"
+                                        className="row-main"
+                                        onClick={() =>
+                                            onSelectFolder(folder.value)
+                                        }
+                                    >
+                                        <div className="row-text">
+                                            <strong>
+                                                {folder.label}
+                                            </strong>
+                                        </div>
+                                    </button>
+
+                                    <span>Folder</span>
+
+                                    <span>-</span>
+
+                                    <span>-</span>
+
+                                    <span>-</span>
+
+                                    <span>-</span>
+
+                                    <span className="document-status status-active">
+                                        active
+                                    </span>
+
+                                    <div className="actions">
+                                        <button
+                                            className="icon-button"
+                                            title="Open Folder"
+                                            type="button"
+                                            onClick={() => onSelectFolder(folder.value)}
+                                        >
+                                            <Eye size={16} />
+                                        </button>
+
+                                        <button
+                                            className="icon-button"
+                                            title="Rename Folder"
+                                            type="button"
+                                            onClick={() => onRenameFolder?.(folder.value)}
+                                        >
+                                            <Edit2 size={16} />
+                                        </button>
+
+                                        <button
+                                            className="icon-button"
+                                            title="Move Folder"
+                                            type="button"
+                                            onClick={() => onMoveFolder?.(folder.value)}
+                                        >
+                                            <FolderSymlink size={16} />
+                                        </button>
+
+                                        <button
+                                            className="icon-button"
+                                            title="Delete Folder"
+                                            type="button"
+                                            onClick={() => onDeleteFolder?.(folder.value)}
+                                        >
+                                            <Trash2 size={16} />
+                                        </button>
+                                    </div>
+                                </article>
+                            ))}
+
+                            {busy && documents.length === 0 && subfolders.length === 0 && (
+                                <div className="empty-state">
+                                    Loading document metadata...
+                                </div>
+                            )}
+
+                            {!busy && documents.length === 0 && subfolders.length === 0 && (
+                                <div className="empty-state">
+                                    No files in this folder yet.
+                                </div>
+                            )}
+                        </>
+                    );
+                })()}
 
                 {documents.map((file) => {
 

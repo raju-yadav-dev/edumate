@@ -7,7 +7,9 @@ import {
     Trash2,
     Edit2,
     FolderSymlink,
-    UploadCloud
+    UploadCloud,
+    Scissors,
+    Clipboard
 } from "lucide-react";
 
 function ContextMenu({
@@ -18,21 +20,21 @@ function ContextMenu({
     onRename,
     onMove,
     onDelete,
-    onCreateFolder
+    onCreateFolder,
+    clipboard,
+    onCopy,
+    onCut,
+    onPaste,
+    onSelectFolder,
+    onRenameFolder,
+    onDeleteFolder,
+    onMoveFolder
 }) {
     if (!menu) {
         return null;
     }
 
-    const copyPath = () => {
-        if (menu.file) {
-            navigator.clipboard?.writeText(
-                menu.file.filePath ||
-                menu.file.originalName ||
-                ""
-            );
-        }
-    };
+    const hasClipboard = clipboard && clipboard.fileIds && clipboard.fileIds.length > 0;
 
     return (
         <div
@@ -40,6 +42,8 @@ function ContextMenu({
             style={{
                 left: menu.x,
                 top: menu.y,
+                position: "fixed",
+                zIndex: 9999
             }}
             onMouseLeave={onClose}
         >
@@ -50,9 +54,14 @@ function ContextMenu({
                         <span>Open</span>
                     </button>
 
-                    <button onClick={() => { copyPath(); onClose(); }}>
+                    <button onClick={() => { onCopy?.(menu.file._id); onClose(); }}>
                         <Copy size={16} />
-                        <span>Copy Path</span>
+                        <span>Copy</span>
+                    </button>
+
+                    <button onClick={() => { onCut?.(menu.file._id); onClose(); }}>
+                        <Scissors size={16} />
+                        <span>Cut</span>
                     </button>
 
                     <button onClick={() => { onRename(menu.file._id, menu.file.originalName || menu.file.title); onClose(); }}>
@@ -88,6 +97,38 @@ function ContextMenu({
                         <span>Delete</span>
                     </button>
                 </>
+            ) : menu.folder ? (
+                <>
+                    <button onClick={() => { onSelectFolder(menu.folder.value); onClose(); }}>
+                        <PreviewEye size={16} />
+                        <span>Open Folder</span>
+                    </button>
+
+                    {hasClipboard && (
+                        <button onClick={() => { onPaste(menu.folder.value); onClose(); }}>
+                            <Clipboard size={16} />
+                            <span>Paste Here</span>
+                        </button>
+                    )}
+
+                    <button onClick={() => { onRenameFolder?.(menu.folder.value); onClose(); }}>
+                        <Edit2 size={16} />
+                        <span>Rename</span>
+                    </button>
+
+                    <button onClick={() => { onMoveFolder?.(menu.folder.value); onClose(); }}>
+                        <FolderSymlink size={16} />
+                        <span>Move Folder</span>
+                    </button>
+
+                    <button
+                        className="danger"
+                        onClick={() => { onDeleteFolder?.(menu.folder.value); onClose(); }}
+                    >
+                        <Trash2 size={16} />
+                        <span>Delete</span>
+                    </button>
+                </>
             ) : (
                 <>
                     <button onClick={() => {
@@ -104,6 +145,13 @@ function ContextMenu({
                             <span>New Folder</span>
                         </button>
                     )}
+
+                    {hasClipboard && (
+                        <button onClick={() => { onPaste(); onClose(); }}>
+                            <Clipboard size={16} />
+                            <span>Paste Here</span>
+                        </button>
+                    )}
                 </>
             )}
         </div>
@@ -111,4 +159,3 @@ function ContextMenu({
 }
 
 export default ContextMenu;
-

@@ -1,0 +1,608 @@
+/**
+ * Voice.css
+ * Styling and animations for AI Receptionist Avatar,
+ * Live Canvas Visualizer, and responsive voice panel card.
+ */
+
+/* Color schemes for states */
+.state-listening {
+    --avatar-color-glow: #10b981;
+    --avatar-color-stroke: rgba(16, 185, 129, 0.35);
+    --avatar-color-face: #34d399;
+}
+.state-speaking {
+    --avatar-color-glow: #3b82f6;
+    --avatar-color-stroke: rgba(59, 130, 246, 0.35);
+    --avatar-color-face: #60a5fa;
+}
+.state-thinking {
+    --avatar-color-glow: #f59e0b;
+    --avatar-color-stroke: rgba(245, 158, 11, 0.3);
+    --avatar-color-face: #fbbf24;
+}
+.state-idle, .state-paused {
+    --avatar-color-glow: #64748b;
+    --avatar-color-stroke: rgba(100, 116, 139, 0.2);
+    --avatar-color-face: #94a3b8;
+}
+.state-ended {
+    --avatar-color-glow: #f43f5e;
+    --avatar-color-stroke: rgba(244, 63, 94, 0.25);
+    --avatar-color-face: #fb7185;
+}
+
+/* Overlay Background */
+.edu-voice-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 2000;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: rgba(15, 23, 42, 0.45);
+    backdrop-filter: blur(12px);
+    transition: all 0.4s ease;
+    animation: fadeInOverlay 0.3s ease-out forwards;
+}
+
+@keyframes fadeInOverlay {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+/* Glassmorphic Panel Card */
+.edu-voice-card {
+    position: relative;
+    width: 390px;
+    height: 570px;
+    background: rgba(30, 41, 59, 0.7);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 28px;
+    box-shadow: 0 24px 64px -16px rgba(0, 0, 0, 0.6),
+                inset 0 1px 1px rgba(255, 255, 255, 0.15);
+    backdrop-filter: blur(32px);
+    display: flex;
+    flex-direction: column;
+    overflow: visible;
+    color: #f8fafc;
+    animation: scaleInCard 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+[data-theme="light"] .edu-voice-card {
+    background: rgba(255, 255, 255, 0.65);
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    color: #0f172a;
+    box-shadow: 0 24px 64px -16px rgba(15, 23, 42, 0.25);
+}
+
+@keyframes scaleInCard {
+    from {
+        opacity: 0;
+        transform: scale(0.88) translateY(24px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+/* Header Styles */
+.edu-voice-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 18px 24px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="light"] .edu-voice-header {
+    border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.edu-voice-timer-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(255, 255, 255, 0.08);
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+[data-theme="light"] .edu-voice-timer-wrapper {
+    background: rgba(15, 23, 42, 0.06);
+    color: #475569;
+}
+
+.timer-dot {
+    width: 8px;
+    height: 8px;
+    background-color: #ef4444;
+    border-radius: 50%;
+    display: inline-block;
+    animation: timerPulse 1s infinite alternate;
+}
+
+@keyframes timerPulse {
+    from { opacity: 0.3; transform: scale(0.9); }
+    to { opacity: 1; transform: scale(1.1); }
+}
+
+.timer-text {
+    font-family: monospace;
+}
+
+.edu-voice-lang-selector {
+    position: relative;
+}
+
+.lang-select-btn {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    color: #f1f5f9;
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+[data-theme="light"] .lang-select-btn {
+    background: rgba(15, 23, 42, 0.06);
+    border: 1px solid rgba(15, 23, 42, 0.04);
+    color: #334155;
+}
+
+.lang-select-btn:hover {
+    background: rgba(255, 255, 255, 0.16);
+}
+
+[data-theme="light"] .lang-select-btn:hover {
+    background: rgba(15, 23, 42, 0.1);
+}
+
+.lang-dropdown-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%);
+    width: 140px;
+    background: rgba(15, 23, 42, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 14px;
+    padding: 6px;
+    list-style: none;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.35);
+    z-index: 2010;
+    backdrop-filter: blur(16px);
+}
+
+.lang-dropdown-menu li button {
+    width: 100%;
+    padding: 8px 12px;
+    background: transparent;
+    border: none;
+    color: #cbd5e1;
+    text-align: left;
+    font-size: 13px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.lang-dropdown-menu li button:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #ffffff;
+}
+
+.edu-voice-close-btn {
+    background: rgba(255, 255, 255, 0.06);
+    border: none;
+    color: #94a3b8;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.edu-voice-close-btn:hover {
+    background: rgba(239, 68, 68, 0.18);
+    color: #f87171;
+}
+
+/* Body and Visualizer */
+.edu-voice-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    padding: 24px;
+    position: relative;
+}
+
+/* Avatar Container & Styling */
+.avatar-container {
+    width: 130px;
+    height: 130px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+    margin-top: 10px;
+}
+
+.avatar-svg {
+    transform-origin: center;
+    animation: avatarFloat 5s ease-in-out infinite;
+}
+
+@keyframes avatarFloat {
+    0%, 100% { transform: translateY(0px) rotate(0deg); }
+    50% { transform: translateY(-4px) rotate(0.5deg); }
+}
+
+/* Avatar Glow Ring animations */
+.avatar-halo-glow {
+    transform-origin: center;
+    animation: avatarHalo 3s infinite alternate ease-in-out;
+}
+
+@keyframes avatarHalo {
+    from { opacity: 0.35; transform: scale(0.96); }
+    to { opacity: 0.85; transform: scale(1.08); }
+}
+
+.avatar-shield-ring {
+    transform-origin: center;
+    transition: stroke 0.4s ease;
+}
+
+.state-thinking .avatar-shield-ring {
+    animation: shieldSpin 12s linear infinite;
+}
+
+@keyframes shieldSpin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* Ears Pulsing Signals */
+.avatar-ear-signal {
+    opacity: 0.1;
+    transition: stroke 0.4s ease;
+}
+
+.state-listening .avatar-ear-signal.left {
+    transform-origin: 12px 50px;
+    animation: earLeft 1.2s infinite ease-out;
+}
+
+.state-listening .avatar-ear-signal.right {
+    transform-origin: 88px 50px;
+    animation: earRight 1.2s infinite ease-out;
+}
+
+@keyframes earLeft {
+    0% { opacity: 0.15; transform: scale(0.95); }
+    50% { opacity: 0.8; }
+    100% { opacity: 0; transform: scale(1.15) translateX(-3px); }
+}
+
+@keyframes earRight {
+    0% { opacity: 0.15; transform: scale(0.95); }
+    50% { opacity: 0.8; }
+    100% { opacity: 0; transform: scale(1.15) translateX(3px); }
+}
+
+/* Eyes Blinking */
+.avatar-eye {
+    transform-origin: 50% 46%; /* Center on eyes vertically */
+    transition: fill 0.4s ease, ry 0.3s ease;
+}
+
+.eye-left {
+    transform-origin: 38px 46px;
+    animation: eyeBlink 4s ease-in-out infinite;
+}
+
+.eye-right {
+    transform-origin: 62px 46px;
+    animation: eyeBlink 4s ease-in-out infinite;
+}
+
+@keyframes eyeBlink {
+    0%, 90%, 100% { transform: scaleY(1); }
+    95% { transform: scaleY(0.06); }
+}
+
+/* Eyebrows transitions */
+.avatar-eyebrow {
+    transition: d 0.4s cubic-bezier(0.25, 0.8, 0.25, 1), stroke 0.4s ease;
+}
+
+/* Mouth animations */
+.avatar-mouth {
+    transition: d 0.4s cubic-bezier(0.25, 0.8, 0.25, 1), stroke 0.4s ease;
+}
+
+.avatar-mouth-speaking {
+    transform-origin: 50px 65px;
+    animation: mouthSpeak 0.26s infinite alternate ease-in-out;
+}
+
+@keyframes mouthSpeak {
+    0% {
+        transform: scaleY(0.25) scaleX(0.9);
+    }
+    100% {
+        transform: scaleY(1.35) scaleX(1.1);
+    }
+}
+
+/* Visualizer Canvas Wrapper */
+.canvas-visualizer-wrapper {
+    width: 100%;
+    height: 60px;
+    margin: 12px 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+    overflow: hidden;
+}
+
+.voice-canvas-line {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+/* Status Label styles */
+.status-label {
+    font-size: 14px;
+    font-weight: 600;
+    color: #94a3b8;
+    margin-bottom: 12px;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+}
+
+[data-theme="light"] .status-label {
+    color: #64748b;
+}
+
+/* Transcript bubble styles */
+.edu-voice-transcript-wrapper {
+    width: 100%;
+    min-height: 76px;
+    max-height: 105px;
+    overflow-y: auto;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 18px;
+    padding: 12px 18px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-bottom: 14px;
+}
+
+[data-theme="light"] .edu-voice-transcript-wrapper {
+    background: rgba(15, 23, 42, 0.03);
+    border: 1px solid rgba(15, 23, 42, 0.05);
+}
+
+.transcript-text {
+    font-size: 14px;
+    line-height: 1.5;
+    text-align: center;
+}
+
+.transcript-text.is-interim {
+    color: #cbd5e1;
+    font-style: italic;
+}
+
+[data-theme="light"] .transcript-text.is-interim {
+    color: #64748b;
+}
+
+.transcript-text.is-final {
+    color: #ffffff;
+    font-weight: 500;
+}
+
+[data-theme="light"] .transcript-text.is-final {
+    color: #0f172a;
+}
+
+.transcript-placeholder {
+    color: #64748b;
+    font-size: 13.5px;
+    font-style: italic;
+    text-align: center;
+}
+
+/* Device indicators Row */
+.voice-device-status-row {
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+    width: 100%;
+}
+
+.status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.03);
+    padding: 4px 12px;
+    border-radius: 12px;
+    color: #64748b;
+    transition: all 0.3s ease;
+}
+
+[data-theme="light"] .status-badge {
+    background: rgba(15, 23, 42, 0.04);
+    border: 1px solid rgba(15, 23, 42, 0.03);
+}
+
+.status-badge.is-active {
+    background: rgba(255, 255, 255, 0.1);
+    color: #e2e8f0;
+}
+
+[data-theme="light"] .status-badge.is-active {
+    background: rgba(15, 23, 42, 0.08);
+    color: #1e293b;
+}
+
+.status-badge .icon {
+    font-size: 14px;
+}
+
+.status-badge small {
+    font-size: 11px;
+    font-weight: 500;
+}
+
+/* Footer Actions */
+.edu-voice-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 24px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    gap: 16px;
+}
+
+[data-theme="light"] .edu-voice-footer {
+    border-top: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.action-btn {
+    flex: 1;
+    height: 44px;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    color: #cbd5e1;
+    font-size: 16px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+[data-theme="light"] .action-btn {
+    background: rgba(15, 23, 42, 0.05);
+    border: 1px solid rgba(15, 23, 42, 0.04);
+    color: #475569;
+}
+
+.action-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.14);
+    color: #ffffff;
+}
+
+[data-theme="light"] .action-btn:hover:not(:disabled) {
+    background: rgba(15, 23, 42, 0.1);
+    color: #0f172a;
+}
+
+.action-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+.action-btn.is-active {
+    background: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.25);
+    color: #f87171;
+}
+
+.stop-session-btn {
+    flex: 2;
+    background: #ef4444 !important;
+    border: none;
+    color: #ffffff !important;
+    font-size: 13.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.stop-session-btn:hover {
+    background: #dc2626 !important;
+}
+
+/* Glow Background Effects on entire window depending on state */
+.state-listening::before {
+    content: "";
+    position: absolute;
+    width: 280px;
+    height: 280px;
+    background: radial-gradient(circle, rgba(16, 185, 129, 0.14) 0%, transparent 70%);
+    pointer-events: none;
+    border-radius: 50%;
+}
+
+.state-speaking::before {
+    content: "";
+    position: absolute;
+    width: 280px;
+    height: 280px;
+    background: radial-gradient(circle, rgba(59, 130, 246, 0.14) 0%, transparent 70%);
+    pointer-events: none;
+    border-radius: 50%;
+}
+
+.state-thinking::before {
+    content: "";
+    position: absolute;
+    width: 280px;
+    height: 280px;
+    background: radial-gradient(circle, rgba(245, 158, 11, 0.12) 0%, transparent 70%);
+    pointer-events: none;
+    border-radius: 50%;
+}
+
+/* Responsive Drawer for Tablet & Mobile layouts */
+@media (max-width: 640px) {
+    .edu-voice-overlay {
+        align-items: flex-end; /* Drawer slides up from bottom */
+    }
+
+    .edu-voice-card {
+        width: 100vw;
+        height: 82vh;
+        border-radius: 28px 28px 0 0;
+        border-bottom: none;
+        border-left: none;
+        border-right: none;
+        box-shadow: 0 -12px 48px rgba(0, 0, 0, 0.4);
+        transform: translateY(100%);
+        animation: slideUpDrawer 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+
+    @keyframes slideUpDrawer {
+        to {
+            transform: translateY(0);
+        }
+    }
+}

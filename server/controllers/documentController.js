@@ -77,6 +77,16 @@ const reindexDocument = asyncHandler(async (req, res) => {
     return sendSuccess(res, 200, "Document indexing initiated in background.", document);
 });
 
+const copyDocument = asyncHandler(async (req, res) => {
+    const document = await documentService.copyDocument({
+        documentId: req.params.documentId,
+        category: req.body.category,
+        user: req.user
+    });
+
+    return sendSuccess(res, 201, "Document copied successfully.", document);
+});
+
 const rebuildAllEmbeddings = asyncHandler(async (req, res) => {
     const result = await documentService.rebuildAllEmbeddings();
 
@@ -90,6 +100,7 @@ module.exports = {
     replaceDocument,
     renameDocument,
     moveDocument,
+    copyDocument,
     reindexDocument,
     rebuildAllEmbeddings
 };

@@ -13,6 +13,9 @@ import SuggestionCards from "../../components/Chat/SuggestionCards";
 import TypingIndicator from "../../components/Chat/TypingIndicator";
 import ChatInput from "../../components/Chat/ChatInput";
 import ThemeControls from "../../components/Chat/ThemeControls";
+import useVoice from "../../hooks/useVoice";
+import VoiceUIComponent from "../../components/Voice/VoiceUIComponent";
+import VoiceConversationManager from "../../services/voice/VoiceConversationManager";
 
 const CHAT_STORAGE_KEY = "edumate-chat-threads";
 const CHAT_ACTIVE_KEY = "edumate-chat-active";
@@ -209,6 +212,21 @@ function Chat() {
     const navigate = useNavigate();
     const { theme } = useTheme();
     const { isAuthenticated, user, logout } = useAuth();
+    const {
+        voiceState,
+        transcript,
+        elapsedSeconds,
+        activeLang,
+        isMuted,
+        isContinuousMode,
+        startSingleQuery,
+        startContinuousConversation,
+        stopConversation,
+        toggleMute,
+        setLanguage,
+        replayResponse,
+        userInterruption
+    } = useVoice();
     const initialPrompt = useMemo(() => new URLSearchParams(location.search).get("q") || "", [location.search]);
     const [threads, setThreads] = useState(() => readStoredThreads());
     const [activeThreadId, setActiveThreadId] = useState(() => readStoredActiveThread(readStoredThreads()));
@@ -216,6 +234,41 @@ function Chat() {
     const [chatSearch, setChatSearch] = useState("");
     const [messageSearch, setMessageSearch] = useState("");
     const [attachments, setAttachments] = useState([]);
+    
+    // Register UI navigation and local injection handlers for Voice commands
+    useEffect(() => {
+        VoiceConversationManager.registerHandlers({
+            navigate: navigate,
+            openSidebar: () => setSidebarCollapsed(false),
+            insertLocalMessage: (userText, assistantText, mapData = null) => {
+                const now = new Date();
+                const userMsg = {
+                    id: safeId("msg"),
+                    role: "user",
+                    content: userText,
+                    timestamp: formatTimestamp(now)
+                };
+                const assistantMsg = {
+                    id: safeId("msg"),
+                    role: "assistant",
+                    content: assistantText,
+                    timestamp: formatTimestamp(new Date()),
+                    confidence: "high",
+                    sources: [],
+                    mapData: mapData
+                };
+
+                setThreads((currentThreads) => currentThreads.map((thread) => {
+                    const targetId = activeThreadId || thread.id;
+                    if (thread.id !== targetId) return thread;
+                    return {
+                        ...thread,
+                        messages: [...thread.messages, userMsg, assistantMsg]
+                    };
+                }));
+            }
+        });
+    }, [activeThreadId, navigate, setThreads]);
     const [loading, setLoading] = useState(false);
     const [conversationId, setConversationId] = useState(null);
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -523,6 +576,7 @@ function Chat() {
     const sendMessage = useCallback(async (question, overrideCoords = null) => {
         let currentThreadId = activeThreadId;
         const trimmedQuestion = question.trim();
+        let finalText = "";
 
         if ((!trimmedQuestion && attachments.length === 0) || loading) {
             return;
@@ -606,6 +660,7 @@ function Chat() {
                 signal: controller.signal,
                 onChunk: (event) => {
                     if (event.type === "chunk") {
+                        finalText += event.content;
                         setThreads((currentThreads) => currentThreads.map((thread) => {
                             if (thread.id !== currentThreadId) {
                                 return thread;
@@ -624,6 +679,7 @@ function Chat() {
                             };
                         }));
                     } else if (event.type === "done") {
+                        finalText = event.message || finalText;
                         if (event.conversationId) {
                             setConversationId(event.conversationId);
                         }
@@ -655,6 +711,7 @@ function Chat() {
                     }
                 }
             });
+            return finalText;
         } catch (error) {
             if (error?.name === "AbortError") {
                 setThreads((currentThreads) => currentThreads.map((thread) => {
@@ -835,9 +892,27 @@ function Chat() {
                         onClear={handleClearInput}
                         attachments={attachments}
                         onRemoveAttachment={handleRemoveAttachment}
+                        onVoiceSingleClick={() => startSingleQuery(sendMessage)}
+                        onVoiceContinuousClick={() => startContinuousConversation(sendMessage)}
+                        isVoiceSingleActive={voiceState === "listening" && !isContinuousMode}
+                        isVoiceContinuousActive={isContinuousMode}
                     />
                 </div>
             </section>
+
+            <VoiceUIComponent
+                voiceState={voiceState}
+                transcript={transcript}
+                elapsedSeconds={elapsedSeconds}
+                activeLang={activeLang}
+                isMuted={isMuted}
+                isContinuousMode={isContinuousMode}
+                stopConversation={stopConversation}
+                toggleMute={toggleMute}
+                setLanguage={setLanguage}
+                replayResponse={replayResponse}
+                userInterruption={userInterruption}
+            />
         </main>
     );
 }

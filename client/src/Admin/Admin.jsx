@@ -20,7 +20,8 @@ import {
     saveProviderApiKeys,
     uploadAdminDocument,
     renameAdminDocument,
-    moveAdminDocument
+    moveAdminDocument,
+    copyAdminDocument
 } from "../services/adminService";
 
 import DashboardStats from "./components/dashboard/DashboardStats";
@@ -166,6 +167,18 @@ function formatFolderLabel(value) {
         .join(" ");
 }
 
+function sanitizeFolders(list) {
+    if (!Array.isArray(list)) return [];
+    return list.map(f => {
+        if (!f || typeof f !== "object") return null;
+        return {
+            label: String(f.label || "").trim(),
+            value: String(f.value || "").trim(),
+            parent: (f.parent && typeof f.parent === "string") ? f.parent : null
+        };
+    }).filter(Boolean);
+}
+
 function Admin({ mode = "auto" }) {
     const { adminUser, loginAdmin: setAdminSession, logoutAdmin, isAdminAuthenticated } = useAdminAuth();
     const { user: authUser } = useAuth();
@@ -175,7 +188,7 @@ function Admin({ mode = "auto" }) {
             const stored = window?.localStorage?.getItem("edumate-admin-folders");
             if (!stored) return DEFAULT_FOLDERS;
             const parsed = JSON.parse(stored);
-            if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+            if (Array.isArray(parsed) && parsed.length > 0) return sanitizeFolders(parsed);
             return DEFAULT_FOLDERS;
         } catch {
             return DEFAULT_FOLDERS;
@@ -205,6 +218,7 @@ function Admin({ mode = "auto" }) {
     const [storageStats, setStorageStats] = useState(DEMO_STORAGE_STATS);
     const [selectedDocument, setSelectedDocument] = useState(null);
     const [selectedIds, setSelectedIds] = useState([]);
+    const [clipboard, setClipboard] = useState({ action: null, fileIds: [], sourceCategory: null });
     const [contextMenu, setContextMenu] = useState(null);
     const [authLoading, setAuthLoading] = useState(false);
     const [authError, setAuthError] = useState("");
@@ -230,17 +244,32 @@ function Admin({ mode = "auto" }) {
     const adminPasswordRef = useRef(null);
 
     const documentCounts = useMemo(() => {
-        if (storageStats?.categoryCounts) {
-            return folders.reduce((counts, folder) => {
-                counts[folder.value] = storageStats.categoryCounts[folder.value]?.count || 0;
-                return counts;
-            }, {});
-        }
+        const directCounts = {};
+        folders.forEach(folder => {
+            if (storageStats?.categoryCounts) {
+                directCounts[folder.value] = storageStats.categoryCounts[folder.value]?.count || 0;
+            } else {
+                directCounts[folder.value] = documents.filter((file) => file.category === folder.value).length;
+            }
+        });
 
-        return folders.reduce((counts, folder) => {
-            counts[folder.value] = documents.filter((file) => file.category === folder.value).length;
-            return counts;
-        }, {});
+        const recursiveCounts = {};
+        const getCount = (val) => {
+            if (recursiveCounts[val] !== undefined) return recursiveCounts[val];
+            let sum = directCounts[val] || 0;
+            const children = folders.filter(f => f.parent === val);
+            children.forEach(child => {
+                sum += getCount(child.value);
+            });
+            recursiveCounts[val] = sum;
+            return sum;
+        };
+
+        folders.forEach(folder => {
+            getCount(folder.value);
+        });
+
+        return recursiveCounts;
     }, [documents, folders, storageStats]);
 
     useEffect(() => {
@@ -281,7 +310,7 @@ function Admin({ mode = "auto" }) {
                     }
                 });
 
-                return updated ? nextFolders : currentFolders;
+                return sanitizeFolders(updated ? nextFolders : currentFolders);
             });
         }
     }, [storageStats]);
@@ -420,7 +449,7 @@ function Admin({ mode = "auto" }) {
     const storageLimit = Number(combinedStats.total || 0);
     const usedStorage = Number(combinedStats.used || 0);
     const storagePercent = Number(combinedStats.usage || 0);
-    const activeFolderLabel = folders.find((folder) => folder.value === activeFolder)?.label || "Admissions";
+    const activeFolderLabel = folders.find((folder) => folder.value === activeFolder)?.label || (activeFolder === "root" || activeFolder === "" ? "Root" : "Admissions");
 
     const stats = [
         {
@@ -778,10 +807,11 @@ function Admin({ mode = "auto" }) {
         ));
     }
 
-    function openContextMenu(event, file) {
+    function openContextMenu(event, item, isFolder = false) {
         event.preventDefault();
         setContextMenu({
-            file,
+            file: !isFolder ? item : null,
+            folder: isFolder ? item : null,
             x: event.clientX,
             y: event.clientY
         });
@@ -811,20 +841,28 @@ function Admin({ mode = "auto" }) {
         }
     }
 
-    function handleCreateFolder() {
-        const folderName = window.prompt("New folder name");
+    function handleCreateFolder(parentVal = null) {
+        const parentString = typeof parentVal === "string" ? parentVal : null;
+        const targetParent = parentString !== null ? parentString : (activeFolder && activeFolder !== "root" ? activeFolder : null);
+        const parentFolder = folders.find(f => f.value === targetParent);
+        const folderName = window.prompt(
+            parentFolder
+                ? `New subfolder name inside "${parentFolder.label}"`
+                : "New root folder name"
+        );
 
         if (!folderName) {
             return;
         }
 
-        const value = slugifyFolder(folderName);
+        const slug = slugifyFolder(folderName);
 
-        if (!value) {
+        if (!slug) {
             setError("Folder name is required.");
             return;
         }
 
+        const value = targetParent ? `${targetParent}_${slug}` : slug;
         const exists = folders.some((folder) => folder.value === value);
 
         if (exists) {
@@ -834,7 +872,7 @@ function Admin({ mode = "auto" }) {
             return;
         }
 
-        const nextFolders = [...folders, { label: folderName.trim(), value }];
+        const nextFolders = sanitizeFolders([...folders, { label: folderName.trim(), value, parent: targetParent }]);
         setFolders(nextFolders);
         window.localStorage.setItem("edumate-admin-folders", JSON.stringify(nextFolders));
         setActiveFolder(value);
@@ -849,12 +887,12 @@ function Admin({ mode = "auto" }) {
         const newName = window.prompt("Rename folder to:", folder.label);
         if (!newName || newName.trim() === "") return;
 
-        const nextFolders = folders.map((f) => {
+        const nextFolders = sanitizeFolders(folders.map((f) => {
             if (f.value === folderValue) {
                 return { ...f, label: newName.trim() };
             }
             return f;
-        });
+        }));
 
         setFolders(nextFolders);
         window.localStorage.setItem("edumate-admin-folders", JSON.stringify(nextFolders));
@@ -865,11 +903,35 @@ function Admin({ mode = "auto" }) {
         const folder = folders.find((f) => f.value === folderValue);
         if (!folder) return;
 
-        const filesToMove = documents.filter((doc) => doc.category === folderValue);
+        const getAllDescendantFolderValues = (parentVal) => {
+            let desc = [parentVal];
+            const children = folders.filter(f => f.parent === parentVal);
+            children.forEach(child => {
+                desc = [...desc, ...getAllDescendantFolderValues(child.value)];
+            });
+            return desc;
+        };
+
+        const descendantFolderValues = getAllDescendantFolderValues(folderValue);
+        
+        let filesToMove = [];
+        try {
+            setBusy(true);
+            for (const cat of descendantFolderValues) {
+                const response = await listAdminDocuments({ category: cat, limit: 1000, ignoreInstitution: "true" });
+                if (response && response.data) {
+                    filesToMove = [...filesToMove, ...response.data];
+                }
+            }
+        } catch (err) {
+            console.error("Failed to check documents in folder structure:", err);
+        } finally {
+            setBusy(false);
+        }
 
         let confirmMsg = `Delete folder "${folder.label}"?`;
         if (filesToMove.length > 0) {
-            confirmMsg += ` This will move all ${filesToMove.length} file(s) inside this folder to Admissions.`;
+            confirmMsg += ` This will move all ${filesToMove.length} file(s) inside this folder and its subfolders to Admissions.`;
         }
 
         if (!window.confirm(confirmMsg)) {
@@ -878,28 +940,195 @@ function Admin({ mode = "auto" }) {
 
         try {
             setBusy(true);
-            const defaultFolder = folders.find((f) => f.value !== folderValue)?.value || "admissions";
+            setError("");
+            const defaultFolder = folders.find((f) => !descendantFolderValues.includes(f.value))?.value || "admissions";
 
             if (filesToMove.length > 0) {
                 for (const doc of filesToMove) {
-                    await moveDocument(doc._id, defaultFolder);
+                    await moveAdminDocument(doc._id, defaultFolder);
                 }
             }
 
-            const nextFolders = folders.filter((f) => f.value !== folderValue);
+            const nextFolders = sanitizeFolders(folders.filter((f) => !descendantFolderValues.includes(f.value)));
             setFolders(nextFolders);
             window.localStorage.setItem("edumate-admin-folders", JSON.stringify(nextFolders));
 
-            if (activeFolder === folderValue) {
+            if (descendantFolderValues.includes(activeFolder)) {
                 setActiveFolder(defaultFolder);
                 setUpload((current) => ({ ...current, category: defaultFolder }));
             }
 
-            setNotice(`Folder "${folder.label}" deleted.`);
+            setNotice(`Folder "${folder.label}" and its subfolders deleted.`);
             await loadDocuments();
             await loadStorageStats();
         } catch (err) {
             setError(err.message || "Failed to delete folder.");
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    async function handleMoveFolder(folderValue) {
+        const folder = folders.find((f) => f.value === folderValue);
+        if (!folder) return;
+
+        const getAllDescendantFolderValues = (parentVal) => {
+            let desc = [parentVal];
+            const children = folders.filter(f => f.parent === parentVal);
+            children.forEach(child => {
+                desc = [...desc, ...getAllDescendantFolderValues(child.value)];
+            });
+            return desc;
+        };
+        const descendantValues = getAllDescendantFolderValues(folderValue);
+
+        const eligibleParents = folders.filter(f => !descendantValues.includes(f.value));
+        const parentOptionsStr = ["Root", ...eligibleParents.map(f => f.label)].join(", ");
+
+        const targetParentLabel = window.prompt(
+            `Move folder "${folder.label}" to parent (${parentOptionsStr}):`,
+            folder.parent ? (folders.find(f => f.value === folder.parent)?.label || "Root") : "Root"
+        );
+
+        if (targetParentLabel === null) return;
+
+        let targetParentValue = null;
+        if (targetParentLabel.trim().toLowerCase() !== "root") {
+            const matchedParent = eligibleParents.find(
+                f => f.label.toLowerCase() === targetParentLabel.trim().toLowerCase() ||
+                     f.value.toLowerCase() === targetParentLabel.trim().toLowerCase()
+            );
+            if (!matchedParent) {
+                setError("Invalid parent folder selected.");
+                return;
+            }
+            targetParentValue = matchedParent.value;
+        }
+
+        if (targetParentValue === folder.parent) {
+            return;
+        }
+
+        try {
+            setBusy(true);
+            setError("");
+
+            const categoryRenames = {};
+
+            const updateSubtree = (currentValue, newParentVal) => {
+                const f = folders.find(item => item.value === currentValue);
+                if (!f) return;
+
+                const slug = currentValue.split("_").pop();
+                const newCurrentValue = newParentVal ? `${newParentVal}_${slug}` : slug;
+
+                categoryRenames[currentValue] = newCurrentValue;
+
+                const children = folders.filter(item => item.parent === currentValue);
+                children.forEach(child => {
+                    updateSubtree(child.value, newCurrentValue);
+                });
+            };
+
+            updateSubtree(folderValue, targetParentValue);
+
+            for (const [oldCat, newCat] of Object.entries(categoryRenames)) {
+                if (oldCat === newCat) continue;
+                const response = await listAdminDocuments({ category: oldCat, limit: 1000, ignoreInstitution: "true" });
+                if (response && response.data && response.data.length > 0) {
+                    for (const doc of response.data) {
+                        await moveAdminDocument(doc._id, newCat);
+                    }
+                }
+            }
+
+            const nextFolders = folders.map(f => {
+                if (categoryRenames[f.value] !== undefined) {
+                    const newValue = categoryRenames[f.value];
+                    const newParent = f.value === folderValue ? targetParentValue : categoryRenames[f.parent];
+                    return {
+                        ...f,
+                        value: newValue,
+                        parent: newParent
+                    };
+                }
+                return f;
+            });
+
+            const sanitized = sanitizeFolders(nextFolders);
+            setFolders(sanitized);
+            window.localStorage.setItem("edumate-admin-folders", JSON.stringify(sanitized));
+
+            if (categoryRenames[activeFolder] !== undefined) {
+                setActiveFolder(categoryRenames[activeFolder]);
+                setUpload(current => ({ ...current, category: categoryRenames[activeFolder] }));
+            }
+
+            setNotice(`Folder "${folder.label}" moved successfully.`);
+            await loadDocuments();
+            await loadStorageStats();
+        } catch (err) {
+            setError(err.message || "Failed to move folder.");
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    function handleCopy(singleId = null) {
+        const ids = singleId ? [singleId] : selectedIds;
+        if (ids.length === 0) return;
+        setClipboard({
+            action: "copy",
+            fileIds: [...ids],
+            sourceCategory: activeFolder
+        });
+        setNotice(`${ids.length} file(s) copied to clipboard.`);
+    }
+
+    function handleCut(singleId = null) {
+        const ids = singleId ? [singleId] : selectedIds;
+        if (ids.length === 0) return;
+        setClipboard({
+            action: "cut",
+            fileIds: [...ids],
+            sourceCategory: activeFolder
+        });
+        setNotice(`${ids.length} file(s) cut to clipboard.`);
+    }
+
+    async function handlePaste(targetCategory = activeFolder) {
+        const pasteCategory = targetCategory === "root" ? "root" : targetCategory;
+        if (!clipboard.action || clipboard.fileIds.length === 0) {
+            return;
+        }
+
+        try {
+            setBusy(true);
+            setError("");
+
+            const promises = clipboard.fileIds.map((id) => {
+                if (clipboard.action === "copy") {
+                    return copyAdminDocument(id, pasteCategory);
+                } else if (clipboard.action === "cut") {
+                    return moveAdminDocument(id, pasteCategory);
+                }
+                return Promise.resolve();
+            });
+
+            await Promise.all(promises);
+
+            const actionLabel = clipboard.action === "copy" ? "copied" : "moved";
+            setNotice(`${clipboard.fileIds.length} file(s) successfully ${actionLabel}.`);
+
+            if (clipboard.action === "cut") {
+                setClipboard({ action: null, fileIds: [], sourceCategory: null });
+            }
+
+            setSelectedIds([]);
+            await loadDocuments();
+            await loadStorageStats();
+        } catch (err) {
+            setError(err.message || "Failed to paste files.");
         } finally {
             setBusy(false);
         }
@@ -1023,6 +1252,10 @@ function Admin({ mode = "auto" }) {
                             selectedIds={selectedIds}
                             selectedDocument={selectedDocument}
                             contextMenu={contextMenu}
+                            clipboard={clipboard}
+                            onCopy={handleCopy}
+                            onCut={handleCut}
+                            onPaste={handlePaste}
                             setSearch={setSearch}
                             setFilters={setFilters}
                             setUpload={setUpload}
@@ -1036,6 +1269,7 @@ function Admin({ mode = "auto" }) {
                             onCreateFolder={handleCreateFolder}
                             onRenameFolder={handleRenameFolder}
                             onDeleteFolder={handleDeleteFolder}
+                            onMoveFolder={handleMoveFolder}
                             onDrop={handleUploadDrop}
                             onDragOver={handleUploadDragOver}
                             onDragLeave={handleUploadDragLeave}

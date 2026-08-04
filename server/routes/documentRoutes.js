@@ -10,6 +10,7 @@ const {
     replaceDocument,
     renameDocument,
     moveDocument,
+    copyDocument,
     reindexDocument,
     rebuildAllEmbeddings
 } = require("../controllers/documentController");
@@ -40,6 +41,11 @@ router.put(
     "/:documentId/move",
     authorizeRoles("admin", "super_admin"),
     moveDocument
+);
+router.put(
+    "/:documentId/copy",
+    authorizeRoles("admin", "super_admin"),
+    copyDocument
 );
 router.delete(
     "/:documentId",

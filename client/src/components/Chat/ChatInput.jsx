@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { FiArrowRight, FiPaperclip, FiSmile, FiUpload, FiX, FiSquare } from "react-icons/fi";
+import { FiArrowRight, FiPaperclip, FiSmile, FiUpload, FiX, FiSquare, FiMic, FiRadio } from "react-icons/fi";
 
 import FilePreview from "./FilePreview";
 
@@ -29,7 +29,11 @@ function ChatInput({
     onAttachFiles,
     onClear,
     attachments,
-    onRemoveAttachment
+    onRemoveAttachment,
+    onVoiceSingleClick,
+    onVoiceContinuousClick,
+    isVoiceSingleActive,
+    isVoiceContinuousActive
 }) {
     const [text, setText] = useState(value || "");
     const textareaRef = useRef(null);
@@ -138,6 +142,28 @@ function ChatInput({
 
                         <button type="button" className="edu-chat-icon-button" onClick={handleClear} aria-label="Clear input">
                             <FiX />
+                        </button>
+
+                        <button
+                            type="button"
+                            className={`edu-chat-icon-button voice-btn-single ${isVoiceSingleActive ? "is-active" : ""}`}
+                            onClick={onVoiceSingleClick}
+                            title="Single Voice Query"
+                            aria-label="Single Voice Query"
+                            style={isVoiceSingleActive ? { color: "#10b981", backgroundColor: "rgba(16, 185, 129, 0.1)" } : {}}
+                        >
+                            <FiMic />
+                        </button>
+
+                        <button
+                            type="button"
+                            className={`edu-chat-icon-button voice-btn-continuous ${isVoiceContinuousActive ? "is-active" : ""}`}
+                            onClick={onVoiceContinuousClick}
+                            title="Continuous Conversation Mode"
+                            aria-label="Continuous Conversation Mode"
+                            style={isVoiceContinuousActive ? { color: "#3b82f6", backgroundColor: "rgba(59, 130, 246, 0.1)" } : {}}
+                        >
+                            <FiRadio />
                         </button>
                     </div>
 

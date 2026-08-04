@@ -33,6 +33,36 @@
     letter-spacing: 0.5px;
 }
 
+.folder-root-btn {
+    min-height: 28px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--admin-muted);
+    font-size: 11px !important;
+    font-weight: 500 !important;
+    padding-left: 28px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    background: transparent !important;
+    border: none !important;
+    width: 100%;
+    text-align: left;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border-radius: 6px;
+}
+
+.folder-root-btn:hover {
+    color: var(--admin-gold);
+    background: rgba(255, 255, 255, 0.03) !important;
+}
+
+.folder-root-btn.active {
+    color: var(--admin-gold);
+    background: rgba(242, 163, 11, 0.12) !important;
+}
+
 .folder-node {
     display: flex;
     flex-direction: column;
