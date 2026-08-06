@@ -156,9 +156,12 @@ const listDocuments = async ({ query, user }) => {
     const limit = Math.min(Math.max(Number(query.limit || 20), 1), 10000);
     const skip = (page - 1) * limit;
 
-    const filter = {
-        status: { $ne: "deleted" }
-    };
+    const filter = {};
+    if (query.status) {
+        filter.status = query.status;
+    } else {
+        filter.status = "active";
+    }
 
     if (query.category) {
         filter.category = sanitizeCategory(query.category);
@@ -225,7 +228,7 @@ const listDocuments = async ({ query, user }) => {
 const archiveDocument = async ({ documentId, user }) => {
     const document = await Document.findOne({
         _id: documentId,
-        status: { $ne: "deleted" }
+        status: "active"
     });
 
     if (!document) {
@@ -234,18 +237,9 @@ const archiveDocument = async ({ documentId, user }) => {
         throw error;
     }
 
-    try {
-        await supabase.storage.from(BUCKET).remove([document.storagePath]);
-    } catch (storageErr) {
-        console.error(`Failed to delete file ${document.storagePath} from Supabase:`, storageErr);
-    }
-
-    document.status = "deleted";
+    document.status = "archived";
     document.updatedBy = user._id;
     await document.save();
-
-    // Clean up vector index chunks from Qdrant via AI service
-    await indexingService.deleteDocumentIndex(documentId);
 
     return document;
 };
@@ -517,6 +511,137 @@ const indexDocumentBackground = async (documentId, fileBuffer = null) => {
     return indexingService.indexDocumentBackground(documentId, fileBuffer);
 };
 
+const bulkReindex = async ({ category, ids, user }) => {
+    const filter = { status: { $ne: "deleted" }, mimeType: "application/pdf" };
+    if (ids && Array.isArray(ids) && ids.length > 0) {
+        filter._id = { $in: ids };
+    } else if (category && category !== "root") {
+        const cleanCat = sanitizeCategory(category);
+        filter.category = { $regex: new RegExp(`^${cleanCat}(/|$)`, "i") };
+    }
+    const documents = await Document.find(filter);
+    for (const doc of documents) {
+        doc.embeddingStatus = "pending";
+        await doc.save();
+        indexDocumentBackground(doc._id).catch(() => {});
+    }
+    return { count: documents.length };
+};
+
+const getJobsStatus = async () => {
+    const activeFilter = { status: { $ne: "deleted" } };
+    const [pending, processing, failed, indexedCount, totalCount] = await Promise.all([
+        Document.find({ ...activeFilter, embeddingStatus: "pending" }).select("originalName category updatedAt fileSize"),
+        Document.find({ ...activeFilter, embeddingStatus: "processing" }).select("originalName category updatedAt fileSize"),
+        Document.find({ ...activeFilter, embeddingStatus: "failed" }).select("originalName category updatedAt fileSize metadata.error"),
+        Document.countDocuments({ ...activeFilter, embeddingStatus: "indexed" }),
+        Document.countDocuments(activeFilter)
+    ]);
+    return {
+        queue: pending,
+        running: processing,
+        failed: failed,
+        completedCount: indexedCount,
+        totalCount
+    };
+};
+
+const retryFailed = async ({ user }) => {
+    const failedDocs = await Document.find({ status: { $ne: "deleted" }, embeddingStatus: "failed" });
+    for (const doc of failedDocs) {
+        doc.embeddingStatus = "pending";
+        await doc.save();
+        indexDocumentBackground(doc._id).catch(() => {});
+    }
+    return { count: failedDocs.length };
+};
+
+const ignoreFailed = async ({ documentId, user }) => {
+    const document = await Document.findOne({ _id: documentId, status: { $ne: "deleted" } });
+    if (!document) {
+        const error = new Error("Document not found.");
+        error.statusCode = 404;
+        throw error;
+    }
+    document.embeddingStatus = "not_required";
+    document.updatedBy = user._id;
+    await document.save();
+    return document;
+};
+
+const restoreDocument = async ({ documentId, user }) => {
+    const document = await Document.findOne({ _id: documentId, status: "archived" });
+    if (!document) {
+        const error = new Error("Document not found in recycle bin.");
+        error.statusCode = 404;
+        throw error;
+    }
+    document.status = "active";
+    document.updatedBy = user._id;
+    await document.save();
+    return document;
+};
+
+const permanentDeleteDocument = async ({ documentId, user }) => {
+    const document = await Document.findOne({ _id: documentId, status: { $in: ["active", "archived"] } });
+    if (!document) {
+        const error = new Error("Document not found.");
+        error.statusCode = 404;
+        throw error;
+    }
+    try {
+        await supabase.storage.from(BUCKET).remove([document.storagePath]);
+    } catch (storageErr) {
+        console.error(`Failed to delete file ${document.storagePath} from Supabase:`, storageErr);
+    }
+    document.status = "deleted";
+    document.updatedBy = user._id;
+    await document.save();
+    await indexingService.deleteDocumentIndex(documentId);
+    return document;
+};
+
+const duplicateDocument = async ({ documentId, user }) => {
+    const document = await Document.findOne({ _id: documentId, status: "active" });
+    if (!document) {
+        const error = new Error("Document not found.");
+        error.statusCode = 404;
+        throw error;
+    }
+    const ext = getSafeExtension(document.originalName);
+    const baseName = path.basename(document.originalName, ext);
+    const newOriginalName = `${baseName} - Copy${ext}`;
+    const uniqueName = `${Date.now()}-${crypto.randomUUID()}${ext}`;
+    const newStoragePath = `${document.category}/${uniqueName}`;
+
+    const { error } = await supabase.storage
+        .from(BUCKET)
+        .copy(document.storagePath, newStoragePath);
+
+    if (error) {
+        const err = new Error(`Failed to duplicate file in storage: ${error.message}`);
+        err.statusCode = 500;
+        throw err;
+    }
+
+    const newDocument = await Document.create({
+        originalName: newOriginalName,
+        storedName: uniqueName,
+        category: document.category,
+        institution: document.institution,
+        department: document.department,
+        mimeType: document.mimeType,
+        fileSize: document.fileSize,
+        checksum: document.checksum,
+        storagePath: newStoragePath,
+        createdBy: user._id,
+        updatedBy: user._id
+    });
+
+    indexingService.indexDocumentBackground(newDocument._id).catch(() => {});
+    return newDocument;
+};
+
 module.exports = {
     uploadDocument,
     listDocuments,
@@ -528,5 +653,12 @@ module.exports = {
     reindexDocument,
     rebuildAllEmbeddings,
     indexDocumentBackground,
+    bulkReindex,
+    getJobsStatus,
+    retryFailed,
+    ignoreFailed,
+    restoreDocument,
+    permanentDeleteDocument,
+    duplicateDocument,
     DOCUMENT_CATEGORIES
 };

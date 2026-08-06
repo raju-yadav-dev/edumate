@@ -88,6 +88,10 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/storage", storageRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api/map", mapRoutes);
+const crawlerRoutes = require("./crawler/routes/crawlerRoutes");
+app.use("/api/crawler", crawlerRoutes);
+const knowledgeRoutes = require("./knowledge/knowledgeRoutes");
+app.use("/api/knowledge", knowledgeRoutes);
 
 // ==============================
 // Test Route

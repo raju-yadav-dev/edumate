@@ -93,6 +93,42 @@ const rebuildAllEmbeddings = asyncHandler(async (req, res) => {
     return sendSuccess(res, 200, `Rebuilding initiated for ${result.count} documents.`, result);
 });
 
+const bulkReindexDocuments = asyncHandler(async (req, res) => {
+    const { category, ids } = req.body;
+    const result = await documentService.bulkReindex({ category, ids, user: req.user });
+    return sendSuccess(res, 200, "Bulk reindexing initiated.", result);
+});
+
+const getJobsStatus = asyncHandler(async (req, res) => {
+    const result = await documentService.getJobsStatus();
+    return sendSuccess(res, 200, "Jobs status retrieved.", result);
+});
+
+const retryFailedDocuments = asyncHandler(async (req, res) => {
+    const result = await documentService.retryFailed({ user: req.user });
+    return sendSuccess(res, 200, "Retrying failed indexing documents.", result);
+});
+
+const ignoreFailedDocument = asyncHandler(async (req, res) => {
+    const document = await documentService.ignoreFailed({ documentId: req.params.documentId, user: req.user });
+    return sendSuccess(res, 200, "Document index status set to ignored.", document);
+});
+
+const restoreDocument = asyncHandler(async (req, res) => {
+    const document = await documentService.restoreDocument({ documentId: req.params.documentId, user: req.user });
+    return sendSuccess(res, 200, "Document restored from recycle bin.", document);
+});
+
+const permanentDeleteDocument = asyncHandler(async (req, res) => {
+    const document = await documentService.permanentDeleteDocument({ documentId: req.params.documentId, user: req.user });
+    return sendSuccess(res, 200, "Document permanently deleted.", document);
+});
+
+const duplicateDocument = asyncHandler(async (req, res) => {
+    const document = await documentService.duplicateDocument({ documentId: req.params.documentId, user: req.user });
+    return sendSuccess(res, 201, "Document duplicated successfully.", document);
+});
+
 module.exports = {
     uploadDocument,
     listDocuments,
@@ -102,5 +138,12 @@ module.exports = {
     moveDocument,
     copyDocument,
     reindexDocument,
-    rebuildAllEmbeddings
+    rebuildAllEmbeddings,
+    bulkReindexDocuments,
+    getJobsStatus,
+    retryFailedDocuments,
+    ignoreFailedDocument,
+    restoreDocument,
+    permanentDeleteDocument,
+    duplicateDocument
 };

@@ -95,7 +95,7 @@ function DocumentManager(props) {
                         onClick={() =>
                             document.querySelector(".upload-dropzone input")?.click()
                         }
-                        >
+                    >
                         <UploadCloud size={16} />
                         Upload Files
                     </button>

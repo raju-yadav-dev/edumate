@@ -35,6 +35,8 @@ import DataTools from "./components/datatools/DataTools";
 import ActivityLogs from "./components/activity/ActivityLogs";
 import UserManagement from "./components/users/UserManagement";
 import SettingsPage from "./components/settings/SettingsPage";
+import CrawlerManager from "../crawler/CrawlerManager";
+import KnowledgeSources from "./components/knowledge/KnowledgeSources";
 import { getDocumentUrl } from "./utils/documentUtils";
 import { recordActivityLog } from "../services/activityLogService";
 import { formatBytes } from "./utils/formatBytes";
@@ -144,17 +146,17 @@ function getActiveLoggedInUsers(adminUser, authUser) {
     try {
         const storedAdmin = localStorage.getItem("edumate-admin-user");
         if (storedAdmin) addIfValid(JSON.parse(storedAdmin), "super_admin");
-    } catch {}
+    } catch { }
 
     try {
         const storedUser = localStorage.getItem("edumate-user");
         if (storedUser) addIfValid(JSON.parse(storedUser), "student");
-    } catch {}
+    } catch { }
 
     try {
         const genericUser = localStorage.getItem("user");
         if (genericUser) addIfValid(JSON.parse(genericUser), "user");
-    } catch {}
+    } catch { }
 
     return list;
 }
@@ -297,7 +299,7 @@ function Admin({ mode = "auto" }) {
     useEffect(() => {
         if (storageStats?.categoryCounts) {
             const countsKeys = Object.keys(storageStats.categoryCounts);
-            
+
             setFolders((currentFolders) => {
                 let updated = false;
                 const nextFolders = [...currentFolders];
@@ -733,7 +735,7 @@ function Admin({ mode = "auto" }) {
             });
             setUsers((current) => current.filter((u) => u._id !== id && u.id !== id));
             setNotice("User deleted.");
-            await loadStorageStats().catch(() => {});
+            await loadStorageStats().catch(() => { });
         } catch (deleteError) {
             setError(deleteError.message || "Unable to delete user.");
         } finally {
@@ -913,7 +915,7 @@ function Admin({ mode = "auto" }) {
         };
 
         const descendantFolderValues = getAllDescendantFolderValues(folderValue);
-        
+
         let filesToMove = [];
         try {
             setBusy(true);
@@ -996,7 +998,7 @@ function Admin({ mode = "auto" }) {
         if (targetParentLabel.trim().toLowerCase() !== "root") {
             const matchedParent = eligibleParents.find(
                 f => f.label.toLowerCase() === targetParentLabel.trim().toLowerCase() ||
-                     f.value.toLowerCase() === targetParentLabel.trim().toLowerCase()
+                    f.value.toLowerCase() === targetParentLabel.trim().toLowerCase()
             );
             if (!matchedParent) {
                 setError("Invalid parent folder selected.");
@@ -1341,6 +1343,21 @@ function Admin({ mode = "auto" }) {
                         savingKeys={savingKeys}
                         documents={documents}
                         storageStats={storageStats}
+                    />
+                ) : null}
+
+                {activeSection === "crawler" ? (
+                    <CrawlerManager
+                        user={adminUser}
+                        setNotice={setNotice}
+                        setError={setError}
+                    />
+                ) : null}
+
+                {activeSection === "knowledge_sources" ? (
+                    <KnowledgeSources
+                        setNotice={setNotice}
+                        setError={setError}
                     />
                 ) : null}
 

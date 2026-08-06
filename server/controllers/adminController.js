@@ -278,7 +278,34 @@ const getStorageStats = asyncHandler(async (req, res) => {
                 $group: {
                     _id: "$category",
                     bytes: { $sum: "$fileSize" },
-                    count: { $sum: 1 }
+                    count: { $sum: 1 },
+                    indexed: {
+                        $sum: {
+                            $cond: [{ $eq: ["$embeddingStatus", "indexed"] }, 1, 0]
+                        }
+                    },
+                    failed: {
+                        $sum: {
+                            $cond: [{ $eq: ["$embeddingStatus", "failed"] }, 1, 0]
+                        }
+                    },
+                    processing: {
+                        $sum: {
+                            $cond: [{ $eq: ["$embeddingStatus", "processing"] }, 1, 0]
+                        }
+                    },
+                    pending: {
+                        $sum: {
+                            $cond: [{ $eq: ["$embeddingStatus", "pending"] }, 1, 0]
+                        }
+                    },
+                    totalChunks: { $sum: "$chunkCount" },
+                    totalEmbeddings: {
+                        $sum: {
+                            $cond: [{ $eq: ["$embeddingStatus", "indexed"] }, "$chunkCount", 0]
+                        }
+                    },
+                    lastIndexed: { $max: "$updatedAt" }
                 }
             }
         ]),
@@ -418,7 +445,14 @@ const getStorageStats = asyncHandler(async (req, res) => {
         categoryCounts: categoryStorage.reduce((counts, category) => {
             counts[category._id] = {
                 count: category.count || 0,
-                bytes: category.bytes || 0
+                bytes: category.bytes || 0,
+                indexed: category.indexed || 0,
+                failed: category.failed || 0,
+                processing: category.processing || 0,
+                pending: category.pending || 0,
+                totalChunks: category.totalChunks || 0,
+                totalEmbeddings: category.totalEmbeddings || 0,
+                lastIndexed: category.lastIndexed || null
             };
             return counts;
         }, {}),

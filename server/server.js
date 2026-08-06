@@ -57,6 +57,14 @@ const startServer = async () => {
             console.error("⚠️ Failed to auto-seed campus locations:", e.message);
         }
 
+        // Start background crawler sync scheduler
+        try {
+            const syncScheduler = require("./crawler/SyncScheduler");
+            syncScheduler.start();
+        } catch (e) {
+            console.error("⚠️ Failed to initialize background scheduler:", e.message);
+        }
+
         // Verify Qdrant connection during startup
         const { ensureCollection } = require("./ai/config/qdrant");
         await ensureCollection();

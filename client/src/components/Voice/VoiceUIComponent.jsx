@@ -217,6 +217,7 @@ export default function VoiceUIComponent({
         thinking: "Thinking...",
         speaking: "Speaking...",
         paused: "Paused",
+        interrupted: "Interrupted",
         ended: "Goodbye!"
     };
 

@@ -69,7 +69,7 @@ function FileTable(props) {
 
             {/* ================= TABLE BODY ================= */}
 
-            <div 
+            <div
                 className="file-rows"
                 onContextMenu={(event) => {
                     if (event.target.classList.contains("file-rows") || event.target.classList.contains("empty-state")) {

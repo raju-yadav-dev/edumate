@@ -9,6 +9,57 @@ const fetch = (() => {
     }
 })();
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const fetchWithRetry = async (url, options, maxAttempts = 6) => {
+    let attempt = 0;
+    while (attempt < maxAttempts) {
+        attempt++;
+        try {
+            const response = await fetch(url, options);
+            const clone = response.clone();
+            let isRateLimit = response.status === 429;
+            let errorMessage = "";
+            let retryAfterMs = 0;
+
+            try {
+                const payload = await response.json();
+                if (payload.error) {
+                    errorMessage = payload.error.message || "";
+                    if (payload.error.code === 429 || errorMessage.toLowerCase().includes("quota exceeded") || errorMessage.toLowerCase().includes("rate limit")) {
+                        isRateLimit = true;
+                    }
+                    const match = errorMessage.match(/retry in ([\d.]+)\s*s/i);
+                    if (match && match[1]) {
+                        retryAfterMs = parseFloat(match[1]) * 1000 + 1000;
+                    }
+                }
+            } catch (e) {
+                // Not JSON or parsing error
+            }
+
+            if (isRateLimit) {
+                if (attempt >= maxAttempts) {
+                    return clone;
+                }
+                const backoffDelay = retryAfterMs || (Math.pow(2, attempt) * 2000 + Math.random() * 1000);
+                console.log(`[Embedding API] Rate limit hit. Retrying attempt ${attempt}/${maxAttempts} after ${Math.round(backoffDelay)}ms... Reason: ${errorMessage || "429 Status"}`);
+                await sleep(backoffDelay);
+                continue;
+            }
+
+            return clone;
+        } catch (error) {
+            if (attempt >= maxAttempts) {
+                throw error;
+            }
+            const backoffDelay = Math.pow(2, attempt) * 2000 + Math.random() * 1000;
+            console.error(`[Embedding API] Request error. Retrying attempt ${attempt}/${maxAttempts} after ${Math.round(backoffDelay)}ms... Error: ${error.message}`);
+            await sleep(backoffDelay);
+        }
+    }
+};
+
 const getEmbeddingProvider = () => {
     return process.env.EMBEDDING_PROVIDER || process.env.LLM_PROVIDER || "gemini";
 };
@@ -82,7 +133,7 @@ const embedText = async (text) => {
         }
         const modelName = process.env.EMBEDDING_MODEL || process.env.GEMINI_EMBEDDING_MODEL || AI_CONSTANTS.EMBEDDING_MODEL || "gemini-embedding-001";
 
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:embedContent?key=${apiKey}`, {
+        const response = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:embedContent?key=${apiKey}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -166,6 +217,9 @@ const embedTexts = async (texts) => {
         const results = [];
 
         for (let i = 0; i < sanitized.length; i += batchSize) {
+            if (i > 0) {
+                await sleep(500);
+            }
             const subBatch = sanitized.slice(i, i + batchSize);
             const requests = subBatch.map((text) => ({
                 model: `models/${modelName}`,
@@ -173,7 +227,7 @@ const embedTexts = async (texts) => {
                 outputDimensionality: 768
             }));
 
-            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:batchEmbedContents?key=${apiKey}`, {
+            const response = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:batchEmbedContents?key=${apiKey}`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ requests })

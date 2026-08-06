@@ -9,6 +9,7 @@ import SpeechSynthesisService from "./SpeechSynthesisService";
 import LanguageDetectionService from "./LanguageDetectionService";
 import AudioAnalyserService from "./AudioAnalyserService";
 import VoiceCommandService from "./VoiceCommandService";
+import VadService from "./VadService";
 
 class VoiceConversationManager {
     constructor() {
@@ -153,6 +154,10 @@ class VoiceConversationManager {
         // Start elapsed timer
         this.startTimer();
 
+        // Initialize VAD interruption hook
+        void VadService.init(() => this.userInterruption());
+        VadService.start();
+
         // Speak Greeting
         this.setState("speaking");
         const greeting = this.getGreetingMessage(this.activeLang);
@@ -261,6 +266,7 @@ class VoiceConversationManager {
 
         // 3. Normal LLM Query
         this.setState("thinking");
+        this.activeAbortController = new AbortController();
 
         try {
             // Get Groq multilingual prompt injection prefix
@@ -269,6 +275,11 @@ class VoiceConversationManager {
 
             // Call existing chat sendMessage function
             const responseText = await this.sendMessageCallback(questionPayload);
+            
+            if (this.state === "interrupted") {
+                console.log("[VoiceManager] Response ignored because conversation was interrupted.");
+                return;
+            }
             
             this.lastAnswer = responseText || "I did not receive an answer.";
             this.setState("speaking");
@@ -292,24 +303,36 @@ class VoiceConversationManager {
                 onStart: this.handleSpeechStart,
                 onEnd: this.handleSpeechEnd
             });
+        } finally {
+            this.activeAbortController = null;
         }
     }
 
 
 
-    /**
-     * User interruption: immediately stops speaking and restarts listening.
-     */
     userInterruption() {
-        if (this.state === "speaking") {
-            console.log("[VoiceManager] User interrupted synthesis!");
+        if (this.state === "speaking" || this.state === "thinking") {
+            console.log("[VoiceManager] User interrupted!");
+            
+            // Immediately Stop SpeechSynthesis
             SpeechSynthesisService.cancel();
             
-            if (this.isContinuousMode) {
-                this.startListeningCycle();
-            } else {
-                this.setState("idle");
+            // Cancel AI response (AbortController)
+            if (this.activeAbortController) {
+                this.activeAbortController.abort();
             }
+
+            this.setState("interrupted");
+
+            setTimeout(() => {
+                if (this.state === "interrupted") {
+                    if (this.isContinuousMode) {
+                        this.startListeningCycle(); // Starts Speech Recognition
+                    } else {
+                        this.setState("idle");
+                    }
+                }
+            }, 600);
         }
     }
 
@@ -332,6 +355,10 @@ class VoiceConversationManager {
         this.isContinuousMode = false;
         SpeechRecognitionService.abort();
         SpeechSynthesisService.cancel();
+        VadService.stop();
+        if (this.activeAbortController) {
+            this.activeAbortController.abort();
+        }
         this.stopTimer();
         this.setState("ended");
         

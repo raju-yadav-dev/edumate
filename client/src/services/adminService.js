@@ -376,3 +376,69 @@ export async function saveProviderApiKeys({ groqApiKey, openRouteServiceKey }) {
 
     return parseResponse(response, "Unable to save API keys.");
 }
+
+export async function bulkReindexAdminDocuments({ category, ids } = {}) {
+    const token = getAdminAccessToken();
+    const response = await fetch(`${DOCUMENT_API_BASE_URL}/reindex`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({ category, ids })
+    });
+    return parseResponse(response, "Unable to run reindexing.");
+}
+
+export async function getJobsStatus() {
+    const token = getAdminAccessToken();
+    const response = await fetch(`${DOCUMENT_API_BASE_URL}/jobs/status`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    return parseResponse(response, "Unable to retrieve background jobs status.");
+}
+
+export async function retryFailedDocuments() {
+    const token = getAdminAccessToken();
+    const response = await fetch(`${DOCUMENT_API_BASE_URL}/retry-failed`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    return parseResponse(response, "Unable to retry failed files.");
+}
+
+export async function ignoreFailedDocument(documentId) {
+    const token = getAdminAccessToken();
+    const response = await fetch(`${DOCUMENT_API_BASE_URL}/${documentId}/ignore`, {
+        method: "PUT",
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    return parseResponse(response, "Unable to ignore file.");
+}
+
+export async function restoreAdminDocument(documentId) {
+    const token = getAdminAccessToken();
+    const response = await fetch(`${DOCUMENT_API_BASE_URL}/${documentId}/restore`, {
+        method: "PUT",
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    return parseResponse(response, "Unable to restore document.");
+}
+
+export async function permanentDeleteAdminDocument(documentId) {
+    const token = getAdminAccessToken();
+    const response = await fetch(`${DOCUMENT_API_BASE_URL}/${documentId}/permanent`, {
+        method: "DELETE",
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    return parseResponse(response, "Unable to permanently delete document.");
+}
+
+export async function duplicateAdminDocument(documentId) {
+    const token = getAdminAccessToken();
+    const response = await fetch(`${DOCUMENT_API_BASE_URL}/${documentId}/duplicate`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    return parseResponse(response, "Unable to duplicate document.");
+}

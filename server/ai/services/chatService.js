@@ -20,6 +20,7 @@ const responseFormattingService = require("./responseFormattingService");
 const { SOURCE_LABELS } = responseFormattingService;
 const citationService = require("./citationService");
 const suggestionsService = require("./suggestionsService");
+const knowledgeManager = require("../../knowledge/KnowledgeManager");
 
 const deterministicGreeting = (user) => ({
     answer: `Hello ${user?.fullName || "there"}. I can help with institutional questions, documents, campus services, routes, and academic support.`,
@@ -153,54 +154,19 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
         const isUniversityRelated = classifyQuestionType(rewrittenQuery, intentResult.intent) !== QUESTION_TYPES.GENERAL_KNOWLEDGE;
 
         if (isUniversityRelated) {
-            console.log(`Smart Search Pipeline: Querying local Qdrant database, university website, and trusted web in parallel...`);
+            console.log(`Smart Search Pipeline: Querying KnowledgeManager for prioritized source retrieval...`);
             try {
-                // Tier 1 Promise: Local Qdrant Retrieval
-                const localRetrievePromise = retrievalService.retrieve({
+                const knowledgeResult = await knowledgeManager.search({
                     question: rewrittenQuery,
-                    user: activeUser,
-                    limit: AI_CONSTANTS.DEFAULT_RETRIEVAL_LIMIT
-                }).then(async (chunks) => {
-                    const reranked = await rerankService.rerank(rewrittenQuery, chunks);
-                    const maxScore = reranked.length > 0 ? Math.max(...reranked.map(c => c.score)) : 0;
-                    console.log(`Local KB Search Max Score: ${maxScore.toFixed(3)}`);
-                    if (maxScore >= AI_CONSTANTS.SIMILARITY_THRESHOLD) {
-                        return reranked.filter((chunk) => chunk.score >= AI_CONSTANTS.SIMILARITY_THRESHOLD);
-                    }
-                    return [];
-                }).catch(err => {
-                    console.error("Local KB search failed:", err);
-                    return [];
+                    user: activeUser
                 });
+                
+                retrievedChunks = knowledgeResult.chunks;
+                webResults = knowledgeResult.webResults;
+                universitySiteResults = [];
 
-                // Tier 2 Promise: University Official Website
-                const uniSearchPromise = webSearchService.searchUniversityWebsite(rewrittenQuery, activeUser)
-                    .catch(err => {
-                        console.error("University website search failed:", err);
-                        return [];
-                    });
-
-                // Tier 3 Promise: General Trusted Web Search
-                const webSearchPromise = webSearchService.searchTrustedWeb(rewrittenQuery)
-                    .catch(err => {
-                        console.error("General web search failed:", err);
-                        return [];
-                    });
-
-                // Execute all searches in parallel
-                const [localChunks, uniResults, trustWebResults] = await Promise.all([
-                    localRetrievePromise,
-                    uniSearchPromise,
-                    webSearchPromise
-                ]);
-
-                retrievedChunks = localChunks;
-                universitySiteResults = uniResults;
-                webResults = trustWebResults;
-
-                // Dynamically classify question type and source label based on search outcome
                 const hasLocal = retrievedChunks.length > 0;
-                const hasWeb = universitySiteResults.length > 0 || webResults.length > 0;
+                const hasWeb = webResults.length > 0;
 
                 if (hasLocal && hasWeb) {
                     activeQuestionType = QUESTION_TYPES.HYBRID;
@@ -208,10 +174,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
                 } else if (hasLocal) {
                     activeQuestionType = QUESTION_TYPES.UNIVERSITY_SPECIFIC;
                     sourceLabel = SOURCE_LABELS.UNIVERSITY;
-                } else if (universitySiteResults.length > 0) {
-                    activeQuestionType = QUESTION_TYPES.UNIVERSITY_SPECIFIC;
-                    sourceLabel = SOURCE_LABELS.UNIVERSITY;
-                } else if (webResults.length > 0) {
+                } else if (hasWeb) {
                     activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
                     sourceLabel = SOURCE_LABELS.WEB;
                 } else {

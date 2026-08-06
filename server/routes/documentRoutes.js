@@ -12,7 +12,14 @@ const {
     moveDocument,
     copyDocument,
     reindexDocument,
-    rebuildAllEmbeddings
+    rebuildAllEmbeddings,
+    bulkReindexDocuments,
+    getJobsStatus,
+    retryFailedDocuments,
+    ignoreFailedDocument,
+    restoreDocument,
+    permanentDeleteDocument,
+    duplicateDocument
 } = require("../controllers/documentController");
 
 const router = express.Router();
@@ -20,6 +27,21 @@ const router = express.Router();
 router.use(authenticate);
 
 router.get("/", listDocuments);
+router.get(
+    "/jobs/status",
+    authorizeRoles("admin", "super_admin"),
+    getJobsStatus
+);
+router.post(
+    "/reindex",
+    authorizeRoles("admin", "super_admin"),
+    bulkReindexDocuments
+);
+router.post(
+    "/retry-failed",
+    authorizeRoles("admin", "super_admin"),
+    retryFailedDocuments
+);
 router.post(
     "/",
     authorizeRoles("teacher", "faculty", "admin", "super_admin"),
@@ -47,10 +69,25 @@ router.put(
     authorizeRoles("admin", "super_admin"),
     copyDocument
 );
+router.put(
+    "/:documentId/ignore",
+    authorizeRoles("admin", "super_admin"),
+    ignoreFailedDocument
+);
+router.put(
+    "/:documentId/restore",
+    authorizeRoles("admin", "super_admin"),
+    restoreDocument
+);
 router.delete(
     "/:documentId",
     authorizeRoles("admin", "super_admin"),
     deleteDocument
+);
+router.delete(
+    "/:documentId/permanent",
+    authorizeRoles("admin", "super_admin"),
+    permanentDeleteDocument
 );
 router.post(
     "/rebuild",
@@ -66,6 +103,11 @@ router.post(
     "/:documentId/embeddings/rebuild",
     authorizeRoles("admin", "super_admin"),
     reindexDocument
+);
+router.post(
+    "/:documentId/duplicate",
+    authorizeRoles("admin", "super_admin"),
+    duplicateDocument
 );
 
 module.exports = router;

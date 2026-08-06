@@ -5,6 +5,8 @@ const userRoutes = require("./userRoutes");
 const chatRoutes = require("./chatRoutes");
 const documentRoutes = require("./documentRoutes");
 const adminRoutes = require("./adminRoutes");
+const crawlerRoutes = require("../crawler/routes/crawlerRoutes");
+const knowledgeRoutes = require("../knowledge/knowledgeRoutes");
 
 const router = express.Router();
 
@@ -13,6 +15,8 @@ router.use("/users", userRoutes);
 router.use("/chat", chatRoutes);
 router.use("/documents", documentRoutes);
 router.use("/admin", adminRoutes);
+router.use("/crawler", crawlerRoutes);
+router.use("/knowledge", knowledgeRoutes);
 
 router.get("/health", (req, res) => {
     res.status(200).json({

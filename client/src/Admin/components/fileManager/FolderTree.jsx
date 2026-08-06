@@ -29,7 +29,7 @@ function FolderNode({
 
     return (
         <div className="folder-node">
-            <div 
+            <div
                 className={`folder-item-row ${activeFolder === folder.value ? "active" : ""}`}
                 onContextMenu={(e) => {
                     if (onContextMenu) {
@@ -137,9 +137,8 @@ function FolderNode({
                             <button
                                 key={doc._id}
                                 type="button"
-                                className={`folder-child-doc ${
-                                    selectedDocument?._id === doc._id ? "active" : ""
-                                }`}
+                                className={`folder-child-doc ${selectedDocument?._id === doc._id ? "active" : ""
+                                    }`}
                                 onClick={() => {
                                     onSelectTreeDoc?.(doc);
                                 }}
