@@ -20,6 +20,7 @@ import FileTable from "./FileTable";
 import FolderTree from "./FolderTree";
 import UploadDialog from "./UploadDialog";
 import PreviewPanel from "./PreviewPanel";
+import useKeyboardShortcuts from "../../../hooks/useKeyboardShortcuts";
 import "./FileManager.css";
 
 function DocumentManager(props) {
@@ -28,6 +29,41 @@ function DocumentManager(props) {
     const [showFilters, setShowFilters] = useState(false);
     const [sortMode, setSortMode] = useState("date-desc");
     const [singleDocumentFilterId, setSingleDocumentFilterId] = useState(null);
+
+    useKeyboardShortcuts({
+        "ctrl+c": () => {
+            if (props.selectedDocument) {
+                props.onCopy(props.selectedDocument._id);
+            }
+        },
+        "ctrl+x": () => {
+            if (props.selectedDocument) {
+                props.onCut(props.selectedDocument._id);
+            }
+        },
+        "ctrl+v": () => {
+            if (props.clipboard && props.clipboard.action) {
+                props.onPaste(props.activeFolder);
+            }
+        },
+        "delete": () => {
+            if (props.selectedDocument) {
+                props.onDelete(props.selectedDocument._id);
+            }
+        },
+        "f2": () => {
+            if (props.selectedDocument) {
+                props.onRename(props.selectedDocument._id, props.selectedDocument.title || props.selectedDocument.originalName);
+            }
+        },
+        "escape": () => {
+            setSingleDocumentFilterId(null);
+            props.onReset?.();
+        },
+        "f5": () => {
+            props.refreshSection?.();
+        }
+    });
 
     const sortedDocuments = useMemo(() => {
         let copy = [...props.documents];

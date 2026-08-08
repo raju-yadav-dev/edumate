@@ -43,7 +43,13 @@ class VadService {
      */
     async setupAudioGateFallback() {
         try {
-            this.fallbackStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            this.fallbackStream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true
+                }
+            });
             const AudioContextClass = window.AudioContext || window.webkitAudioContext;
             this.fallbackCtx = new AudioContextClass();
             const source = this.fallbackCtx.createMediaStreamSource(this.fallbackStream);

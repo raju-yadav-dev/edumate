@@ -876,3 +876,37 @@
         grid-template-columns: 1fr;
     }
 }
+
+/* ==========================================================================
+   Tab Navigation Styles
+   ========================================================================== */
+.datatools-tabs {
+    display: flex;
+    gap: 8px;
+    border-bottom: 1px solid var(--admin-line, rgba(255, 255, 255, 0.08));
+    padding-bottom: 12px;
+    margin-bottom: 20px;
+}
+
+.datatools-tab-btn {
+    background: transparent;
+    border: none;
+    color: var(--admin-muted, #9ca3af);
+    font-size: 14px;
+    font-weight: 500;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.datatools-tab-btn:hover {
+    color: var(--admin-text, #ffffff);
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.datatools-tab-btn.active {
+    color: #0b0f17;
+    background: var(--admin-gold, #f59e0b);
+    font-weight: 600;
+}

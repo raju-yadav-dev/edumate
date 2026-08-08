@@ -8,59 +8,62 @@ export default function StorageStatCards({ stats = {}, documents = [] }) {
     const qdrant = stats?.qdrant || {};
     const combined = stats?.combined || {};
 
-    const mongoUsedBytes = mongo.used || 8.1 * 1024 * 1024 * 1024;
-    const mongoTotalBytes = mongo.total || 25.0 * 1024 * 1024 * 1024;
-    const mongoPct = mongo.usage ? Math.round(mongo.usage) : 32;
+    const mongoConnected = mongo.connected;
+    const mongoUsedBytes = mongoConnected ? mongo.used || 0 : null;
+    const mongoTotalBytes = mongoConnected ? mongo.total || 0 : null;
+    const mongoPct = mongoConnected ? Math.round(mongo.usage || 0) : 0;
 
-    const supabaseUsedBytes = supabase.used || 15.4 * 1024 * 1024 * 1024;
-    const supabaseTotalBytes = supabase.quota || 25.0 * 1024 * 1024 * 1024;
-    const supabasePct = supabase.usage ? Math.round(supabase.usage) : 61;
+    const supabaseConnected = supabase.connected;
+    const supabaseUsedBytes = supabaseConnected ? supabase.used || 0 : null;
+    const supabaseTotalBytes = supabaseConnected ? supabase.quota || 0 : null;
+    const supabasePct = supabaseConnected ? Math.round(supabase.usage || 0) : 0;
 
-    const combinedUsedBytes = combined.used || (mongoUsedBytes + supabaseUsedBytes);
-    const combinedTotalBytes = combined.total || 50.0 * 1024 * 1024 * 1024;
-    const combinedPct = combined.usage ? Math.round(combined.usage) : 47;
+    const combinedConnected = combined.used !== null && combined.total !== null;
+    const combinedUsedBytes = combinedConnected ? combined.used || 0 : null;
+    const combinedTotalBytes = combinedConnected ? combined.total || 0 : null;
+    const combinedPct = combinedConnected ? Math.round(combined.usage || 0) : 0;
 
-    const totalFiles = supabase.files || documents.length || 430;
-    const totalChunks = qdrant.vectors || stats?.knowledgeBase?.totalChunks || 12540;
+    const totalFiles = supabaseConnected ? supabase.files : documents.length;
+    const totalChunks = qdrant.connected ? qdrant.vectors : (stats?.knowledgeBase?.totalChunks || 0);
 
     const cards = [
         {
             id: "total-storage",
             title: "Total Storage Used",
-            value: `${(combinedUsedBytes / (1024 * 1024 * 1024)).toFixed(1)} GB`,
-            subtitle: `of ${(combinedTotalBytes / (1024 * 1024 * 1024)).toFixed(1)} GB (${combinedPct}%)`,
+            value: combinedConnected ? `${(combinedUsedBytes / (1024 * 1024 * 1024)).toFixed(2)} GB` : "—",
+            subtitle: combinedConnected ? `of ${(combinedTotalBytes / (1024 * 1024 * 1024)).toFixed(2)} GB (${combinedPct}%)` : "Disconnected",
             icon: Folder,
             iconColor: "#f59e0b",
             iconBg: "rgba(245, 158, 11, 0.14)",
-            barColor: "#f59e0b",
+            barColor: combinedConnected ? "#f59e0b" : null,
             percent: combinedPct
         },
         {
             id: "mongodb-storage",
             title: "MongoDB (Atlas)",
-            value: `${(mongoUsedBytes / (1024 * 1024 * 1024)).toFixed(1)} GB`,
-            subtitle: `of ${(mongoTotalBytes / (1024 * 1024 * 1024)).toFixed(1)} GB (${mongoPct}%)`,
+            value: mongoConnected ? `${(mongoUsedBytes / (1024 * 1024 * 1024)).toFixed(2)} GB` : "—",
+            subtitle: mongoConnected ? `of ${(mongoTotalBytes / (1024 * 1024 * 1024)).toFixed(2)} GB (${mongoPct}%)` : "Disconnected",
             icon: Database,
             iconColor: "#10b981",
             iconBg: "rgba(16, 185, 129, 0.14)",
-            barColor: "#10b981",
+            barColor: mongoConnected ? "#10b981" : null,
             percent: mongoPct
         },
         {
             id: "supabase-storage",
             title: "Supabase Storage",
-            value: `${(supabaseUsedBytes / (1024 * 1024 * 1024)).toFixed(1)} GB`,
-            subtitle: `of ${(supabaseTotalBytes / (1024 * 1024 * 1024)).toFixed(1)} GB (${supabasePct}%)`,
+            value: supabaseConnected ? `${(supabaseUsedBytes / (1024 * 1024 * 1024)).toFixed(2)} GB` : "—",
+            subtitle: supabaseConnected ? `of ${(supabaseTotalBytes / (1024 * 1024 * 1024)).toFixed(2)} GB (${supabasePct}%)` : "Disconnected",
             icon: HardDrive,
             iconColor: "#06b6d4",
             iconBg: "rgba(6, 182, 212, 0.14)",
-            barColor: "#06b6d4",
+            barColor: supabaseConnected ? "#06b6d4" : null,
             percent: supabasePct
         },
         {
             id: "total-files",
             title: "Files",
-            value: totalFiles.toLocaleString(),
+            value: supabaseConnected ? totalFiles.toLocaleString() : "—",
             subtitle: "Total Files",
             icon: FileText,
             iconColor: "#a855f7",
@@ -71,7 +74,7 @@ export default function StorageStatCards({ stats = {}, documents = [] }) {
         {
             id: "total-chunks",
             title: "Chunks / Records",
-            value: totalChunks.toLocaleString(),
+            value: qdrant.connected ? totalChunks.toLocaleString() : "—",
             subtitle: "Total Chroma Records",
             icon: Layers,
             iconColor: "#6366f1",

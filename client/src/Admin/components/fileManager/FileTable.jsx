@@ -300,7 +300,7 @@ function FileTable(props) {
                                     <input
                                         hidden
                                         type="file"
-                                        accept="application/pdf,.pdf"
+                                        accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,.txt,.md,.markdown,.json,.xml,.png,.jpg,.jpeg,.webp,.gif,.zip"
                                         onChange={(event) =>
                                             onReplace(
                                                 file._id,

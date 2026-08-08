@@ -45,7 +45,7 @@ const buildGuestUser = () => ({
 /**
  * Handles chatbot queries with RAG matching using Gemini 2.5 Flash and Qdrant
  */
-const askQuestion = async ({ user, question, conversationId, onChunk, signal, latitude, longitude }) => {
+const askQuestion = async ({ user, question, conversationId, onChunk, signal, latitude, longitude, userMessageId, assistantMessageId, parentId }) => {
     const startedAt = Date.now();
     const normalizedQuestion = String(question || "").trim();
     const activeUser = user || buildGuestUser();
@@ -60,7 +60,8 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
     const { historyText } = await conversationService.getRecentMemory({
         userId: activeUser._id,
         conversationId,
-        maxTokens: 1500
+        maxTokens: 1500,
+        parentId
     });
 
     // 2. Intent Detection
@@ -306,7 +307,10 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
         intent: intentResult.intent,
         confidence: intentResult.confidence,
         provider,
-        responseTimeMs
+        responseTimeMs,
+        userMessageId,
+        assistantMessageId,
+        parentId
     });
 
     // 7. Generate Follow-up Suggestions

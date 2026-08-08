@@ -8,6 +8,8 @@ const TXTExtractor = require("./TXTExtractor");
 const HTMLExtractor = require("./HTMLExtractor");
 const XMLExtractor = require("./XMLExtractor");
 const MarkdownExtractor = require("./MarkdownExtractor");
+const ZipExtractor = require("./ZipExtractor");
+const ImageExtractor = require("./ImageExtractor");
 
 class UniversalExtractor {
     /**
@@ -42,6 +44,16 @@ class UniversalExtractor {
         switch (ext) {
             case ".pdf":
                 return await PDFExtractor.extract(buffer);
+
+            case ".zip":
+                return await ZipExtractor.extract(buffer);
+
+            case ".png":
+            case ".jpg":
+            case ".jpeg":
+            case ".webp":
+            case ".gif":
+                return await ImageExtractor.extract(buffer);
 
             case ".docx":
                 return await DOCXExtractor.extract(buffer);

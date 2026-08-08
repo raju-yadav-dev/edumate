@@ -16,9 +16,45 @@ import ThemeControls from "../../components/Chat/ThemeControls";
 import useVoice from "../../hooks/useVoice";
 import VoiceUIComponent from "../../components/Voice/VoiceUIComponent";
 import VoiceConversationManager from "../../services/voice/VoiceConversationManager";
+import useKeyboardShortcuts from "../../hooks/useKeyboardShortcuts";
 
 const CHAT_STORAGE_KEY = "edumate-chat-threads";
 const CHAT_ACTIVE_KEY = "edumate-chat-active";
+
+const normalizeThreadMessages = (messages, threadId) => {
+    if (!messages) return { normalized: [], updated: false };
+    
+    let needsNormalization = false;
+    for (let i = 0; i < messages.length; i++) {
+        if (messages[i].id === undefined) {
+            needsNormalization = true;
+            break;
+        }
+        if (i > 0 && messages[i].parentId === undefined) {
+            needsNormalization = true;
+            break;
+        }
+    }
+    
+    if (!needsNormalization) {
+        return { normalized: messages, updated: false };
+    }
+    
+    const normalized = messages.map((msg, idx) => {
+        const id = msg.id || `msg-legacy-${idx}-${threadId}`;
+        let parentId = msg.parentId;
+        if (idx > 0 && !parentId) {
+            parentId = messages[idx - 1].id || `msg-legacy-${idx - 1}-${threadId}`;
+        }
+        return {
+            ...msg,
+            id,
+            parentId: parentId || null
+        };
+    });
+    
+    return { normalized, updated: true };
+};
 
 function safeId(prefix) {
     if (typeof crypto !== "undefined" && crypto.randomUUID) {
@@ -234,6 +270,21 @@ function Chat() {
     const [chatSearch, setChatSearch] = useState("");
     const [messageSearch, setMessageSearch] = useState("");
     const [attachments, setAttachments] = useState([]);
+
+    const [activeChildMap, setActiveChildMap] = useState({});
+    const [streamingText, setStreamingText] = useState("");
+    const [streamingMessageId, setStreamingMessageId] = useState(null);
+
+    useKeyboardShortcuts({
+        "ctrl+f": (e) => {
+            const searchField = document.querySelector("input[placeholder*='Search'], .edu-topbar-search-box input");
+            if (searchField) searchField.focus();
+        },
+        "escape": () => {
+            setMessageSearch("");
+            setChatSearch("");
+        }
+    });
     
     // Register UI navigation and local injection handlers for Voice commands
     useEffect(() => {
@@ -289,6 +340,11 @@ function Chat() {
     }, [activeThreadId]);
 
     useEffect(() => {
+        const activeT = threads.find((t) => t.id === activeThreadId);
+        setConversationId(activeT?.serverConversationId || null);
+    }, [activeThreadId, threads]);
+
+    useEffect(() => {
         const handleOnline = () => setIsOnline(true);
         const handleOffline = () => setIsOnline(false);
 
@@ -303,19 +359,292 @@ function Chat() {
 
     const activeThread = useMemo(() => threads.find((thread) => thread.id === activeThreadId) || threads[0], [threads, activeThreadId]);
 
+    // Reconstruct branching active path
+    useEffect(() => {
+        if (!activeThread?.messages) return;
+
+        const { normalized, updated } = normalizeThreadMessages(activeThread.messages, activeThread.id);
+        if (updated) {
+            setThreads((prevThreads) => prevThreads.map((t) => t.id === activeThread.id ? { ...t, messages: normalized } : t));
+            return;
+        }
+
+        const map = { ...activeChildMap };
+        let changed = false;
+
+        const parentToChildren = {};
+        normalized.forEach(msg => {
+            const pId = msg.parentId || "root";
+            if (!parentToChildren[pId]) parentToChildren[pId] = [];
+            parentToChildren[pId].push(msg);
+        });
+
+        Object.keys(parentToChildren).forEach(pId => {
+            const children = parentToChildren[pId];
+            if (children.length > 0) {
+                if (!map[pId] || !children.some(c => c.id === map[pId])) {
+                    map[pId] = children[children.length - 1].id;
+                    changed = true;
+                }
+            }
+        });
+
+        if (changed) {
+            setActiveChildMap(map);
+        }
+    }, [activeThreadId, activeThread?.messages]);
+
+    const activeBranchMessages = useMemo(() => {
+        if (!activeThread?.messages?.length) return [];
+        
+        const messageMap = {};
+        const parentToChildren = {};
+        
+        activeThread.messages.forEach(msg => {
+            messageMap[msg.id] = msg;
+            const pId = msg.parentId || "root";
+            if (!parentToChildren[pId]) parentToChildren[pId] = [];
+            parentToChildren[pId].push(msg);
+        });
+        
+        const branch = [];
+        let currentId = activeChildMap["root"];
+        if (!currentId || !messageMap[currentId]) {
+            const roots = parentToChildren["root"] || [];
+            currentId = roots[roots.length - 1]?.id || null;
+        }
+        
+        const visited = new Set();
+        while (currentId && messageMap[currentId] && !visited.has(currentId)) {
+            visited.add(currentId);
+            const msg = messageMap[currentId];
+            branch.push(msg);
+            
+            const children = parentToChildren[currentId] || [];
+            if (children.length === 0) break;
+            
+            if (activeChildMap[currentId] && messageMap[activeChildMap[currentId]]) {
+                currentId = activeChildMap[currentId];
+            } else {
+                currentId = children[children.length - 1].id;
+            }
+        }
+        
+        return branch;
+    }, [activeThread?.messages, activeChildMap]);
+
+    const sendMessage = useCallback(async (question, overrideCoords = null, parentId = null, userMessageId = null, assistantMessageId = null) => {
+        let currentThreadId = activeThreadId;
+        const trimmedQuestion = question.trim();
+        let finalText = "";
+
+        if ((!trimmedQuestion && attachments.length === 0) || loading) {
+            return;
+        }
+
+        setLoading(true);
+        setInput("");
+        setStreamingText("");
+
+        if (abortRef.current) {
+            abortRef.current.abort();
+        }
+
+        const controller = new AbortController();
+        abortRef.current = controller;
+
+        const now = new Date();
+        const uMsgId = userMessageId || safeId("msg");
+        const aMsgId = assistantMessageId || safeId("msg");
+
+        let finalParentId = parentId;
+        if (!finalParentId && activeBranchMessages.length > 0) {
+            finalParentId = activeBranchMessages[activeBranchMessages.length - 1].id;
+        }
+
+        const userMessage = {
+            id: uMsgId,
+            parentId: finalParentId,
+            role: "user",
+            content: trimmedQuestion || (attachments.length ? `[Attached ${attachments.length} file(s)]` : ""),
+            timestamp: formatTimestamp(now)
+        };
+
+        const initialAssistantMessage = {
+            id: aMsgId,
+            parentId: uMsgId,
+            role: "assistant",
+            content: "",
+            timestamp: formatTimestamp(new Date()),
+            confidence: "medium",
+            sources: [],
+            bookmarked: false,
+            reaction: null
+        };
+
+        setStreamingMessageId(aMsgId);
+
+        setActiveChildMap(prev => {
+            const next = { ...prev };
+            if (finalParentId) {
+                next[finalParentId] = uMsgId;
+            } else {
+                next["root"] = uMsgId;
+            }
+            next[uMsgId] = aMsgId;
+            return next;
+        });
+
+        if (!currentThreadId) {
+            const newThread = createBlankThread();
+            currentThreadId = newThread.id;
+            newThread.title = trimmedQuestion ? trimmedQuestion.slice(0, 42) : "New chat";
+            newThread.preview = trimmedQuestion || (attachments.length ? `Attached ${attachments.length} file(s)` : "");
+            newThread.hasFiles = attachments.length > 0;
+            newThread.messages = [userMessage, initialAssistantMessage];
+
+            setThreads((currentThreads) => [newThread, ...currentThreads]);
+            setActiveThreadId(currentThreadId);
+        } else {
+            setThreads((currentThreads) => currentThreads.map((thread) => {
+                if (thread.id !== currentThreadId) {
+                    return thread;
+                }
+
+                const nextTitle = thread.title === "New chat" ? (trimmedQuestion ? trimmedQuestion.slice(0, 42) : "New chat") : thread.title;
+
+                return {
+                    ...thread,
+                    title: nextTitle,
+                    preview: trimmedQuestion || (attachments.length ? `Attached ${attachments.length} file(s)` : ""),
+                    updatedLabel: formatThreadLabel(now),
+                    hasFiles: thread.hasFiles || attachments.length > 0,
+                    messages: [...thread.messages, userMessage, initialAssistantMessage]
+                };
+            }));
+        }
+
+        try {
+            await askEduMate({
+                question: attachments.length ? `${trimmedQuestion}\n\nAttachments: ${attachments.map((file) => file.name).join(", ")}` : trimmedQuestion,
+                conversationId,
+                latitude: overrideCoords?.lat || gpsCoords?.lat,
+                longitude: overrideCoords?.lng || gpsCoords?.lng,
+                signal: controller.signal,
+                userMessageId: uMsgId,
+                assistantMessageId: aMsgId,
+                parentId: finalParentId,
+                onChunk: (event) => {
+                    if (event.type === "chunk") {
+                        finalText += event.content;
+                        setStreamingText((prev) => prev + event.content);
+                    } else if (event.type === "done") {
+                        finalText = event.message || finalText;
+                        setStreamingText("");
+                        setStreamingMessageId(null);
+                        
+                        if (event.conversationId) {
+                            setConversationId(event.conversationId);
+                        }
+                        
+                        setThreads((currentThreads) => currentThreads.map((thread) => {
+                            if (thread.id !== currentThreadId) {
+                                return thread;
+                            }
+                            return {
+                                ...thread,
+                                serverConversationId: event.conversationId || thread.serverConversationId || null,
+                                messages: thread.messages.map((m) => {
+                                    if (m.id === aMsgId) {
+                                        return {
+                                            ...m,
+                                            content: event.message || finalText || m.content,
+                                            sources: event.sources || [],
+                                            confidence: event.confidence || "medium",
+                                            mapData: event.mapData || null,
+                                            requiresLocationPermission: event.requiresLocationPermission || false
+                                        };
+                                    }
+                                    return m;
+                                }),
+                                preview: event.message || thread.preview,
+                                updatedLabel: formatThreadLabel(new Date())
+                            };
+                        }));
+                    } else if (event.type === "error") {
+                        throw new Error(event.message || "An error occurred during generation.");
+                    }
+                }
+            });
+            return finalText;
+        } catch (error) {
+            setStreamingText("");
+            setStreamingMessageId(null);
+            
+            if (error?.name === "AbortError") {
+                setThreads((currentThreads) => currentThreads.map((thread) => {
+                    if (thread.id !== currentThreadId) {
+                        return thread;
+                    }
+
+                    return {
+                        ...thread,
+                        messages: thread.messages.map((m) => {
+                            if (m.id === aMsgId) {
+                                return {
+                                    ...m,
+                                    content: m.content ? `${m.content}\n\n[Generation stopped.]` : "Generation stopped.",
+                                    confidence: "low"
+                                };
+                            }
+                            return m;
+                        })
+                    };
+                }));
+
+                return;
+            }
+
+            setThreads((currentThreads) => currentThreads.map((thread) => {
+                if (thread.id !== currentThreadId) {
+                    return thread;
+                }
+
+                return {
+                    ...thread,
+                    messages: thread.messages.map((m) => {
+                        if (m.id === aMsgId) {
+                            const errorMsg = error?.message || "EduMate is unavailable right now. Please retry.";
+                            return {
+                                ...m,
+                                content: m.content ? `${m.content}\n\n[Error: ${errorMsg}]` : errorMsg,
+                                confidence: "low"
+                            };
+                        }
+                        return m;
+                    })
+                };
+            }));
+        } finally {
+            setLoading(false);
+            abortRef.current = null;
+            setAttachments([]);
+        }
+    }, [activeThreadId, attachments, conversationId, loading, gpsCoords, activeBranchMessages, activeChildMap]);
+
     const visibleMessages = useMemo(() => {
-        if (!activeThread?.messages?.length) {
+        if (!activeBranchMessages.length) {
             return [];
         }
 
         if (!messageSearch.trim()) {
-            return activeThread.messages;
+            return activeBranchMessages;
         }
 
         const query = messageSearch.trim().toLowerCase();
 
-        return activeThread.messages.filter((message) => message.content.toLowerCase().includes(query));
-    }, [activeThread, messageSearch]);
+        return activeBranchMessages.filter((message) => message.content.toLowerCase().includes(query));
+    }, [activeBranchMessages, messageSearch]);
 
     const groupedSections = useMemo(() => {
         const query = messageSearch.trim().toLowerCase();
@@ -343,8 +672,6 @@ function Chat() {
         }
     }, [threads, activeThreadId]);
 
-
-
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
     }, [visibleMessages.length, loading, activeThreadId]);
@@ -367,12 +694,14 @@ function Chat() {
 
     const handleSelectThread = useCallback((threadId) => {
         setActiveThreadId(threadId);
+        const selectedThread = threads.find((thread) => thread.id === threadId);
+        setConversationId(selectedThread?.serverConversationId || null);
         setMessageSearch("");
         setChatSearch("");
         setAttachments([]);
         setInput("");
         abortRef.current?.abort();
-    }, []);
+    }, [threads]);
 
     const handleRenameThread = useCallback((threadId) => {
         const targetThread = threads.find((thread) => thread.id === threadId);
@@ -514,6 +843,29 @@ function Chat() {
         printWindow.print();
     }, [activeThread]);
 
+    const handleExportDocx = useCallback((message) => {
+        const html = `
+            <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+            <head>
+                <title>${activeThread?.title || "EduMate Response"}</title>
+                <style>
+                    body { font-family: Arial, sans-serif; line-height: 1.6; padding: 20px; }
+                    pre { background: #f4f4f5; padding: 12px; border: 1px solid #e4e4e7; font-family: monospace; }
+                </style>
+            </head>
+            <body>
+                <h2>${activeThread?.title || "EduMate Response"}</h2>
+                <div style="font-size: 11pt;">${message.content.replace(/\n/g, "<br/>")}</div>
+            </body>
+            </html>
+        `;
+        downloadTextFile(
+            `${(activeThread?.title || "response").replace(/\s+/g, "-").toLowerCase()}-response.docx`,
+            html,
+            "application/msword"
+        );
+    }, [activeThread]);
+
     const handleStopGenerating = useCallback(() => {
         abortRef.current?.abort();
     }, []);
@@ -573,196 +925,51 @@ function Chat() {
         return fullName.split(/\s+/)[0] || "Raju";
     }, [user]);
 
-    const sendMessage = useCallback(async (question, overrideCoords = null) => {
-        let currentThreadId = activeThreadId;
-        const trimmedQuestion = question.trim();
-        let finalText = "";
+    const handleSwitchBranch = useCallback((parentId, childId) => {
+        setActiveChildMap(prev => ({
+            ...prev,
+            [parentId]: childId
+        }));
+    }, []);
 
-        if ((!trimmedQuestion && attachments.length === 0) || loading) {
-            return;
-        }
+    const handleEditMessage = useCallback(async (msg, newText) => {
+        await sendMessage(newText, null, msg.parentId);
+    }, [sendMessage]);
 
-        setLoading(true);
-        setInput("");
-
-        if (abortRef.current) {
-            abortRef.current.abort();
-        }
-
-        const controller = new AbortController();
-        abortRef.current = controller;
-
-        const now = new Date();
-        const userMessage = {
-            id: safeId("msg"),
-            role: "user",
-            content: trimmedQuestion || (attachments.length ? `[Attached ${attachments.length} file(s)]` : ""),
-            timestamp: formatTimestamp(now)
-        };
-
-        if (!currentThreadId) {
-            const newThread = createBlankThread();
-            currentThreadId = newThread.id;
-            newThread.title = trimmedQuestion ? trimmedQuestion.slice(0, 42) : "New chat";
-            newThread.preview = trimmedQuestion || (attachments.length ? `Attached ${attachments.length} file(s)` : "");
-            newThread.hasFiles = attachments.length > 0;
-            newThread.messages = [userMessage];
-
-            setThreads((currentThreads) => [newThread, ...currentThreads]);
-            setActiveThreadId(currentThreadId);
-        } else {
-            setThreads((currentThreads) => currentThreads.map((thread) => {
-                if (thread.id !== currentThreadId) {
-                    return thread;
-                }
-
-                const nextTitle = thread.title === "New chat" ? (trimmedQuestion ? trimmedQuestion.slice(0, 42) : "New chat") : thread.title;
-
-                return {
-                    ...thread,
-                    title: nextTitle,
-                    preview: trimmedQuestion || (attachments.length ? `Attached ${attachments.length} file(s)` : ""),
-                    updatedLabel: formatThreadLabel(now),
-                    hasFiles: thread.hasFiles || attachments.length > 0,
-                    messages: [...thread.messages, userMessage]
-                };
-            }));
-        }
-
-        const assistantMessageId = safeId("msg");
-        const initialAssistantMessage = {
-            id: assistantMessageId,
-            role: "assistant",
-            content: "",
-            timestamp: formatTimestamp(new Date()),
-            confidence: "medium",
-            sources: [],
-            bookmarked: false,
-            reaction: null
-        };
-
-        setThreads((currentThreads) => currentThreads.map((thread) => {
-            if (thread.id !== currentThreadId) {
-                return thread;
-            }
+    const handleDeleteMessage = useCallback((msg) => {
+        if (!window.confirm("Delete this message and its branch?")) return;
+        
+        setThreads(prevThreads => prevThreads.map(thread => {
+            if (thread.id !== activeThreadId) return thread;
+            
+            const toDelete = new Set([msg.id]);
+            let len;
+            do {
+                len = toDelete.size;
+                thread.messages.forEach(m => {
+                    if (m.parentId && toDelete.has(m.parentId)) {
+                        toDelete.add(m.id);
+                    }
+                });
+            } while (toDelete.size > len);
+            
+            const nextMessages = thread.messages.filter(m => !toDelete.has(m.id));
             return {
                 ...thread,
-                messages: [...thread.messages, initialAssistantMessage]
+                messages: nextMessages
             };
         }));
+    }, [activeThreadId]);
 
-        try {
-            await askEduMate({
-                question: attachments.length ? `${trimmedQuestion}\n\nAttachments: ${attachments.map((file) => file.name).join(", ")}` : trimmedQuestion,
-                conversationId,
-                latitude: overrideCoords?.lat || gpsCoords?.lat,
-                longitude: overrideCoords?.lng || gpsCoords?.lng,
-                signal: controller.signal,
-                onChunk: (event) => {
-                    if (event.type === "chunk") {
-                        finalText += event.content;
-                        setThreads((currentThreads) => currentThreads.map((thread) => {
-                            if (thread.id !== currentThreadId) {
-                                return thread;
-                            }
-                            return {
-                                ...thread,
-                                messages: thread.messages.map((m) => {
-                                    if (m.id === assistantMessageId) {
-                                        return {
-                                            ...m,
-                                            content: m.content + event.content
-                                        };
-                                    }
-                                    return m;
-                                })
-                            };
-                        }));
-                    } else if (event.type === "done") {
-                        finalText = event.message || finalText;
-                        if (event.conversationId) {
-                            setConversationId(event.conversationId);
-                        }
-                        setThreads((currentThreads) => currentThreads.map((thread) => {
-                            if (thread.id !== currentThreadId) {
-                                return thread;
-                            }
-                            return {
-                                ...thread,
-                                messages: thread.messages.map((m) => {
-                                    if (m.id === assistantMessageId) {
-                                        return {
-                                            ...m,
-                                            content: event.message || m.content,
-                                            sources: event.sources || [],
-                                            confidence: event.confidence || "medium",
-                                            mapData: event.mapData || null,
-                                            requiresLocationPermission: event.requiresLocationPermission || false
-                                        };
-                                    }
-                                    return m;
-                                }),
-                                preview: event.message || thread.preview,
-                                updatedLabel: formatThreadLabel(new Date())
-                            };
-                        }));
-                    } else if (event.type === "error") {
-                        throw new Error(event.message || "An error occurred during generation.");
-                    }
-                }
-            });
-            return finalText;
-        } catch (error) {
-            if (error?.name === "AbortError") {
-                setThreads((currentThreads) => currentThreads.map((thread) => {
-                    if (thread.id !== currentThreadId) {
-                        return thread;
-                    }
-
-                    return {
-                        ...thread,
-                        messages: thread.messages.map((m) => {
-                            if (m.id === assistantMessageId) {
-                                return {
-                                    ...m,
-                                    content: m.content ? `${m.content}\n\n[Generation stopped.]` : "Generation stopped.",
-                                    confidence: "low"
-                                };
-                            }
-                            return m;
-                        })
-                    };
-                }));
-
-                return;
-            }
-
-            setThreads((currentThreads) => currentThreads.map((thread) => {
-                if (thread.id !== currentThreadId) {
-                    return thread;
-                }
-
-                return {
-                    ...thread,
-                    messages: thread.messages.map((m) => {
-                        if (m.id === assistantMessageId) {
-                            const errorMsg = error?.message || "EduMate is unavailable right now. Please retry.";
-                            return {
-                                ...m,
-                                content: m.content ? `${m.content}\n\n[Error: ${errorMsg}]` : errorMsg,
-                                confidence: "low"
-                            };
-                        }
-                        return m;
-                    })
-                };
-            }));
-        } finally {
-            setLoading(false);
-            abortRef.current = null;
-            setAttachments([]);
-        }
-    }, [activeThreadId, attachments, conversationId, loading, gpsCoords]);
+    const handlePinMessage = useCallback((msg) => {
+        setThreads(prevThreads => prevThreads.map(thread => {
+            if (thread.id !== activeThreadId) return thread;
+            return {
+                ...thread,
+                messages: thread.messages.map(m => m.id === msg.id ? { ...m, pinned: !m.pinned } : m)
+            };
+        }));
+    }, [activeThreadId]);
 
     const handleLocationAction = useCallback(async (messageId, action) => {
         const thread = threads.find(t => t.id === activeThreadId);
@@ -854,24 +1061,38 @@ function Chat() {
                         </div>
                     ) : (
                         <div className="edu-chat-thread" aria-label="Conversation">
-                            {visibleMessages.map((message, index) => (
-                                <MessageBubble
-                                    key={message.id}
-                                    message={message}
-                                    prevMessage={index > 0 ? visibleMessages[index - 1] : null}
-                                    onCopy={handleCopy}
-                                    onRegenerate={() => {
-                                        const previousUser = [...(activeThread?.messages || [])].reverse().find((entry) => entry.role === "user");
-                                        void sendMessage(previousUser?.content || message.content);
-                                    }}
-                                    onShare={handleShare}
-                                    onBookmark={handleBookmark}
-                                    onRate={handleRate}
-                                    onExportMarkdown={handleExportMarkdown}
-                                    onDownloadPdf={handleDownloadPdf}
-                                    onLocationAction={handleLocationAction}
-                                />
-                            ))}
+                            {visibleMessages.map((message, index) => {
+                                const siblings = activeThread?.messages?.filter(m => m.parentId === message.parentId) || [];
+                                const displayMsg = message.id === streamingMessageId && streamingText ? { ...message, content: streamingText } : message;
+                                return (
+                                    <MessageBubble
+                                        key={message.id}
+                                        message={displayMsg}
+                                        prevMessage={index > 0 ? visibleMessages[index - 1] : null}
+                                        onCopy={handleCopy}
+                                        onRegenerate={() => {
+                                            const userMsg = activeThread?.messages?.find(m => m.id === message.parentId);
+                                            if (userMsg) {
+                                                void sendMessage(userMsg.content, null, userMsg.parentId);
+                                            } else {
+                                                void sendMessage(message.content, null, message.parentId);
+                                            }
+                                        }}
+                                        onShare={handleShare}
+                                        onBookmark={handleBookmark}
+                                        onRate={handleRate}
+                                        onExportMarkdown={handleExportMarkdown}
+                                        onDownloadPdf={handleDownloadPdf}
+                                        onLocationAction={handleLocationAction}
+                                        siblings={siblings}
+                                        onSwitchBranch={handleSwitchBranch}
+                                        onEditMessage={handleEditMessage}
+                                        onDeleteMessage={handleDeleteMessage}
+                                        onPinMessage={handlePinMessage}
+                                        onExportDocx={handleExportDocx}
+                                    />
+                                );
+                            })}
 
                             {loading ? <TypingIndicator /> : null}
                             <div ref={bottomRef} />

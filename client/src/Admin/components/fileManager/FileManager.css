@@ -106,8 +106,8 @@
 
 .document-layout {
     min-width: 0;
+    height: calc(100vh - 80px);
     min-height: 600px;
-    height: auto;
     display: grid;
     grid-template-columns: 216px minmax(0, 1fr);
     border: 1px solid var(--admin-line);

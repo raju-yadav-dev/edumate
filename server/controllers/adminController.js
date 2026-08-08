@@ -40,12 +40,23 @@ const getSupabaseConfig = () => {
 };
 
 const getMongoStorageStats = async () => {
+    let fallbackLimit = 512 * 1024 * 1024; // 512 MB default Atlas limit
+    let total = Number(process.env.MONGODB_STORAGE_LIMIT_BYTES);
+    if (!Number.isFinite(total) || total <= 0) {
+        const totalMB = Number(process.env.MONGODB_STORAGE_LIMIT_MB);
+        if (Number.isFinite(totalMB) && totalMB > 0) {
+            total = totalMB * 1024 * 1024;
+        } else {
+            total = fallbackLimit;
+        }
+    }
+
     if (mongoose.connection.readyState !== 1 || !mongoose.connection.db) {
         return {
             connected: false,
             used: 0,
-            total: toStorageLimit(),
-            remaining: toStorageLimit(),
+            total,
+            remaining: total,
             usage: 0,
             collections: 0,
             documents: 0,
@@ -55,15 +66,6 @@ const getMongoStorageStats = async () => {
 
     try {
         const stats = await mongoose.connection.db.stats();
-        let total = Number(process.env.MONGODB_STORAGE_LIMIT_BYTES);
-        if (!Number.isFinite(total) || total <= 0) {
-            const totalMB = Number(process.env.MONGODB_STORAGE_LIMIT_MB);
-            if (Number.isFinite(totalMB) && totalMB > 0) {
-                total = totalMB * 1024 * 1024;
-            } else {
-                total = toStorageLimit();
-            }
-        }
         const used = Number(stats.storageSize || stats.dataSize || 0) + Number(stats.indexSize || 0);
 
         return {
@@ -83,8 +85,8 @@ const getMongoStorageStats = async () => {
         return {
             connected: false,
             used: 0,
-            total: toStorageLimit(),
-            remaining: toStorageLimit(),
+            total,
+            remaining: total,
             usage: 0,
             collections: 0,
             documents: 0,
@@ -164,6 +166,10 @@ const walkSupabaseStorage = async (config, folder = "") => {
     return { used, files, largestFile };
 };
 
+let cachedSupabaseStats = null;
+let lastSupabaseStatsFetch = 0;
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes cache TTL
+
 const getSupabaseStorageStats = async (fallbackBytes = 0, fallbackCount = 0) => {
     const config = getSupabaseConfig();
 
@@ -181,10 +187,37 @@ const getSupabaseStorageStats = async (fallbackBytes = 0, fallbackCount = 0) => 
         };
     }
 
+    const now = Date.now();
+    if (cachedSupabaseStats && (now - lastSupabaseStatsFetch < CACHE_TTL_MS)) {
+        return cachedSupabaseStats;
+    }
+
     try {
+        if (cachedSupabaseStats) {
+            // Trigger background revalidation (Stale-While-Revalidate)
+            walkSupabaseStorage(config).then(({ used, files, largestFile }) => {
+                cachedSupabaseStats = {
+                    configured: true,
+                    bucket: config.bucket,
+                    quota: config.quota,
+                    used,
+                    remaining: Math.max(config.quota - used, 0),
+                    usage: config.quota ? Math.min((used / config.quota) * 100, 100) : 0,
+                    files,
+                    averageFileSize: files ? used / files : 0,
+                    largestFile
+                };
+                lastSupabaseStatsFetch = Date.now();
+            }).catch((err) => {
+                console.error("Background revalidation of Supabase stats failed:", err);
+            });
+            return cachedSupabaseStats;
+        }
+
+        // Fresh walk on first request
         const { used, files, largestFile } = await walkSupabaseStorage(config);
 
-        return {
+        cachedSupabaseStats = {
             configured: true,
             bucket: config.bucket,
             quota: config.quota,
@@ -195,6 +228,8 @@ const getSupabaseStorageStats = async (fallbackBytes = 0, fallbackCount = 0) => 
             averageFileSize: files ? used / files : 0,
             largestFile
         };
+        lastSupabaseStatsFetch = now;
+        return cachedSupabaseStats;
     } catch (error) {
         console.error("Error fetching Supabase storage stats, using fallbacks:", error);
         return {

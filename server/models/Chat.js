@@ -27,6 +27,14 @@ const sourceSchema = new mongoose.Schema(
 
 const messageSchema = new mongoose.Schema(
     {
+        id: {
+            type: String,
+            default: null
+        },
+        parentId: {
+            type: String,
+            default: null
+        },
         role: {
             type: String,
             enum: ["user", "assistant", "system"],

@@ -7,21 +7,25 @@ export default function StorageMiddleSection({ stats = {} }) {
     const mongo = stats?.mongodb || {};
     const supabase = stats?.supabase || {};
     const qdrant = stats?.qdrant || {};
+    const combined = stats?.combined || {};
 
-    const mongoUsedGB = mongo.used ? (mongo.used / (1024 * 1024 * 1024)).toFixed(1) : "8.1";
-    const mongoTotalGB = mongo.total ? (mongo.total / (1024 * 1024 * 1024)).toFixed(1) : "25.0";
-    const mongoRemainingGB = (parseFloat(mongoTotalGB) - parseFloat(mongoUsedGB)).toFixed(1);
-    const mongoPct = mongo.usage ? Math.round(mongo.usage) : 32;
+    const mongoConnected = mongo.connected;
+    const mongoUsedGB = mongoConnected && mongo.used !== null ? (mongo.used / (1024 * 1024 * 1024)).toFixed(2) : "—";
+    const mongoTotalGB = mongoConnected && mongo.total !== null ? (mongo.total / (1024 * 1024 * 1024)).toFixed(2) : "—";
+    const mongoRemainingGB = mongoConnected && mongo.remaining !== null ? (mongo.remaining / (1024 * 1024 * 1024)).toFixed(2) : "—";
+    const mongoPct = mongoConnected ? Math.round(mongo.usage || 0) : 0;
 
-    const supabaseUsedGB = supabase.used ? (supabase.used / (1024 * 1024 * 1024)).toFixed(1) : "15.4";
-    const supabaseTotalGB = supabase.quota ? (supabase.quota / (1024 * 1024 * 1024)).toFixed(1) : "25.0";
-    const supabaseRemainingGB = (parseFloat(supabaseTotalGB) - parseFloat(supabaseUsedGB)).toFixed(1);
-    const supabasePct = supabase.usage ? Math.round(supabase.usage) : 61;
+    const supabaseConnected = supabase.connected;
+    const supabaseUsedGB = supabaseConnected && supabase.used !== null ? (supabase.used / (1024 * 1024 * 1024)).toFixed(2) : "—";
+    const supabaseTotalGB = supabaseConnected && supabase.quota !== null ? (supabase.quota / (1024 * 1024 * 1024)).toFixed(2) : "—";
+    const supabaseRemainingGB = supabaseConnected && supabase.remaining !== null ? (supabase.remaining / (1024 * 1024 * 1024)).toFixed(2) : "—";
+    const supabasePct = supabaseConnected ? Math.round(supabase.usage || 0) : 0;
 
-    const combinedUsedGB = (parseFloat(mongoUsedGB) + parseFloat(supabaseUsedGB)).toFixed(1);
-    const combinedTotalGB = "50.0";
-    const combinedRemainingGB = (parseFloat(combinedTotalGB) - parseFloat(combinedUsedGB)).toFixed(1);
-    const combinedPct = Math.round((parseFloat(combinedUsedGB) / parseFloat(combinedTotalGB)) * 100) || 47;
+    const combinedConnected = combined.used !== null && combined.total !== null;
+    const combinedUsedGB = combinedConnected ? (combined.used / (1024 * 1024 * 1024)).toFixed(2) : "—";
+    const combinedTotalGB = combinedConnected ? (combined.total / (1024 * 1024 * 1024)).toFixed(2) : "—";
+    const combinedRemainingGB = combinedConnected ? (combined.remaining / (1024 * 1024 * 1024)).toFixed(2) : "—";
+    const combinedPct = combinedConnected ? Math.round(combined.usage || 0) : 0;
 
     // Chart trend points for 7 Days
     const trendPoints = [
@@ -31,7 +35,7 @@ export default function StorageMiddleSection({ stats = {} }) {
         { date: "May 13", val: "22 GB", y: 40 },
         { date: "May 14", val: "19 GB", y: 55 },
         { date: "May 15", val: "21 GB", y: 45 },
-        { date: "May 16", val: `${combinedUsedGB} GB`, y: 30 }
+        { date: "May 16", val: combinedConnected ? `${combinedUsedGB} GB` : "0 GB", y: 30 }
     ];
 
     const pathD = `M 15,100 Q 35,75 60,75 T 105,60 T 150,40 T 195,55 T 240,45 T 285,30`;
@@ -45,8 +49,8 @@ export default function StorageMiddleSection({ stats = {} }) {
                         <Database size={16} className="green-icon" />
                         <strong>MongoDB (Atlas)</strong>
                     </div>
-                    <span className="status-pill healthy">
-                        <span className="dot"></span> Healthy
+                    <span className={`status-pill ${mongoConnected ? "healthy" : "offline"}`}>
+                        <span className="dot"></span> {mongoConnected ? "Healthy" : "Offline"}
                     </span>
                 </div>
 
@@ -64,7 +68,7 @@ export default function StorageMiddleSection({ stats = {} }) {
                                 />
                             </svg>
                             <div className="donut-inner-text">
-                                <strong>{mongoUsedGB} GB</strong>
+                                <strong>{mongoConnected ? `${mongoUsedGB} GB` : "—"}</strong>
                                 <span>Used</span>
                             </div>
                         </div>
@@ -72,10 +76,10 @@ export default function StorageMiddleSection({ stats = {} }) {
                     </div>
 
                     <div className="metrics-list-col">
-                        <div className="m-row"><span>Collections</span> <strong>{mongo.collections || 12}</strong></div>
-                        <div className="m-row"><span>Indexes</span> <strong>{mongo.documents || 23}</strong></div>
-                        <div className="m-row"><span>Storage Used</span> <strong>{mongoUsedGB} GB</strong></div>
-                        <div className="m-row"><span>Remaining</span> <strong>{mongoRemainingGB} GB</strong></div>
+                        <div className="m-row"><span>Collections</span> <strong>{mongoConnected ? mongo.collections : "—"}</strong></div>
+                        <div className="m-row"><span>Documents</span> <strong>{mongoConnected ? mongo.documents : "—"}</strong></div>
+                        <div className="m-row"><span>Storage Used</span> <strong>{mongoConnected ? `${mongoUsedGB} GB` : "—"}</strong></div>
+                        <div className="m-row"><span>Remaining</span> <strong>{mongoConnected ? `${mongoRemainingGB} GB` : "—"}</strong></div>
                     </div>
                 </div>
             </div>
@@ -87,8 +91,8 @@ export default function StorageMiddleSection({ stats = {} }) {
                         <HardDrive size={16} className="blue-icon" />
                         <strong>Supabase Storage</strong>
                     </div>
-                    <span className="status-pill healthy">
-                        <span className="dot"></span> Healthy
+                    <span className={`status-pill ${supabaseConnected ? "healthy" : "offline"}`}>
+                        <span className="dot"></span> {supabaseConnected ? "Healthy" : "Offline"}
                     </span>
                 </div>
 
@@ -106,7 +110,7 @@ export default function StorageMiddleSection({ stats = {} }) {
                                 />
                             </svg>
                             <div className="donut-inner-text">
-                                <strong>{supabaseUsedGB} GB</strong>
+                                <strong>{supabaseConnected ? `${supabaseUsedGB} GB` : "—"}</strong>
                                 <span>Used</span>
                             </div>
                         </div>
@@ -114,10 +118,10 @@ export default function StorageMiddleSection({ stats = {} }) {
                     </div>
 
                     <div className="metrics-list-col">
-                        <div className="m-row"><span>Buckets</span> <strong>4</strong></div>
-                        <div className="m-row"><span>Files</span> <strong>{supabase.files || 1245}</strong></div>
-                        <div className="m-row"><span>Storage Used</span> <strong>{supabaseUsedGB} GB</strong></div>
-                        <div className="m-row"><span>Remaining</span> <strong>{supabaseRemainingGB} GB</strong></div>
+                        <div className="m-row"><span>Buckets</span> <strong>{supabaseConnected ? supabase.bucket ? 1 : 0 : "—"}</strong></div>
+                        <div className="m-row"><span>Files</span> <strong>{supabaseConnected ? supabase.files : "—"}</strong></div>
+                        <div className="m-row"><span>Storage Used</span> <strong>{supabaseConnected ? `${supabaseUsedGB} GB` : "—"}</strong></div>
+                        <div className="m-row"><span>Remaining</span> <strong>{supabaseConnected ? `${supabaseRemainingGB} GB` : "—"}</strong></div>
                     </div>
                 </div>
             </div>
@@ -133,8 +137,8 @@ export default function StorageMiddleSection({ stats = {} }) {
 
                 <div className="combined-body">
                     <div className="combined-headline">
-                        <h2>{combinedUsedGB} GB</h2>
-                        <span>of {combinedTotalGB} GB used</span>
+                        <h2>{combinedConnected ? `${combinedUsedGB} GB` : "—"}</h2>
+                        <span>of {combinedConnected ? `${combinedTotalGB} GB` : "—"} used</span>
                         <span className="pct-badge">{combinedPct}% Used</span>
                     </div>
 
@@ -147,15 +151,15 @@ export default function StorageMiddleSection({ stats = {} }) {
                     <div className="combined-legend">
                         <div className="l-item">
                             <div className="l-left"><span className="dot green"></span> MongoDB (Atlas)</div>
-                            <span className="l-val">{mongoUsedGB} GB ({mongoPct}%)</span>
+                            <span className="l-val">{mongoConnected ? `${mongoUsedGB} GB (${mongoPct}%)` : "—"}</span>
                         </div>
                         <div className="l-item">
                             <div className="l-left"><span className="dot blue"></span> Supabase Storage</div>
-                            <span className="l-val">{supabaseUsedGB} GB ({supabasePct}%)</span>
+                            <span className="l-val">{supabaseConnected ? `${supabaseUsedGB} GB (${supabasePct}%)` : "—"}</span>
                         </div>
                         <div className="l-item">
                             <div className="l-left"><span className="dot gray"></span> Remaining</div>
-                            <span className="l-val">{combinedRemainingGB} GB ({100 - combinedPct}%)</span>
+                            <span className="l-val">{combinedConnected ? `${combinedRemainingGB} GB (${100 - combinedPct}%)` : "—"}</span>
                         </div>
                     </div>
                 </div>

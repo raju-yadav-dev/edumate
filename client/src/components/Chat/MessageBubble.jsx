@@ -5,7 +5,7 @@ import rehypeKatex from "rehype-katex";
 import rehypeHighlight from "rehype-highlight";
 import { useState } from "react";
 
-import { Bot, UserRound, MapPin, Navigation } from "lucide-react";
+import { Bot, UserRound, MapPin, Navigation, ChevronLeft, ChevronRight, Edit2, Trash, Pin } from "lucide-react";
 
 import ConfidenceBadge from "./ConfidenceBadge";
 import CitationCard from "./CitationCard";
@@ -251,9 +251,17 @@ function MessageBubble({
     onRate,
     onExportMarkdown,
     onDownloadPdf,
-    onLocationAction
+    onLocationAction,
+    siblings = [],
+    onSwitchBranch,
+    onEditMessage,
+    onDeleteMessage,
+    onPinMessage,
+    onExportDocx
 }) {
     const isUser = message.role === "user";
+    const [isEditing, setIsEditing] = useState(false);
+    const [editText, setEditText] = useState(message.content);
     const showCitations = (() => {
         if (!Array.isArray(message.sources) || message.sources.length === 0) {
             return false;
@@ -308,17 +316,144 @@ function MessageBubble({
                 {isUser ? <UserRound size={16} /> : <Bot size={16} />}
             </div>
 
-            <div className="edu-chat-message-body">
+            <div className="edu-chat-message-body" id={`msg-${message.id}`}>
                 <div className="edu-chat-message-panel">
-                    <div className="edu-chat-message-meta">
+                    <div className="edu-chat-message-meta" style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
                         <strong>{isUser ? "You" : "EduMate"}</strong>
                         <span>{message.timestamp}</span>
                         {message.confidence ? <ConfidenceBadge value={message.confidence} /> : null}
                         {message.bookmarked ? <span className="edu-chat-bookmark-pill">Bookmarked</span> : null}
                         {message.reaction ? <span className={`edu-chat-reaction-pill edu-chat-reaction-${message.reaction}`}>{message.reaction}</span> : null}
+                        {message.pinned ? <span className="edu-chat-pinned-pill" style={{ background: "var(--warning)", color: "#000", padding: "1px 6px", borderRadius: "8px", fontSize: "11px" }}>Pinned</span> : null}
+
+                        {/* Sibling Branch Switcher */}
+                        {siblings && siblings.length > 1 && (
+                            <div className="branch-selector" style={{ display: "inline-flex", alignItems: "center", gap: "4px", background: "rgba(0,0,0,0.05)", padding: "2px 6px", borderRadius: "12px", fontSize: "11px", marginLeft: "8px" }}>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const idx = siblings.findIndex(s => s.id === message.id);
+                                        if (idx > 0 && onSwitchBranch) {
+                                            onSwitchBranch(message.parentId || "root", siblings[idx - 1].id);
+                                        }
+                                    }}
+                                    disabled={siblings.findIndex(s => s.id === message.id) <= 0}
+                                    style={{ border: "none", background: "none", cursor: "pointer", display: "flex", alignItems: "center", padding: "0" }}
+                                    aria-label="Previous version"
+                                >
+                                    <ChevronLeft size={12} />
+                                </button>
+                                <span>{siblings.findIndex(s => s.id === message.id) + 1}/{siblings.length}</span>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const idx = siblings.findIndex(s => s.id === message.id);
+                                        if (idx !== -1 && idx < siblings.length - 1 && onSwitchBranch) {
+                                            onSwitchBranch(message.parentId || "root", siblings[idx + 1].id);
+                                        }
+                                    }}
+                                    disabled={siblings.findIndex(s => s.id === message.id) >= siblings.length - 1}
+                                    style={{ border: "none", background: "none", cursor: "pointer", display: "flex", alignItems: "center", padding: "0" }}
+                                    aria-label="Next version"
+                                >
+                                    <ChevronRight size={12} />
+                                </button>
+                            </div>
+                        )}
+
+                        {/* Quick Actions (Edit, Pin, Delete) */}
+                        <div style={{ marginLeft: "auto", display: "flex", gap: "6px", opacity: 0.7 }}>
+                            {isUser && !isEditing && onEditMessage && (
+                                <button
+                                    type="button"
+                                    onClick={() => setIsEditing(true)}
+                                    style={{ border: "none", background: "none", cursor: "pointer", padding: "2px", display: "flex", alignItems: "center" }}
+                                    title="Edit query"
+                                >
+                                    <Edit2 size={12} />
+                                </button>
+                            )}
+                            {onPinMessage && (
+                                <button
+                                    type="button"
+                                    onClick={() => onPinMessage(message)}
+                                    style={{ border: "none", background: "none", cursor: "pointer", padding: "2px", display: "flex", alignItems: "center" }}
+                                    title={message.pinned ? "Unpin message" : "Pin message"}
+                                >
+                                    <Pin size={12} style={message.pinned ? { fill: "currentColor" } : {}} />
+                                </button>
+                            )}
+                            {onDeleteMessage && (
+                                <button
+                                    type="button"
+                                    onClick={() => onDeleteMessage(message)}
+                                    style={{ border: "none", background: "none", cursor: "pointer", padding: "2px", display: "flex", alignItems: "center", color: "var(--danger)" }}
+                                    title="Delete message"
+                                >
+                                    <Trash size={12} />
+                                </button>
+                            )}
+                        </div>
                     </div>
 
-                    <div className={`edu-chat-markdown ${isUser ? "edu-chat-markdown-user" : ""}`}>
+                    {isEditing ? (
+                        <div className="edu-chat-message-edit-container" style={{ marginTop: "8px", width: "100%" }}>
+                            <textarea
+                                value={editText}
+                                onChange={(e) => setEditText(e.target.value)}
+                                style={{
+                                    width: "100%",
+                                    minHeight: "60px",
+                                    padding: "8px",
+                                    borderRadius: "8px",
+                                    border: "1px solid var(--border)",
+                                    background: "var(--bg)",
+                                    color: "var(--text)",
+                                    fontFamily: "inherit",
+                                    fontSize: "14px"
+                                }}
+                            />
+                            <div style={{ display: "flex", gap: "8px", marginTop: "6px" }}>
+                                <button
+                                    onClick={() => {
+                                        if (editText.trim() && editText.trim() !== message.content) {
+                                            onEditMessage(message, editText.trim());
+                                        }
+                                        setIsEditing(false);
+                                    }}
+                                    style={{
+                                        padding: "4px 10px",
+                                        background: "var(--primary)",
+                                        color: "var(--on-primary)",
+                                        border: "none",
+                                        borderRadius: "6px",
+                                        fontSize: "12px",
+                                        fontWeight: "500",
+                                        cursor: "pointer"
+                                    }}
+                                >
+                                    Save & Submit
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        setEditText(message.content);
+                                        setIsEditing(false);
+                                    }}
+                                    style={{
+                                        padding: "4px 10px",
+                                        background: "none",
+                                        border: "1px solid var(--border)",
+                                        borderRadius: "6px",
+                                        fontSize: "12px",
+                                        cursor: "pointer"
+                                    }}
+                                >
+                                    Cancel
+                                </button>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className={`edu-chat-markdown ${isUser ? "edu-chat-markdown-user" : ""}`}>
                         <ReactMarkdown
                             remarkPlugins={[remarkGfm, remarkMath]}
                             rehypePlugins={[rehypeKatex, rehypeHighlight]}
@@ -354,7 +489,7 @@ function MessageBubble({
                         >
                             {displayContent}
                         </ReactMarkdown>
-                    </div>
+                    </div>)}
 
                     {/* Interactive Map Block */}
                     {!isUser && message.mapData && (
@@ -385,6 +520,7 @@ function MessageBubble({
                             onRate={onRate}
                             onExportMarkdown={onExportMarkdown}
                             onDownloadPdf={onDownloadPdf}
+                            onExportDocx={onExportDocx}
                         />
                     ) : null}
                 </div>

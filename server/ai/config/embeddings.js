@@ -227,22 +227,38 @@ const embedTexts = async (texts) => {
                 outputDimensionality: 768
             }));
 
-            const response = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:batchEmbedContents?key=${apiKey}`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ requests })
-            });
+            try {
+                const response = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:batchEmbedContents?key=${apiKey}`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ requests })
+                });
 
-            const payload = await response.json();
-            if (!response.ok) {
-                throw new Error(payload.error?.message || `Gemini Batch Embedding API error: ${response.status}`);
-            }
+                const payload = await response.json();
+                if (!response.ok) {
+                    throw new Error(payload.error?.message || `Gemini Batch Embedding API error: ${response.status}`);
+                }
 
-            const embeddings = payload.embeddings;
-            if (!Array.isArray(embeddings)) {
-                throw new Error("Gemini Batch Embedding did not return an array of embeddings.");
+                const embeddings = payload.embeddings;
+                if (!Array.isArray(embeddings)) {
+                    throw new Error("Gemini Batch Embedding did not return an array of embeddings.");
+                }
+                results.push(...embeddings.map((emb) => emb.values));
+            } catch (batchError) {
+                console.warn(`[Embedding API] Gemini batch request failed. Falling back to individual requests. Error: ${batchError.message}`);
+                // Fallback to sequential individual embeds for this subBatch
+                for (const text of subBatch) {
+                    try {
+                        const emb = await embedText(text);
+                        results.push(emb);
+                    } catch (singleError) {
+                        console.error(`[Embedding API] Individual embedding failed for text snippet: ${text.substring(0, 50)}... Error: ${singleError.message}`);
+                        // Push a zero vector of dimension 768 to ensure array lengths align
+                        results.push(new Array(768).fill(0));
+                    }
+                    await sleep(100);
+                }
             }
-            results.push(...embeddings.map((emb) => emb.values));
         }
 
         return results;

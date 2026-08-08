@@ -18,7 +18,8 @@ function FolderNode({
     folderDocs,
     loading,
     selectedDocument,
-    onMoveFolder
+    onMoveFolder,
+    storageStats
 }) {
     const isExpanded = !!expandedFolders[folder.value];
     const isLoading = !!loading[folder.value];
@@ -26,6 +27,21 @@ function FolderNode({
     const subfolders = folders
         .filter((f) => f.parent === folder.value)
         .sort((a, b) => (a.label || "").localeCompare(b.label || ""));
+
+    const hasFailedDoc = (folderVal) => {
+        if (storageStats?.categoryCounts?.[folderVal]?.failed > 0) {
+            return true;
+        }
+        const children = folders.filter((f) => f.parent === folderVal);
+        for (const child of children) {
+            if (hasFailedDoc(child.value)) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    const isFailedFolder = hasFailedDoc(folder.value);
 
     return (
         <div className="folder-node">
@@ -51,8 +67,8 @@ function FolderNode({
                     className="folder-item"
                     onClick={() => onSelectFolder(folder.value)}
                 >
-                    <div className="folder-info">
-                        <Folder size={18} />
+                    <div className="folder-info" style={isFailedFolder ? { color: "var(--danger, #ef4444)" } : {}}>
+                        <Folder size={18} style={isFailedFolder ? { color: "var(--danger, #ef4444)" } : {}} />
                         <span>{folder.label}</span>
                     </div>
                 </button>
@@ -121,6 +137,7 @@ function FolderNode({
                             loading={loading}
                             selectedDocument={selectedDocument}
                             onMoveFolder={onMoveFolder}
+                            storageStats={storageStats}
                         />
                     ))}
 
@@ -133,20 +150,23 @@ function FolderNode({
                     ) : docs.length === 0 && subfolders.length === 0 ? (
                         <div className="folder-child empty">No documents</div>
                     ) : (
-                        docs.map((doc) => (
-                            <button
-                                key={doc._id}
-                                type="button"
-                                className={`folder-child-doc ${selectedDocument?._id === doc._id ? "active" : ""
-                                    }`}
-                                onClick={() => {
-                                    onSelectTreeDoc?.(doc);
-                                }}
-                            >
-                                <File size={12} className="doc-icon" />
-                                <span>{doc.title || doc.originalName}</span>
-                            </button>
-                        ))
+                        docs.map((doc) => {
+                            const isFailed = doc.embeddingStatus === "failed";
+                            return (
+                                <button
+                                    key={doc._id}
+                                    type="button"
+                                    className={`folder-child-doc ${selectedDocument?._id === doc._id ? "active" : ""} ${isFailed ? "failed" : ""}`}
+                                    style={isFailed ? { color: "var(--danger, #ef4444)" } : {}}
+                                    onClick={() => {
+                                        onSelectTreeDoc?.(doc);
+                                    }}
+                                >
+                                    <File size={12} className="doc-icon" style={isFailed ? { color: "var(--danger, #ef4444)" } : {}} />
+                                    <span>{doc.title || doc.originalName}</span>
+                                </button>
+                            );
+                        })
                     )}
                 </div>
             )}
@@ -166,7 +186,8 @@ function FolderTree(props) {
         onContextMenu,
         selectedDocument,
         onSelectTreeDoc,
-        onMoveFolder
+        onMoveFolder,
+        storageStats
     } = props;
 
     const [expandedFolders, setExpandedFolders] = useState({});
@@ -240,6 +261,7 @@ function FolderTree(props) {
                         loading={loading}
                         selectedDocument={selectedDocument}
                         onMoveFolder={onMoveFolder}
+                        storageStats={storageStats}
                     />
                 ))}
             </div>

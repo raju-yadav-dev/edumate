@@ -109,26 +109,6 @@ function Sidebar({
                         <Database />
                         <span>Data Tools</span>
                     </button>
-
-                    <button
-                        type="button"
-                        className={activeSection === "crawler" ? "active" : ""}
-                        onClick={() => setActiveSection("crawler")}
-                        title="Web Crawler"
-                    >
-                        <Globe />
-                        <span>Web Crawler</span>
-                    </button>
-
-                    <button
-                        type="button"
-                        className={activeSection === "knowledge_sources" ? "active" : ""}
-                        onClick={() => setActiveSection("knowledge_sources")}
-                        title="Knowledge Sources"
-                    >
-                        <BookOpen />
-                        <span>Knowledge Sources</span>
-                    </button>
                 </nav>
 
                 <p className="nav-section-label">System</p>

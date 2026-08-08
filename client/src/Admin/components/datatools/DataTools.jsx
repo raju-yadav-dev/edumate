@@ -4,10 +4,13 @@ import DatabaseHealth from "./DatabaseHealth";
 import DocumentsOverview from "./DocumentsOverview";
 import RecentOperations from "./RecentOperations";
 import ToolActions from "./ToolActions";
+import CrawlerManager from "../../../crawler/CrawlerManager";
+import KnowledgeSources from "../knowledge/KnowledgeSources";
 import "./DataTools.css";
 
-export default function DataTools({ setActiveSection, documents = [], storageStats = {}, users = [], onRefresh }) {
+export default function DataTools({ setActiveSection, documents = [], storageStats = {}, users = [], onRefresh, user, setNotice, setError }) {
     const [operations, setOperations] = useState(null);
+    const [activeTab, setActiveTab] = useState("overview");
 
     const handleOperationComplete = (newOp) => {
         setOperations((prevOps) => {
@@ -87,27 +90,77 @@ export default function DataTools({ setActiveSection, documents = [], storageSta
 
     return (
         <div className="datatools-page-wrapper">
-            {/* Top 4 Stat Cards Row - Dynamic from storageStats & documents */}
-            <DataStatCards documents={documents} storageStats={storageStats} />
-
-            {/* Main Content Grid: Left Column & Right Column */}
-            <div className="datatools-two-col-layout">
-                {/* Left Side: DB Health, Docs Overview, Recent Operations */}
-                <div className="datatools-left-col">
-                    <DatabaseHealth storageStats={storageStats} />
-                    <DocumentsOverview documents={documents} storageStats={storageStats} />
-                    <RecentOperations operations={operations} setOperations={setOperations} />
-                </div>
-
-                {/* Right Side: Tool Actions */}
-                <div className="datatools-right-col">
-                    <ToolActions
-                        onOperationComplete={handleOperationComplete}
-                        documents={documents}
-                        onRefresh={onRefresh}
-                    />
+            <div className="datatools-page-header">
+                <div>
+                    <h2 className="datatools-main-title">Data Tools</h2>
+                    <p className="datatools-main-subtitle">Manage vector search, indexing, data scraping, and knowledge sources</p>
                 </div>
             </div>
+
+            <div className="datatools-tabs">
+                <button
+                    type="button"
+                    className={`datatools-tab-btn ${activeTab === "overview" ? "active" : ""}`}
+                    onClick={() => setActiveTab("overview")}
+                >
+                    Overview
+                </button>
+                <button
+                    type="button"
+                    className={`datatools-tab-btn ${activeTab === "crawler" ? "active" : ""}`}
+                    onClick={() => setActiveTab("crawler")}
+                >
+                    Web Crawler
+                </button>
+                <button
+                    type="button"
+                    className={`datatools-tab-btn ${activeTab === "knowledge" ? "active" : ""}`}
+                    onClick={() => setActiveTab("knowledge")}
+                >
+                    Knowledge Sources
+                </button>
+            </div>
+
+            {activeTab === "overview" && (
+                <>
+                    {/* Top 4 Stat Cards Row - Dynamic from storageStats & documents */}
+                    <DataStatCards documents={documents} storageStats={storageStats} />
+
+                    {/* Main Content Grid: Left Column & Right Column */}
+                    <div className="datatools-two-col-layout">
+                        {/* Left Side: DB Health, Docs Overview, Recent Operations */}
+                        <div className="datatools-left-col">
+                            <DatabaseHealth storageStats={storageStats} />
+                            <DocumentsOverview documents={documents} storageStats={storageStats} />
+                            <RecentOperations operations={operations} setOperations={setOperations} />
+                        </div>
+
+                        {/* Right Side: Tool Actions */}
+                        <div className="datatools-right-col">
+                            <ToolActions
+                                onOperationComplete={handleOperationComplete}
+                                documents={documents}
+                                onRefresh={onRefresh}
+                            />
+                        </div>
+                    </div>
+                </>
+            )}
+
+            {activeTab === "crawler" && (
+                <CrawlerManager
+                    user={user}
+                    setNotice={setNotice}
+                    setError={setError}
+                />
+            )}
+
+            {activeTab === "knowledge" && (
+                <KnowledgeSources
+                    setNotice={setNotice}
+                    setError={setError}
+                />
+            )}
         </div>
     );
 }

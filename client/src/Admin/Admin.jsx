@@ -217,7 +217,7 @@ function Admin({ mode = "auto" }) {
     const [savingKeys, setSavingKeys] = useState(false);
     const [notice, setNotice] = useState("");
     const [error, setError] = useState("");
-    const [storageStats, setStorageStats] = useState(DEMO_STORAGE_STATS);
+    const [storageStats, setStorageStats] = useState(null);
     const [selectedDocument, setSelectedDocument] = useState(null);
     const [selectedIds, setSelectedIds] = useState([]);
     const [clipboard, setClipboard] = useState({ action: null, fileIds: [], sourceCategory: null });
@@ -390,7 +390,7 @@ function Admin({ mode = "auto" }) {
         } catch (statsError) {
             console.error("Failed to load storage stats:", statsError);
             handleAuthError(statsError);
-            setStorageStats(DEMO_STORAGE_STATS);
+            setStorageStats(null);
         }
     }, [handleAuthError]);
 
@@ -456,28 +456,30 @@ function Admin({ mode = "auto" }) {
     const stats = [
         {
             label: "Documents",
-            value: knowledgeStats.totalDocuments ?? documents.length,
+            value: knowledgeStats.totalDocuments !== undefined && knowledgeStats.totalDocuments !== null ? knowledgeStats.totalDocuments : (documents.length || "-"),
             note: "Total files",
             tone: "gold",
             Icon: Folder
         },
         {
             label: "Pages",
-            value: knowledgeStats.totalPages ?? 0,
+            value: knowledgeStats.totalPages !== undefined && knowledgeStats.totalPages !== null ? knowledgeStats.totalPages : "-",
             note: "Indexed pages",
             tone: "blue",
             Icon: FileText
         },
         {
             label: "Chunks",
-            value: knowledgeStats.totalChunks ?? 0,
+            value: knowledgeStats.totalChunks !== undefined && knowledgeStats.totalChunks !== null ? knowledgeStats.totalChunks : "-",
             note: "Qdrant vectors",
             tone: "violet",
             Icon: Database
         },
         {
             label: "Users",
-            value: (storageStats?.userCount || 0) + (storageStats?.adminCount || 0) || users.length,
+            value: storageStats?.userCount !== undefined || storageStats?.adminCount !== undefined 
+                ? (Number(storageStats?.userCount || 0) + Number(storageStats?.adminCount || 0)) 
+                : (users.length || "-"),
             note: "Active users",
             tone: "rose",
             Icon: UserRoundCheck
@@ -491,34 +493,71 @@ function Admin({ mode = "auto" }) {
         },
         {
             label: "Failed Jobs",
-            value: knowledgeStats.failedDocuments ?? 0,
+            value: knowledgeStats.failedDocuments !== undefined && knowledgeStats.failedDocuments !== null ? knowledgeStats.failedDocuments : "-",
             note: "In queue",
             tone: "danger",
             Icon: AlertTriangle
         }
     ];
 
-    function handleUploadFile(file) {
-        if (!file) {
+    async function getFilesFromEntry(entry) {
+        let files = [];
+        if (entry.isFile) {
+            const file = await new Promise((resolve) => entry.file(resolve));
+            files.push(file);
+        } else if (entry.isDirectory) {
+            const dirReader = entry.createReader();
+            const entries = await new Promise((resolve) => {
+                dirReader.readEntries(resolve);
+            });
+            for (const ent of entries) {
+                const subFiles = await getFilesFromEntry(ent);
+                files = [...files, ...subFiles];
+            }
+        }
+        return files;
+    }
+
+    async function handleUploadFiles(selectedFiles) {
+        if (!selectedFiles || selectedFiles.length === 0) {
             return;
         }
 
-        if (file.type !== "application/pdf" || !file.name.toLowerCase().endsWith(".pdf")) {
-            setError("Only PDF files can be uploaded.");
-            return;
+        const allowedExtensions = [
+            ".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx",
+            ".csv", ".txt", ".md", ".markdown", ".json", ".xml",
+            ".png", ".jpg", ".jpeg", ".webp", ".gif", ".zip"
+        ];
+
+        const validFiles = [];
+        const invalidNames = [];
+
+        for (const file of selectedFiles) {
+            const ext = file.name.substring(file.name.lastIndexOf(".")).toLowerCase();
+            if (!allowedExtensions.includes(ext)) {
+                invalidNames.push(file.name);
+                continue;
+            }
+            if (file.size > 100 * MB) {
+                setError(`File ${file.name} exceeds the 100 MB limit.`);
+                return;
+            }
+            validFiles.push(file);
         }
 
-        if (file.size > 50 * MB) {
-            setError("PDF uploads are limited to 50 MB.");
-            return;
+        if (invalidNames.length > 0) {
+            setError(`Unsupported formats for: ${invalidNames.join(", ")}`);
         }
 
-        setUpload((current) => ({
-            ...current,
-            category: activeFolder,
-            title: current.title || file.name.replace(/\.pdf$/i, ""),
-            file
-        }));
+        if (validFiles.length > 0) {
+            setUpload((current) => ({
+                ...current,
+                category: activeFolder,
+                title: current.title || validFiles[0].name.substring(0, validFiles[0].name.lastIndexOf(".")),
+                file: validFiles[0],
+                files: validFiles
+            }));
+        }
     }
 
     function handleUploadDragOver(event) {
@@ -530,12 +569,31 @@ function Admin({ mode = "auto" }) {
         setIsDropActive(false);
     }
 
-    function handleUploadDrop(event) {
+    async function handleUploadDrop(event) {
         event.preventDefault();
         setIsDropActive(false);
 
-        const file = event.dataTransfer.files?.[0];
-        handleUploadFile(file);
+        const items = event.dataTransfer.items;
+        let files = [];
+        if (items) {
+            for (let i = 0; i < items.length; i++) {
+                const item = items[i];
+                if (typeof item.webkitGetAsEntry === "function") {
+                    const entry = item.webkitGetAsEntry();
+                    if (entry) {
+                        const entryFiles = await getFilesFromEntry(entry);
+                        files = [...files, ...entryFiles];
+                    }
+                } else {
+                    const file = item.getAsFile();
+                    if (file) files.push(file);
+                }
+            }
+        } else {
+            files = Array.from(event.dataTransfer.files || []);
+        }
+
+        await handleUploadFiles(files);
     }
 
     async function handleAdminLogin(event) {
@@ -580,8 +638,10 @@ function Admin({ mode = "auto" }) {
     async function submitUpload(event) {
         event.preventDefault();
 
-        if (!upload.file) {
-            setError("Choose a file first.");
+        const filesToUpload = upload.files && upload.files.length > 0 ? upload.files : (upload.file ? [upload.file] : []);
+
+        if (filesToUpload.length === 0) {
+            setError("Choose file(s) first.");
             return;
         }
 
@@ -589,14 +649,35 @@ function Admin({ mode = "auto" }) {
             setBusy(true);
             setError("");
             setUploadProgress(0);
-            await uploadAdminDocument(upload, (percent) => {
-                setUploadProgress(percent);
-            });
-            setNotice("File uploaded successfully.");
+
+            const progressTracker = {};
+            const updateOverallProgress = (fileName, percent) => {
+                progressTracker[fileName] = percent;
+                const totalPercent = Object.values(progressTracker).reduce((sum, val) => sum + val, 0);
+                const avgPercent = Math.round(totalPercent / filesToUpload.length);
+                setUploadProgress(avgPercent);
+            };
+
+            await Promise.all(
+                filesToUpload.map(async (file) => {
+                    const uploadPayload = {
+                        ...upload,
+                        title: file.name.substring(0, file.name.lastIndexOf(".")),
+                        file
+                    };
+                    progressTracker[file.name] = 0;
+                    await uploadAdminDocument(uploadPayload, (percent) => {
+                        updateOverallProgress(file.name, percent);
+                    });
+                })
+            );
+
+            setNotice(`Uploaded ${filesToUpload.length} file(s) successfully.`);
             setUpload({
                 title: "",
                 category: activeFolder,
                 file: null,
+                files: [],
                 institution: "",
                 department: "",
                 version: "1",
@@ -605,7 +686,7 @@ function Admin({ mode = "auto" }) {
             await loadDocuments();
             await loadStorageStats();
         } catch (uploadError) {
-            setError(uploadError.message || "Unable to upload file.");
+            setError(uploadError.message || "Unable to upload file(s).");
         } finally {
             setBusy(false);
             setUploadProgress(null);
@@ -1275,7 +1356,7 @@ function Admin({ mode = "auto" }) {
                             onDrop={handleUploadDrop}
                             onDragOver={handleUploadDragOver}
                             onDragLeave={handleUploadDragLeave}
-                            onFile={handleUploadFile}
+                            onFile={handleUploadFiles}
                             onSubmit={submitUpload}
                             onRefresh={refreshSection}
                             onReset={handleReset}
@@ -1321,6 +1402,9 @@ function Admin({ mode = "auto" }) {
                         storageStats={storageStats}
                         users={users}
                         onRefresh={refreshSection}
+                        user={adminUser}
+                        setNotice={setNotice}
+                        setError={setError}
                     />
                 ) : null}
 
@@ -1346,20 +1430,7 @@ function Admin({ mode = "auto" }) {
                     />
                 ) : null}
 
-                {activeSection === "crawler" ? (
-                    <CrawlerManager
-                        user={adminUser}
-                        setNotice={setNotice}
-                        setError={setError}
-                    />
-                ) : null}
 
-                {activeSection === "knowledge_sources" ? (
-                    <KnowledgeSources
-                        setNotice={setNotice}
-                        setError={setError}
-                    />
-                ) : null}
 
                 <div className="notification-banner">
                     {notice ? <div className="status-pill success">{notice}</div> : null}

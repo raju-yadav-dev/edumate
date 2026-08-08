@@ -34,19 +34,26 @@
 .file-rows {
     min-height: 0;
     overflow-x: auto;
-    /*overflow-y: scroll;
     scrollbar-width: thin;
-    scrollbar-color: rgba(168, 179, 207, 0.32) transparent;*/
+    scrollbar-color: rgba(168, 179, 207, 0.28) transparent;
 }
 
 .file-rows::-webkit-scrollbar {
     width: 8px;
     height: 8px;
 }
+ 
+.file-rows::-webkit-scrollbar-track {
+    background: transparent;
+}
 
 .file-rows::-webkit-scrollbar-thumb {
     border-radius: 999px;
     background: rgba(168, 179, 207, 0.28);
+}
+
+.file-rows::-webkit-scrollbar-thumb:hover {
+    background: rgba(168, 179, 207, 0.45);
 }
 
 .file-row {
@@ -226,6 +233,8 @@
 
 .file-rows {
     overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(168, 179, 207, 0.28) transparent;
 }
 
 .table-head,

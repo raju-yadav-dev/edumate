@@ -32,59 +32,67 @@ const percent = (used, total) => {
 const normalizeStorageStats = (stats = {}) => {
     const limit = Number(stats.limitBytes || 0);
 
-    // MongoDB normalization
-    const mongoUsed = Number(stats.mongodb?.used || stats.mongodbBytes || stats.dataBytes || 0);
-    const mongoTotal = Number(stats.mongodb?.total || stats.mongodbStorageSize || stats.mongodbTotalBytes || limit);
+    // MongoDB connection status & normalization
+    const mongoConnected = stats.mongodb?.connected ?? (stats.systemStatus?.mongodb === "connected" || (stats.mongodb && Object.keys(stats.mongodb).length > 0));
+    const mongoUsed = mongoConnected ? Number(stats.mongodb?.used ?? stats.mongodbBytes ?? stats.dataBytes ?? 0) : null;
+    const mongoTotal = mongoConnected ? Number(stats.mongodb?.total ?? stats.mongodbStorageSize ?? stats.mongodbTotalBytes ?? limit) : null;
 
-    // Supabase normalization
-    const supabaseUsed = Number(stats.supabase?.used || stats.supabaseBytes || stats.documentBytes || 0);
-    const supabaseQuota = Number(stats.supabase?.quota || stats.supabaseQuotaBytes || limit);
+    // Supabase connection status & normalization
+    const supabaseConfigured = stats.supabaseConfigured !== false && stats.supabase?.configured !== false;
+    const supabaseConnected = supabaseConfigured && (stats.systemStatus?.supabase === "connected" || (stats.supabase && Object.keys(stats.supabase).length > 0));
+    const supabaseUsed = supabaseConnected ? Number(stats.supabase?.used ?? stats.supabaseBytes ?? stats.documentBytes ?? 0) : null;
+    const supabaseQuota = supabaseConnected ? Number(stats.supabase?.quota ?? stats.supabaseQuotaBytes ?? limit) : null;
 
-    // Qdrant normalization & estimated byte usage (4KB per vector points/embeddings)
-    const qdrantVectors = Number(stats.qdrant?.vectors || stats.knowledgeBase?.totalChunks || stats.totalChunks || 0);
-    const qdrantUsed = qdrantVectors * 4096;
-    const qdrantTotal = 512 * 1024 * 1024; // 512 MB hard quota
+    // Qdrant connection status & normalization
+    const qdrantConnected = stats.qdrant?.connected ?? (stats.systemStatus?.qdrant === "connected");
+    const qdrantVectors = qdrantConnected ? Number(stats.qdrant?.vectors ?? stats.knowledgeBase?.totalChunks ?? stats.totalChunks ?? 0) : 0;
+    const qdrantUsed = qdrantConnected ? qdrantVectors * 4096 : null;
+    const qdrantTotal = qdrantConnected ? 512 * 1024 * 1024 : null; // 512 MB hard quota
 
-    // Combined normalization (includes mongo, supabase, and qdrant)
-    const combinedUsed = Number(stats.combined?.used || stats.usedBytes || (mongoUsed + supabaseUsed + qdrantUsed));
-    const combinedTotal = Number(stats.combined?.total || stats.totalBytes || (mongoTotal + supabaseQuota + qdrantTotal));
+    // Combined connection status & normalization
+    const combinedConnected = mongoConnected || supabaseConnected || qdrantConnected;
+    const combinedUsed = combinedConnected ? ((mongoUsed || 0) + (supabaseUsed || 0) + (qdrantUsed || 0)) : null;
+    const combinedTotal = combinedConnected ? ((mongoTotal || 0) + (supabaseQuota || 0) + (qdrantTotal || 0)) : null;
 
     return {
         ...stats,
         mongodb: {
+            connected: mongoConnected,
             total: mongoTotal,
             used: mongoUsed,
-            remaining: Math.max(mongoTotal - mongoUsed, 0),
-            usage: percent(mongoUsed, mongoTotal),
-            collections: stats.mongodb?.collections || stats.mongodbCollections || stats.collections || 0,
-            documents: stats.mongodb?.documents || stats.mongodbObjects || stats.documentCount || 0,
-            indexesSize: stats.mongodb?.indexesSize || stats.mongodbIndexSize || 0
+            remaining: mongoConnected ? Math.max(mongoTotal - mongoUsed, 0) : null,
+            usage: mongoConnected ? percent(mongoUsed, mongoTotal) : 0,
+            collections: mongoConnected ? (stats.mongodb?.collections ?? stats.mongodbCollections ?? stats.collections ?? 0) : 0,
+            documents: mongoConnected ? (stats.mongodb?.documents ?? stats.mongodbObjects ?? stats.documentCount ?? 0) : 0,
+            indexesSize: mongoConnected ? (stats.mongodb?.indexesSize ?? stats.mongodbIndexSize ?? 0) : null
         },
         supabase: {
-            bucket: stats.supabase?.bucket || stats.supabaseBucket || stats.bucket || "",
-            files: stats.supabase?.files || stats.supabaseFiles || stats.documentCount || 0,
+            configured: supabaseConfigured,
+            connected: supabaseConnected,
+            bucket: stats.supabase?.bucket ?? stats.supabaseBucket ?? stats.bucket ?? "",
+            files: supabaseConnected ? (stats.supabase?.files ?? stats.supabaseFiles ?? stats.documentCount ?? 0) : 0,
             used: supabaseUsed,
-            remaining: Math.max(supabaseQuota - supabaseUsed, 0),
-            averageFileSize: stats.supabase?.averageFileSize || stats.supabaseAverageFileSize || (stats.documentCount ? supabaseUsed / stats.documentCount : 0),
-            largestFile: stats.supabase?.largestFile || stats.supabaseLargestFile || null,
+            remaining: supabaseConnected ? Math.max(supabaseQuota - supabaseUsed, 0) : null,
+            averageFileSize: supabaseConnected ? (stats.supabase?.averageFileSize ?? stats.supabaseAverageFileSize ?? (stats.documentCount ? supabaseUsed / stats.documentCount : 0)) : null,
+            largestFile: supabaseConnected ? (stats.supabase?.largestFile ?? stats.supabaseLargestFile ?? null) : null,
             quota: supabaseQuota,
-            usage: percent(supabaseUsed, supabaseQuota)
+            usage: supabaseConnected ? percent(supabaseUsed, supabaseQuota) : 0
         },
         qdrant: {
-            connected: stats.qdrant?.connected ?? false,
-            status: stats.qdrant?.status ?? "offline",
+            connected: qdrantConnected,
+            status: stats.qdrant?.status ?? (qdrantConnected ? "green" : "offline"),
             vectors: qdrantVectors,
             collection: stats.qdrant?.collection ?? "edumate",
             used: qdrantUsed,
             total: qdrantTotal,
-            remaining: Math.max(qdrantTotal - qdrantUsed, 0),
-            usage: percent(qdrantUsed, qdrantTotal)
+            remaining: qdrantConnected ? Math.max(qdrantTotal - qdrantUsed, 0) : null,
+            usage: qdrantConnected ? percent(qdrantUsed, qdrantTotal) : 0
         },
         combined: {
             total: combinedTotal,
             used: combinedUsed,
-            remaining: Math.max(combinedTotal - combinedUsed, 0),
-            usage: percent(combinedUsed, combinedTotal)
+            remaining: combinedConnected ? Math.max(combinedTotal - combinedUsed, 0) : null,
+            usage: combinedConnected ? percent(combinedUsed, combinedTotal) : 0
         },
         knowledgeBase: {
             totalDocuments: stats.documentCount ?? stats.knowledgeBase?.totalDocuments ?? 0,

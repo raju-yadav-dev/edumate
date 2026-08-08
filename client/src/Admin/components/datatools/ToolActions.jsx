@@ -128,7 +128,23 @@ export default function ToolActions({ onOperationComplete, documents = [], onRef
             try {
                 sessionStorage.clear();
             } catch {}
-        } else if (tool.id === "sync-documents" || tool.id === "reindex-database") {
+        } else if (tool.id === "sync-documents") {
+            if (typeof onRefresh === "function") {
+                await onRefresh();
+            }
+        } else if (tool.id === "reindex-database") {
+            if (documents && documents.length > 0) {
+                const realDocs = documents.filter(doc => doc._id && !doc._id.startsWith("demo-"));
+                await Promise.all(
+                    realDocs.map(async (doc) => {
+                        try {
+                            await rebuildAdminDocumentEmbeddings(doc._id);
+                        } catch (err) {
+                            console.error(`Failed to rebuild embeddings for doc ${doc._id}:`, err);
+                        }
+                    })
+                );
+            }
             if (typeof onRefresh === "function") {
                 await onRefresh();
             }

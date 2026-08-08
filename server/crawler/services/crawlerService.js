@@ -31,6 +31,11 @@ const normalizeUrl = (urlStr) => {
     }
 };
 
+const slugify = (text) => {
+    if (!text) return "";
+    return text.toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+};
+
 /**
  * Helper to upload a buffer to Supabase storage.
  */
@@ -117,8 +122,9 @@ const runCrawlBackground = async (jobId) => {
                 downloadedCount++;
 
                 // Upload clean text to Supabase storage
+                const folderName = slugify(job.institution) || job.category || "others";
                 const uniqueFilename = `${Date.now()}-${crypto.randomUUID()}.txt`;
-                const storagePath = `crawler-pages/${uniqueFilename}`;
+                const storagePath = `${folderName}/${uniqueFilename}`;
                 const uploadResult = await uploadBufferToSupabase(textBuffer, storagePath, "text/plain");
                 storageUsed += uploadResult.size;
 
@@ -126,7 +132,7 @@ const runCrawlBackground = async (jobId) => {
                 const document = await Document.create({
                     originalName: documentName,
                     storedName: uniqueFilename,
-                    category: job.category,
+                    category: folderName,
                     institution: job.institution || "",
                     department: "",
                     mimeType: "text/plain",
@@ -160,7 +166,7 @@ const runCrawlBackground = async (jobId) => {
                             documentId: String(document._id),
                             originalName: documentName,
                             pageNumber: 1,
-                            category: job.category,
+                            category: folderName,
                             department: "",
                             institution: job.institution || "",
                             uploadedBy: String(job.createdBy)
@@ -185,10 +191,14 @@ const runCrawlBackground = async (jobId) => {
                         });
                     }
 
-                    await qdrantClient.upsert(qdrantCollection, {
-                        wait: true,
-                        points
-                    });
+                    const qdrantBatchSize = 100;
+                    for (let start = 0; start < points.length; start += qdrantBatchSize) {
+                        const subPoints = points.slice(start, start + qdrantBatchSize);
+                        await qdrantClient.upsert(qdrantCollection, {
+                            wait: true,
+                            points: subPoints
+                        });
+                    }
                     embeddingsCount += points.length;
                 }
 
@@ -294,7 +304,8 @@ const runCrawlBackground = async (jobId) => {
                 const originalName = path.basename(parsedUrl.pathname) || "document";
                 const fileExt = path.extname(originalName) || ".txt";
                 const uniqueName = `${Date.now()}-${crypto.randomUUID()}${fileExt}`;
-                const storagePath = `${job.category}/${uniqueName}`;
+                const folderName = slugify(job.institution) || job.category || "others";
+                const storagePath = `${folderName}/${uniqueName}`;
                 const mimeType = fileResponse.headers.get("content-type") || "application/octet-stream";
 
                 console.log(`[CrawlerService] Uploading original document file to Supabase: ${storagePath}`);
@@ -309,7 +320,7 @@ const runCrawlBackground = async (jobId) => {
                 const document = await Document.create({
                     originalName,
                     storedName: uniqueName,
-                    category: job.category,
+                    category: folderName,
                     institution: job.institution || "",
                     department: "",
                     mimeType,
@@ -346,7 +357,7 @@ const runCrawlBackground = async (jobId) => {
                             documentId: String(document._id),
                             originalName,
                             pageNumber: 1,
-                            category: job.category,
+                            category: folderName,
                             department: "",
                             institution: job.institution || "",
                             uploadedBy: String(job.createdBy)
@@ -371,10 +382,14 @@ const runCrawlBackground = async (jobId) => {
                         });
                     }
 
-                    await qdrantClient.upsert(qdrantCollection, {
-                        wait: true,
-                        points
-                    });
+                    const qdrantBatchSize = 100;
+                    for (let start = 0; start < points.length; start += qdrantBatchSize) {
+                        const subPoints = points.slice(start, start + qdrantBatchSize);
+                        await qdrantClient.upsert(qdrantCollection, {
+                            wait: true,
+                            points: subPoints
+                        });
+                    }
                     embeddingsCount += points.length;
                 }
 

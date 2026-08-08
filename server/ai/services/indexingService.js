@@ -45,42 +45,54 @@ const indexDocumentBackground = async (documentId, fileBuffer = null) => {
             buffer = await downloadFromSupabase(document.storagePath);
         }
 
-        // Only index PDF files
-        if (document.mimeType !== "application/pdf") {
-            document.embeddingStatus = "not_required";
-            await document.save();
-            return;
-        }
+        let rawChunks = [];
+        let numPages = 1;
+        let extractedText = "";
+        const splitter = new RecursiveCharacterTextSplitter();
 
-        // 1. Extract text page-by-page
-        const parsed = await pdfExtractor.extractText(buffer);
-        if (parsed.requiresOcr) {
-            document.embeddingStatus = "not_required";
-            document.metadata = {
-                ...(document.metadata || {}),
-                requiresOcr: true,
-                notes: (document.metadata?.notes || "") + "\n[Image-only PDF. Indexing skipped.]"
-            };
-            await document.save();
-            return;
+        const isPdf = document.mimeType === "application/pdf" || document.originalName.toLowerCase().endsWith(".pdf");
+
+        if (isPdf) {
+            const parsed = await pdfExtractor.extractText(buffer);
+            numPages = parsed.numPages || 1;
+            if (parsed.requiresOcr) {
+                console.log(`[IndexingService] Scanned PDF detected for doc ${documentId}. Initiating OCR fallback...`);
+                const ImageExtractor = require("../../crawler/extractors/ImageExtractor");
+                const ocrResult = await ImageExtractor.extract(buffer);
+                extractedText = ocrResult.text || "";
+                const splits = splitter.splitText(extractedText);
+                splits.forEach((text) => {
+                    rawChunks.push({
+                        content: text,
+                        pageNumber: 1
+                    });
+                });
+            } else {
+                for (const page of parsed.pages) {
+                    const pageSplits = splitter.splitText(page.text);
+                    for (const text of pageSplits) {
+                        rawChunks.push({
+                            content: text,
+                            pageNumber: page.pageNumber
+                        });
+                    }
+                }
+            }
+        } else {
+            const UniversalExtractor = require("../../crawler/extractors/UniversalExtractor");
+            const extracted = await UniversalExtractor.extract(buffer, document.originalName);
+            extractedText = extracted.text || "";
+            const splits = splitter.splitText(extractedText);
+            splits.forEach((text) => {
+                rawChunks.push({
+                    content: text,
+                    pageNumber: 1
+                });
+            });
         }
 
         // 2. Clear any existing chunks for this document in Qdrant
         await deleteDocumentIndex(documentId);
-
-        // 3. Chunk page texts using the splitter
-        const splitter = new RecursiveCharacterTextSplitter();
-        const rawChunks = [];
-
-        for (const page of parsed.pages) {
-            const pageSplits = splitter.splitText(page.text);
-            for (const text of pageSplits) {
-                rawChunks.push({
-                    content: text,
-                    pageNumber: page.pageNumber
-                });
-            }
-        }
 
         if (rawChunks.length > 0) {
             // 4. Batch generate embeddings for all chunks
@@ -123,18 +135,22 @@ const indexDocumentBackground = async (documentId, fileBuffer = null) => {
                 });
             }
 
-            // 6. Bulk insert points to Qdrant collection
-            await client.upsert(collectionName, {
-                wait: true,
-                points
-            });
+            // 6. Bulk insert points to Qdrant collection in batches of 100 to prevent timeouts/failures
+            const qdrantBatchSize = 100;
+            for (let start = 0; start < points.length; start += qdrantBatchSize) {
+                const subPoints = points.slice(start, start + qdrantBatchSize);
+                await client.upsert(collectionName, {
+                    wait: true,
+                    points: subPoints
+                });
+            }
         }
 
         document.embeddingStatus = "indexed";
         document.chunkCount = rawChunks.length;
         document.metadata = {
             ...(document.metadata || {}),
-            pages: parsed.numPages
+            pages: numPages
         };
         await document.save();
     } catch (err) {

@@ -35,14 +35,14 @@ function UploadDialog({
                 <UploadCloud />
                 <span>
                     <strong>Drag files here</strong>
-                    <small>{upload.file ? upload.file.name : "PDF only, max 50 MB"}</small>
+                    <small>{upload.files && upload.files.length > 1 ? `${upload.files.length} files selected` : (upload.file ? upload.file.name : "PDF, Word, Excel, PowerPoint, ZIP, Images (max 100 MB)")}</small>
                 </span>
                 <input
                     hidden
                     type="file"
                     multiple
-                    accept="application/pdf,.pdf"
-                    onChange={(event) => onFile(event.target.files?.[0] || null)}
+                    accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,.txt,.md,.markdown,.json,.xml,.png,.jpg,.jpeg,.webp,.gif,.zip"
+                    onChange={(event) => onFile(Array.from(event.target.files || []))}
                 />
             </label>
 

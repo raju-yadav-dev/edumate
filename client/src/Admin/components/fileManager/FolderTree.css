@@ -18,6 +18,8 @@
     gap: 4px;
     overflow-y: auto;
     overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(168, 179, 207, 0.28) transparent;
 }
 
 .folder-root {
@@ -310,4 +312,20 @@
 
 .folder-item-row:hover .folder-count {
     display: none;
+}
+
+/* Premium custom scrollbar styling */
+.folder-list::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+.folder-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+.folder-list::-webkit-scrollbar-thumb {
+    background: rgba(168, 179, 207, 0.28);
+    border-radius: 999px;
+}
+.folder-list::-webkit-scrollbar-thumb:hover {
+    background: rgba(168, 179, 207, 0.45);
 }

@@ -213,14 +213,26 @@ class VoiceConversationManager {
             onError: (err) => {
                 console.error("Recognition error in continuous cycle:", err);
                 if (err === "no-speech") {
-                    // Recover by restarting loop
-                    this.startListeningCycle();
+                    setTimeout(() => {
+                        this.startListeningCycle();
+                    }, 300);
+                } else if (err !== "not-allowed" && this.isContinuousMode) {
+                    console.log("[VoiceManager] Auto restarting voice recognition after failure:", err);
+                    setTimeout(() => {
+                        this.startListeningCycle();
+                    }, 1000);
                 } else {
                     this.setState("paused");
                 }
             },
             onEnd: () => {
-                // If stopped by user or state changed, do not restart
+                // If browser ended the recognition session naturally but we are still in listening state and in continuous mode, auto-restart it
+                if (this.state === "listening" && this.isContinuousMode) {
+                    console.log("[VoiceManager] SpeechRecognition ended naturally. Re-starting listening cycle.");
+                    setTimeout(() => {
+                        this.startListeningCycle();
+                    }, 300);
+                }
             }
         });
     }

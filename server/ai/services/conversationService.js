@@ -11,7 +11,7 @@ const llmService = require("./llmService");
  * @param {number} [params.maxTokens=1500]
  * @returns {Promise<Object>} - { historyText: string, rawHistory: Array }
  */
-const getRecentMemory = async ({ userId, conversationId, maxTokens = 1500 }) => {
+const getRecentMemory = async ({ userId, conversationId, maxTokens = 1500, parentId = null }) => {
     if (!userId || !conversationId) {
         return {
             historyText: "",
@@ -32,8 +32,40 @@ const getRecentMemory = async ({ userId, conversationId, maxTokens = 1500 }) => 
         };
     }
 
+    // Backfill legacy IDs if needed
+    chat.messages.forEach((msg, idx) => {
+        if (!msg.id) {
+            msg.id = `msg-legacy-${idx}-${chat._id}`;
+            if (idx > 0 && !msg.parentId) {
+                msg.parentId = chat.messages[idx - 1].id || `msg-legacy-${idx - 1}-${chat._id}`;
+            }
+        }
+    });
+
+    // Build map of messages by id
+    const messageMap = {};
+    chat.messages.forEach((m) => {
+        if (m.id) messageMap[m.id] = m;
+    });
+
+    // Traverse backwards starting from parentId
+    const branchMessages = [];
+    let currentId = parentId;
+
+    if (!currentId && chat.messages.length > 0) {
+        currentId = chat.messages[chat.messages.length - 1].id;
+    }
+
+    const visited = new Set();
+    while (currentId && messageMap[currentId] && !visited.has(currentId)) {
+        visited.add(currentId);
+        const msg = messageMap[currentId];
+        branchMessages.unshift(msg);
+        currentId = msg.parentId;
+    }
+
     // Map DB messages to simple role/content pairs
-    const rawHistory = chat.messages.map((m) => ({
+    const rawHistory = branchMessages.map((m) => ({
         role: m.role === "assistant" ? "assistant" : "user",
         content: m.content || ""
     }));
@@ -101,7 +133,7 @@ const getOrCreateChat = async ({ user, conversationId, question }) => {
     });
 };
 
-const saveMessageTurn = async ({ user, conversationId, question, response, intent, confidence, provider, responseTimeMs }) => {
+const saveMessageTurn = async ({ user, conversationId, question, response, intent, confidence, provider, responseTimeMs, userMessageId, assistantMessageId, parentId }) => {
     const chat = await getOrCreateChat({
         user,
         conversationId,
@@ -109,7 +141,28 @@ const saveMessageTurn = async ({ user, conversationId, question, response, inten
     });
 
     if (chat) {
+        const uMsgId = userMessageId || `msg-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        const aMsgId = assistantMessageId || `msg-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+        let finalParentId = parentId;
+        if (!finalParentId && chat.messages.length > 0) {
+            const lastMsg = chat.messages[chat.messages.length - 1];
+            finalParentId = lastMsg.id || null;
+        }
+
+        // Backfill IDs for any old messages in this chat to prevent breaks
+        chat.messages.forEach((msg, idx) => {
+            if (!msg.id) {
+                msg.id = `msg-legacy-${idx}-${chat._id}`;
+                if (idx > 0 && !msg.parentId) {
+                    msg.parentId = chat.messages[idx - 1].id || `msg-legacy-${idx-1}-${chat._id}`;
+                }
+            }
+        });
+
         chat.messages.push({
+            id: uMsgId,
+            parentId: finalParentId,
             role: "user",
             content: question,
             intent: intent,
@@ -118,6 +171,8 @@ const saveMessageTurn = async ({ user, conversationId, question, response, inten
         });
 
         chat.messages.push({
+            id: aMsgId,
+            parentId: uMsgId,
             role: "assistant",
             content: response.answer || response,
             intent: intent,

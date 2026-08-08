@@ -4,33 +4,28 @@ import { CheckCircle2, ArrowRight } from "lucide-react";
 export default function DatabaseDetailsTable({ documents = [] }) {
     const [showModal, setShowModal] = useState(false);
 
+    const totalSize = documents.reduce((sum, doc) => sum + (doc.fileSize || doc.size || 0), 0);
+    const formatBytes = (bytes) => {
+        if (!bytes) return "-";
+        const k = 1024;
+        const sizes = ["Bytes", "KB", "MB", "GB", "TB"];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+    };
+
     const collections = [
         {
-            name: "edumate_db (MongoDB)",
-            documents: "12,540",
-            size: "8.1 GB",
-            indexes: "23",
-            status: "Healthy"
-        },
-        {
-            name: "chroma_db (ChromaDB)",
-            documents: "12,540",
-            size: "6.3 GB",
+            name: "edumate_db (MongoDB / Supabase Storage)",
+            documents: documents.length > 0 ? documents.length.toLocaleString() : "-",
+            size: documents.length > 0 ? formatBytes(totalSize) : "-",
             indexes: "-",
             status: "Healthy"
         },
         {
-            name: "analytics_db (MongoDB)",
-            documents: "2,340",
-            size: "1.2 GB",
-            indexes: "12",
-            status: "Healthy"
-        },
-        {
-            name: "logs_db (MongoDB)",
-            documents: "15,210",
-            size: "512 MB",
-            indexes: "8",
+            name: "qdrant_db (Qdrant Vector Store)",
+            documents: "-",
+            size: "-",
+            indexes: "-",
             status: "Healthy"
         }
     ];

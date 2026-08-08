@@ -1,9 +1,0 @@
-{
-	"id": "3RXPtcHjQncMP6F",
-	"json": "{\"id\":\"3RXPtcHjQncMP6F\",\"url\":\"https://www.brainwareuniversity.ac.in/departments/computer-science-engineering/faculty.php\",\"uniqueKey\":\"https://www.brainwareuniversity.ac.in/departments/computer-science-engineering/faculty.php\",\"method\":\"GET\",\"noRetry\":false,\"retryCount\":0,\"errorMessages\":[],\"headers\":{},\"userData\":{\"depth\":0}}",
-	"method": "GET",
-	"orderNo": 1786016069560,
-	"retryCount": 0,
-	"uniqueKey": "https://www.brainwareuniversity.ac.in/departments/computer-science-engineering/faculty.php",
-	"url": "https://www.brainwareuniversity.ac.in/departments/computer-science-engineering/faculty.php"
-}
