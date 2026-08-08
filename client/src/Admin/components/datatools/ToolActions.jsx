@@ -207,26 +207,13 @@ export default function ToolActions({ onOperationComplete, documents = [], onRef
                 await onRefresh();
             }
         } else if (tool.id === "reindex-database") {
-            if (documents && documents.length > 0) {
-                const realDocs = documents.filter(doc => doc._id && !doc._id.startsWith("demo-"));
-                await Promise.all(
-                    realDocs.map(async (doc) => {
-                        try {
-                            await rebuildAdminDocumentEmbeddings(doc._id);
-                        } catch (err) {
-                            console.error(`Failed to rebuild embeddings for doc ${doc._id}:`, err);
-                        }
-                    })
-                );
-            }
-            if (typeof onRefresh === "function") {
-                await onRefresh();
-            }
-        } else if (tool.id === "reindex-database") {
             try {
                 await rebuildAllEmbeddings();
             } catch (err) {
                 console.error("Full re-index failed:", err);
+            }
+            if (typeof onRefresh === "function") {
+                await onRefresh();
             }
         } else if (tool.id === "generate-embeddings" && documents.length > 0) {
             try {

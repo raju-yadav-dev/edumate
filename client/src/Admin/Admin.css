@@ -39,6 +39,52 @@ body,
     overflow: visible;
 }
 
+body.admin-theme-active {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(168, 179, 207, 0.28) transparent;
+}
+
+body.admin-theme-active::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+body.admin-theme-active::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+body.admin-theme-active::-webkit-scrollbar-thumb {
+    background: rgba(168, 179, 207, 0.28);
+    border-radius: 999px;
+}
+
+body.admin-theme-active::-webkit-scrollbar-thumb:hover {
+    background: rgba(168, 179, 207, 0.45);
+}
+
+.admin-page *::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+.admin-page *::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.admin-page *::-webkit-scrollbar-thumb {
+    background: rgba(168, 179, 207, 0.28) !important;
+    border-radius: 999px;
+}
+
+.admin-page *::-webkit-scrollbar-thumb:hover {
+    background: rgba(168, 179, 207, 0.45) !important;
+}
+
+.admin-page * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(168, 179, 207, 0.28) transparent !important;
+}
+
 .admin-page[data-admin-theme="light"] {
     --admin-bg: #eef3f7;
     --admin-panel: rgba(255, 255, 255, 0.94);
@@ -239,10 +285,11 @@ body,
     }
 }
 
-border-radius: 99px;
-font-size: 10px;
-font-weight: 600;
-text-transform: uppercase;
+.status-badge-small {
+    border-radius: 99px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
 }
 
 .status-badge-small.healthy {

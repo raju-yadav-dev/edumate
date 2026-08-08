@@ -18,7 +18,7 @@ const crawlJobSchema = new mongoose.Schema(
         },
         status: {
             type: String,
-            enum: ["queued", "crawling", "completed", "failed"],
+            enum: ["queued", "crawling", "completed", "completed_with_errors", "failed", "cancelled"],
             default: "queued",
             index: true
         },
@@ -33,6 +33,10 @@ const crawlJobSchema = new mongoose.Schema(
         errors: {
             type: [String],
             default: []
+        },
+        progress: {
+            type: mongoose.Schema.Types.Mixed,
+            default: {}
         },
         institution: {
             type: String,

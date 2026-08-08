@@ -122,6 +122,7 @@ const uploadDocument = async ({ file, body, user }) => {
         mimeType: file.mimetype,
         fileSize: file.size,
         checksum,
+        contentHash: checksum,
         storagePath: storagePath,
         metadata: {
             uploadedFrom: "api",
@@ -579,20 +580,26 @@ const indexDocumentBackground = async (documentId, fileBuffer = null) => {
 };
 
 const bulkReindex = async ({ category, ids, user }) => {
-    const filter = { status: { $ne: "deleted" }, mimeType: "application/pdf" };
+    const filter = { status: { $ne: "deleted" } };
     if (ids && Array.isArray(ids) && ids.length > 0) {
         filter._id = { $in: ids };
     } else if (category && category !== "root") {
         const cleanCat = sanitizeCategory(category);
-        filter.category = { $regex: new RegExp(`^${cleanCat}(_|\\/|$)`, "i") };
+        filter.category = { $regex: new RegExp(`^${cleanCat}(_|\/|$)`, "i") };
     }
+
     const documents = await Document.find(filter);
     for (const doc of documents) {
         doc.embeddingStatus = "pending";
+        doc.metadata = {
+            ...(doc.metadata || {}),
+            indexAttempts: 0,
+            lastIndexAttemptAt: null
+        };
         await doc.save();
         indexDocumentBackground(doc._id).catch(() => {});
     }
-    return { count: documents.length };
+    return { count: documents.length, scope: ids?.length ? "files" : category === "root" ? "root" : "folder" };
 };
 
 const getJobsStatus = async () => {

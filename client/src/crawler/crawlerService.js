@@ -44,3 +44,33 @@ export async function getCrawlJobDetails(jobId) {
     });
     return parseResponse(response, "Unable to retrieve crawl job details.");
 }
+
+export async function cancelCrawlJob(jobId) {
+    const response = await fetch(`${CRAWLER_API_BASE_URL}/jobs/${jobId}/cancel`, {
+        method: "POST",
+        headers: {
+            "Authorization": `Bearer ${getAdminAccessToken()}`
+        }
+    });
+    return parseResponse(response, "Failed to cancel crawl job.");
+}
+
+export async function recrawlCrawlJob(jobId) {
+    const response = await fetch(`${CRAWLER_API_BASE_URL}/jobs/${jobId}/recrawl`, {
+        method: "POST",
+        headers: {
+            "Authorization": `Bearer ${getAdminAccessToken()}`
+        }
+    });
+    return parseResponse(response, "Failed to recrawl crawl job.");
+}
+
+export async function deleteCrawlJob(jobId) {
+    const response = await fetch(`${CRAWLER_API_BASE_URL}/jobs/${jobId}`, {
+        method: "DELETE",
+        headers: {
+            "Authorization": `Bearer ${getAdminAccessToken()}`
+        }
+    });
+    return parseResponse(response, "Failed to delete crawl job history.");
+}

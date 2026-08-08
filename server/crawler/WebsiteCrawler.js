@@ -1,4 +1,3 @@
-const { CheerioCrawler, Dataset } = require("crawlee");
 const cheerio = require("cheerio");
 const RobotsManager = require("./RobotsManager");
 const SitemapCrawler = require("./SitemapCrawler");
@@ -6,151 +5,209 @@ const QueueManager = require("./QueueManager");
 const ContentCleaner = require("./ContentCleaner");
 
 class WebsiteCrawler {
-    /**
-     * Initializes the crawler configuration
-     * @param {Object} options
-     * @param {string} options.startUrl - The entry point URL
-     * @param {number|string} options.maxPages - Maximum pages to crawl (10 to ALL)
-     * @param {number} [options.maxDepth=3] - Maximum link depth
-     * @param {number} [options.delayMs=1000] - Rate limiting delay between fetches
-     */
-    constructor({ startUrl, maxPages, maxDepth = 3, delayMs = 1000 }) {
+    constructor({ startUrl, maxPages, maxDepth = 3, delayMs = 50, maxConcurrency = null }) {
         this.startUrl = startUrl;
         this.maxPages = maxPages;
         this.maxDepth = maxDepth;
-        this.delayMs = delayMs;
+        this.delayMs = Math.max(0, Number(delayMs) || 0);
+
+        const configuredConcurrency = Number(maxConcurrency ?? process.env.CRAWLER_CONCURRENCY ?? 5);
+        this.maxConcurrency = Math.max(1, Math.min(20, Number.isFinite(configuredConcurrency) ? configuredConcurrency : 5));
 
         this.robotsManager = new RobotsManager();
         this.sitemapCrawler = new SitemapCrawler();
         this.queueManager = new QueueManager(maxPages, maxDepth);
+        this.pendingPages = [];
+        this.pendingPageWorkerActive = false;
+        this.pendingPageCallback = null;
+        this.domainLastRequestAt = new Map();
     }
 
-    /**
-     * Executes the prioritized web crawl job
-     * @param {Object} callbacks
-     * @param {Function} callbacks.onPage - Invoked when an HTML page is fetched: (url, title, cleanText) => Promise
-     * @param {Function} [callbacks.onProgress] - Invoked for status reports: (stats) => void
-     */
     async crawl(callbacks = {}) {
-        const { onPage, onProgress } = callbacks;
+        const { onPage, onProgress, onDocument } = callbacks;
 
-        // 1. Fetch and respect robots.txt
         await this.robotsManager.parse(this.startUrl);
 
-        // 2. Discover links from sitemaps
         let sitemapLinks = [];
         if (this.robotsManager.sitemaps.length > 0) {
-            sitemapLinks = await this.sitemapCrawler.fetchSitemapUrls(
-                this.robotsManager.sitemaps,
-                this.startUrl
-            );
+            sitemapLinks = await this.sitemapCrawler.fetchSitemapUrls(this.robotsManager.sitemaps, this.startUrl);
         }
 
-        // 3. Queue bootstrap
         this.queueManager.enqueue(this.startUrl, 0, this.startUrl);
-        sitemapLinks.forEach(link => {
-            this.queueManager.enqueue(link, 1, this.startUrl);
-        });
+        sitemapLinks.forEach((link) => this.queueManager.enqueue(link, 1, this.startUrl));
 
-        const startOrigin = new URL(this.startUrl).origin;
         console.log(`[WebsiteCrawler] Crawl queue bootstrapped with ${this.queueManager.queue.length} targets.`);
 
-        // 4. Initialize Crawlee CheerioCrawler
-        const self = this;
-        const crawler = new CheerioCrawler({
-            // Respect rate limiting and max requests bounds
-            maxRequestsPerCrawl: this.queueManager.maxPages,
-            minConcurrency: 1,
-            maxConcurrency: 2,
-            requestHandlerTimeoutSecs: 20,
-            
-            // Custom request execution hook
-            requestHandler: async ({ request, body, $ }) => {
-                const currentUrl = request.url;
+        const activeTasks = [];
+        while ((this.queueManager.queue.length > 0 || activeTasks.length > 0) && this.queueManager.crawledUrlsList.length < this.maxPages) {
+            while (activeTasks.length < this.maxConcurrency && this.queueManager.queue.length > 0) {
+                const nextItem = this.queueManager.dequeue();
+                if (!nextItem) break;
 
-                // Validate URL against robots.txt permissions
-                if (!self.robotsManager.isAllowed(currentUrl)) {
-                    console.log(`[WebsiteCrawler] Robots.txt disallows crawling URL: ${currentUrl}. Skipping.`);
-                    return;
-                }
-
-                // Respect rate limiting delay
-                if (self.delayMs > 0) {
-                    await new Promise(resolve => setTimeout(resolve, self.delayMs));
-                }
-
-                console.log(`[WebsiteCrawler] Fetching page: ${currentUrl}`);
-                self.queueManager.markCrawled(currentUrl);
-
-                // Extract clean readability article text
-                const pageResult = ContentCleaner.clean(body, currentUrl);
-                
-                // Invoke callback to persist and index the HTML page
-                if (onPage) {
-                    try {
-                        await onPage({
-                            url: currentUrl,
-                            title: pageResult.title,
-                            content: pageResult.content
-                        });
-                    } catch (saveError) {
-                        console.error(`[WebsiteCrawler] onPage callback failed for ${currentUrl}:`, saveError.message);
-                    }
-                }
-
-                // Retrieve current crawling depth
-                const currentDepth = request.userData?.depth || 0;
-
-                // Discover outgoing links inside the page using Cheerio
-                $("a[href]").each((_, element) => {
-                    const href = $(element).attr("href");
-                    if (href) {
-                        try {
-                            const resolved = new URL(href, currentUrl).href;
-                            // Enqueue outlink targets with incremented depth
-                            self.queueManager.enqueue(resolved, currentDepth + 1, self.startUrl);
-                        } catch {
-                            // Skip invalid links
+                const task = this.processRequest(nextItem, { onProgress })
+                    .then(() => true)
+                    .catch((error) => {
+                        console.error(`[WebsiteCrawler] Crawl request failed for ${nextItem.url}:`, error?.message || error);
+                        this.queueManager.markFailed(nextItem.url, error?.message || String(error));
+                        return false;
+                    })
+                    .finally(() => {
+                        const index = activeTasks.indexOf(task);
+                        if (index >= 0) {
+                            activeTasks.splice(index, 1);
                         }
-                    }
-                });
+                    });
 
-                // Report current crawl diagnostics
-                if (onProgress) {
-                    onProgress(self.queueManager.getStats());
-                }
+                activeTasks.push(task);
             }
-        });
 
-        // 5. Feed our custom queue targets to Crawlee
-        const initialRequests = this.queueManager.queue.map(item => ({
-            url: item.url,
-            userData: { depth: item.depth }
-        }));
-
-        // Clear queue in queueManager since they are handed to Crawlee
-        this.queueManager.queue = [];
-
-        if (initialRequests.length > 0) {
-            await crawler.run(initialRequests);
+            if (activeTasks.length === 0) break;
+            await Promise.race(activeTasks);
         }
 
-        // Process discovered documents sequentially
+        if (this.pendingPages.length > 0 && onPage) {
+            console.log(`[WebsiteCrawler] Processing ${this.pendingPages.length} discovered pages...`);
+            await this.runWorkerPool(this.pendingPages, async (pagePayload) => {
+                await onPage(pagePayload);
+            });
+        }
+
         const discoveredDocs = this.queueManager.documentsList;
-        if (discoveredDocs.length > 0 && callbacks.onDocument) {
+        if (discoveredDocs.length > 0 && onDocument) {
             console.log(`[WebsiteCrawler] Processing ${discoveredDocs.length} discovered documents...`);
-            for (const docUrl of discoveredDocs) {
-                try {
-                    await callbacks.onDocument(docUrl);
-                } catch (err) {
-                    console.error(`[WebsiteCrawler] Failed to process document ${docUrl}:`, err.message);
-                }
-            }
+            await this.runWorkerPool(discoveredDocs, async (docUrl) => {
+                await onDocument(docUrl);
+            });
         }
 
         const finalStats = this.queueManager.getStats();
         console.log(`[WebsiteCrawler] Crawl completed. Total crawled: ${finalStats.pagesCrawled} | Discovered docs: ${finalStats.discoveredDocuments.length}`);
         return finalStats;
+    }
+
+    async runWorkerPool(items, worker) {
+        if (!Array.isArray(items) || items.length === 0) return [];
+
+        const results = [];
+        const active = [];
+        let index = 0;
+
+        const startNext = () => {
+            while (active.length < this.maxConcurrency && index < items.length) {
+                const currentItem = items[index++];
+                const task = Promise.resolve()
+                    .then(() => worker(currentItem))
+                    .then((result) => {
+                        results.push(result);
+                    })
+                    .catch((error) => {
+                        console.error(`[WebsiteCrawler] Worker failed for ${currentItem?.url || currentItem}:`, error?.message || error);
+                    })
+                    .finally(() => {
+                        const taskIndex = active.indexOf(task);
+                        if (taskIndex >= 0) {
+                            active.splice(taskIndex, 1);
+                        }
+                    });
+
+                active.push(task);
+            }
+        };
+
+        startNext();
+        while (active.length > 0) {
+            await Promise.race(active);
+            startNext();
+        }
+
+        return results;
+    }
+
+    async processRequest(item, callbacks = {}) {
+        const { onProgress } = callbacks;
+        const currentUrl = item.url;
+
+        if (!this.robotsManager.isAllowed(currentUrl)) {
+            console.log(`[WebsiteCrawler] Robots.txt disallows crawling URL: ${currentUrl}. Skipping.`);
+            this.queueManager.setUrlStatus(currentUrl, "failed", "Robots.txt disallowed");
+            return;
+        }
+
+        let lastError;
+        for (let attempt = 1; attempt <= 3; attempt += 1) {
+            try {
+                await this.waitForRateLimit(currentUrl);
+                const response = await fetch(currentUrl, {
+                    headers: {
+                        "User-Agent": "Mozilla/5.0",
+                        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+                    },
+                    signal: AbortSignal.timeout(20000)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                let html = await response.text();
+                if (this.shouldRenderWithPlaywright(currentUrl, html)) {
+                    const renderedHtml = await this.renderWithPlaywright(currentUrl);
+                    if (renderedHtml) {
+                        html = renderedHtml;
+                    }
+                }
+
+                const $ = cheerio.load(html);
+                const pageResult = ContentCleaner.clean(html, currentUrl);
+
+                this.pendingPages.push({
+                    url: currentUrl,
+                    title: pageResult.title,
+                    content: pageResult.content
+                });
+                this.queueManager.markCrawled(currentUrl);
+
+                $("a[href]").each((_, element) => {
+                    const href = $(element).attr("href");
+                    if (href) {
+                        try {
+                            const resolved = new URL(href, currentUrl).href;
+                            this.queueManager.enqueue(resolved, (item.depth || 0) + 1, this.startUrl);
+                        } catch {
+                            // Ignore invalid links
+                        }
+                    }
+                });
+
+                if (onProgress) {
+                    onProgress(this.queueManager.getStats());
+                }
+                return;
+            } catch (error) {
+                lastError = error;
+                if (attempt < 3) {
+                    await new Promise((resolve) => setTimeout(resolve, Math.min(2000, 250 * attempt)));
+                    continue;
+                }
+            }
+        }
+
+        this.queueManager.markFailed(currentUrl, lastError?.message || "Unknown fetch error");
+        throw lastError;
+    }
+
+    async waitForRateLimit(url) {
+        const parsedUrl = new URL(url);
+        const domain = parsedUrl.hostname;
+        const now = Date.now();
+        const lastRequestAt = this.domainLastRequestAt.get(domain) || 0;
+        const waitMs = Math.max(0, lastRequestAt + this.delayMs - now);
+
+        if (waitMs > 0) {
+            await new Promise((resolve) => setTimeout(resolve, waitMs));
+        }
+
+        this.domainLastRequestAt.set(domain, Date.now());
     }
 }
 

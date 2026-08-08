@@ -12,6 +12,14 @@ const WebsiteCrawler = require("../WebsiteCrawler");
 const UniversalExtractor = require("../extractors/UniversalExtractor");
 const KnowledgeSource = require("../../models/KnowledgeSource");
 
+const withTimeout = (promise, ms, message) => {
+    let timeoutId;
+    const timeoutPromise = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error(message)), ms);
+    });
+    return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
+};
+
 const BUCKET = process.env.SUPABASE_STORAGE_BUCKET || process.env.SUPABASE_BUCKET || "documents";
 
 /**
@@ -73,13 +81,24 @@ const runCrawlBackground = async (jobId) => {
     let skippedCount = 0;
     let downloadedCount = 0;
     const errorsList = [];
-    
-    // Arrays to track resources visited during this run for incremental cleanup
     const crawledUrlsInThisRun = [];
     const processedDocUrlsInThisRun = [];
+    let finalStatus = "completed";
+
+    const persistLivePageProgress = async () => {
+        job.pagesCrawled = pagesCount;
+        job.progress = {
+            ...(job.progress || {}),
+            indexed: pagesCount,
+            completed: pagesCount
+        };
+        job.crawledUrls = crawledUrlsInThisRun;
+        await job.save();
+    };
 
     try {
         job.status = "crawling";
+        job.progress = { total: 0, completed: 0, failed: 0, pending: 0 };
         await job.save();
 
         console.log(`[CrawlerService] Starting WebsiteCrawler for start URL: ${job.url} with maxPages limit: ${job.maxPages}`);
@@ -88,7 +107,7 @@ const runCrawlBackground = async (jobId) => {
             startUrl: job.url,
             maxPages: job.maxPages,
             maxDepth: 3,
-            delayMs: 1000 // Enforce a 1s crawl delay rate-limit
+            delayMs: Number(process.env.CRAWLER_DELAY_MS || 100)
         });
 
         const stats = await crawlerInstance.crawl({
@@ -109,6 +128,7 @@ const runCrawlBackground = async (jobId) => {
                         console.log(`[CrawlerService] Incremental Sync: HTML page unchanged. Skipping: ${url}`);
                         skippedCount++;
                         pagesCount++;
+                        await persistLivePageProgress();
                         return;
                     }
 
@@ -138,6 +158,7 @@ const runCrawlBackground = async (jobId) => {
                     mimeType: "text/plain",
                     fileSize: uploadResult.size,
                     checksum: uploadResult.checksum,
+                    contentHash: checksum,
                     storagePath,
                     embeddingStatus: "processing",
                     metadata: {
@@ -206,20 +227,19 @@ const runCrawlBackground = async (jobId) => {
                 document.chunkCount = splitTexts.length;
                 await document.save();
                 pagesCount++;
+                await persistLivePageProgress();
                 console.log(`[CrawlerService] Webpage successfully saved and indexed: ${url}`);
             },
             onDocument: async (docUrl) => {
                 processedDocUrlsInThisRun.push(docUrl);
                 console.log(`[CrawlerService] Document detected: ${docUrl}`);
-
                 let headHeaders = {};
                 try {
-                    // 1. HEAD request for cache tags
-                    const headResponse = await fetch(docUrl, {
+                    const headResponse = await withTimeout(fetch(docUrl, {
                         method: "HEAD",
                         headers: { "User-Agent": "Mozilla/5.0" },
                         signal: AbortSignal.timeout(8000)
-                    });
+                    }), 10000, `HEAD request timed out for ${docUrl}`);
 
                     if (headResponse.ok) {
                         headHeaders = {
@@ -254,13 +274,21 @@ const runCrawlBackground = async (jobId) => {
                 // 3. Cache MISS: Download original file buffer
                 console.log(`[CrawlerService] Smart Cache MISS. Downloading document: ${docUrl}`);
                 downloadedCount++;
-                const fileResponse = await fetch(docUrl, {
-                    headers: { "User-Agent": "Mozilla/5.0" },
-                    signal: AbortSignal.timeout(20000)
-                });
+                let fileResponse;
+                try {
+                    fileResponse = await withTimeout(fetch(docUrl, {
+                        headers: { "User-Agent": "Mozilla/5.0" },
+                        signal: AbortSignal.timeout(20000)
+                    }), 25000, `Document fetch timed out for ${docUrl}`);
+                } catch (fetchErr) {
+                    errorsList.push(`Document fetch failed: ${docUrl} (${fetchErr.message})`);
+                    throw fetchErr;
+                }
 
                 if (!fileResponse.ok) {
-                    throw new Error(`Failed to download file. HTTP Status ${fileResponse.status}`);
+                    const error = new Error(`Failed to download file. HTTP Status ${fileResponse.status}`);
+                    errorsList.push(`Document fetch failed: ${docUrl} (${error.message})`);
+                    throw error;
                 }
 
                 const arrayBuffer = await fileResponse.arrayBuffer();
@@ -302,14 +330,17 @@ const runCrawlBackground = async (jobId) => {
                 // 5. Determine file naming and upload original file to Supabase
                 const parsedUrl = new URL(docUrl);
                 const originalName = path.basename(parsedUrl.pathname) || "document";
-                const fileExt = path.extname(originalName) || ".txt";
-                const uniqueName = `${Date.now()}-${crypto.randomUUID()}${fileExt}`;
+                const documentExtension = path.extname(originalName) || ".txt";
+                const uniqueName = `${Date.now()}-${crypto.randomUUID()}${documentExtension}`;
                 const folderName = slugify(job.institution) || job.category || "others";
                 const storagePath = `${folderName}/${uniqueName}`;
-                const mimeType = fileResponse.headers.get("content-type") || "application/octet-stream";
+                const contentType = fileResponse.headers.get("content-type") || "application/octet-stream";
+                const detectedMimeType = contentType.split(";")[0].trim() || "application/octet-stream";
+                const resolvedFileExt = path.extname(originalName || "").toLowerCase();
+                const resolvedMimeType = detectedMimeType || (resolvedFileExt === ".pdf" ? "application/pdf" : "application/octet-stream");
 
                 console.log(`[CrawlerService] Uploading original document file to Supabase: ${storagePath}`);
-                const uploadResult = await uploadBufferToSupabase(buffer, storagePath, mimeType);
+                const uploadResult = await uploadBufferToSupabase(buffer, storagePath, resolvedMimeType);
                 storageUsed += uploadResult.size;
 
                 // 6. Run universal text extraction
@@ -323,9 +354,10 @@ const runCrawlBackground = async (jobId) => {
                     category: folderName,
                     institution: job.institution || "",
                     department: "",
-                    mimeType,
+                    mimeType: resolvedMimeType,
                     fileSize: uploadResult.size,
                     checksum: uploadResult.checksum,
+                    contentHash: checksum,
                     storagePath,
                     embeddingStatus: "processing",
                     metadata: {
@@ -402,14 +434,22 @@ const runCrawlBackground = async (jobId) => {
             onProgress: (progressStats) => {
                 job.pagesCrawled = progressStats.pagesCrawled;
                 job.crawledUrls = progressStats.crawledUrls;
-                
-                // Track discovered files and depth in job metadata
+                job.progress = {
+                    total: progressStats.pending + progressStats.completed + progressStats.failed,
+                    discovered: progressStats.discovered,
+                    queued: progressStats.queued,
+                    processing: progressStats.processing,
+                    indexed: progressStats.indexed,
+                    failed: progressStats.failed,
+                    completed: progressStats.completed,
+                    pending: progressStats.pending
+                };
                 job.metadata = {
                     ...(job.metadata || {}),
                     discoveredDocumentsCount: progressStats.discoveredDocuments.length,
-                    discoveredDocuments: progressStats.discoveredDocuments
+                    discoveredDocuments: progressStats.discoveredDocuments,
+                    urlStatuses: progressStats.urlStatuses
                 };
-                
                 job.save().catch((err) => {
                     console.error("[CrawlerService] Failed to update progress:", err.message);
                 });
@@ -465,7 +505,10 @@ const runCrawlBackground = async (jobId) => {
             }
         );
 
-        job.status = "completed";
+        if (errorsList.length > 0) {
+            finalStatus = "completed_with_errors";
+        }
+        job.status = finalStatus;
         job.pagesCrawled = stats.pagesCrawled;
         job.crawledUrls = stats.crawledUrls;
         await job.save();
@@ -473,7 +516,8 @@ const runCrawlBackground = async (jobId) => {
     } catch (err) {
         console.error(`[CrawlerService] Sync job ${jobId} failed critically:`, err);
         errorsList.push(err.message);
-        job.status = "failed";
+        finalStatus = "failed";
+        job.status = finalStatus;
         job.errors.push(`Critical: ${err.message}`);
         await job.save();
         
@@ -525,6 +569,60 @@ const startCrawl = async ({ url, maxPages, category, institution, user }) => {
     return job;
 };
 
+const cancelCrawl = async ({ jobId, user }) => {
+    const job = await CrawlJob.findOne({ _id: jobId, createdBy: user._id });
+    if (!job) {
+        const error = new Error("Crawl job not found.");
+        error.statusCode = 404;
+        throw error;
+    }
+
+    if (job.status === "completed" || job.status === "failed" || job.status === "cancelled") {
+        return job;
+    }
+
+    job.status = "cancelled";
+    job.errors = [...(job.errors || []), "Cancelled by user."];
+    await job.save();
+
+    return job;
+};
+
+const recrawlCrawlJob = async ({ jobId, user }) => {
+    const job = await CrawlJob.findOne({ _id: jobId, createdBy: user._id });
+    if (!job) {
+        const error = new Error("Crawl job not found.");
+        error.statusCode = 404;
+        throw error;
+    }
+
+    return startCrawl({
+        url: job.url,
+        maxPages: job.maxPages,
+        category: job.category,
+        institution: job.institution,
+        user
+    });
+};
+
+const deleteCrawlJob = async ({ jobId, user }) => {
+    const job = await CrawlJob.findOne({ _id: jobId, createdBy: user._id });
+    if (!job) {
+        const error = new Error("Crawl job not found.");
+        error.statusCode = 404;
+        throw error;
+    }
+
+    if (job.status === "queued" || job.status === "crawling") {
+        const error = new Error("Cancel the active crawl before deleting its history.");
+        error.statusCode = 400;
+        throw error;
+    }
+
+    await CrawlJob.deleteOne({ _id: jobId });
+    return { deleted: true, jobId: String(jobId) };
+};
+
 /**
  * Lists past crawl jobs.
  */
@@ -556,6 +654,9 @@ const getCrawlJobDetails = async (jobId) => {
 
 module.exports = {
     startCrawl,
+    cancelCrawl,
+    recrawlCrawlJob,
+    deleteCrawlJob,
     listCrawlJobs,
     getCrawlJobDetails
 };

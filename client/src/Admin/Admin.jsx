@@ -628,6 +628,13 @@ function Admin({ mode = "auto" }) {
         return () => window.clearTimeout(timer);
     }, [userSearch, roleFilter, activeSection, loadUsers]);
 
+    useEffect(() => {
+        document.body.classList.add("admin-theme-active");
+        return () => {
+            document.body.classList.remove("admin-theme-active");
+        };
+    }, []);
+
     const visibleFolderStorage = useMemo(() => {
         return documents.reduce((total, file) => total + Number(file.fileSize || file.size || 0), 0);
     }, [documents]);
@@ -749,7 +756,7 @@ function Admin({ mode = "auto" }) {
         }
     }
 
-    function handleUploadDragOver(event) {
+    const handleUploadDragOver = useCallback((event) => {
         event.preventDefault();
         setIsDropActive(true);
     }, []);
@@ -1498,6 +1505,93 @@ function Admin({ mode = "auto" }) {
         setNotice("");
         setError("");
     }
+
+    const pushToUndo = useCallback((action) => {
+        setUndoStack((prev) => [...prev, action]);
+        setRedoStack([]);
+    }, []);
+
+    const handleUndo = useCallback(async () => {
+        if (undoStack.length === 0) return;
+        const action = undoStack[undoStack.length - 1];
+        setUndoStack((prev) => prev.slice(0, -1));
+        setRedoStack((prev) => [...prev, action]);
+
+        try {
+            setBusy(true);
+            setError("");
+            if (action.type === "rename") {
+                await renameAdminDocument(action.fileId, action.oldName);
+                setNotice(`Undone: renamed back to "${action.oldName}"`);
+            } else if (action.type === "move") {
+                await bulkMoveAdminDocuments(action.fileIds, action.oldCategory);
+                setNotice(`Undone: moved back to folder.`);
+            } else if (action.type === "delete") {
+                if (typeof restoreAdminDocument === "function") {
+                    for (const id of action.fileIds) {
+                        await restoreAdminDocument(id);
+                    }
+                    setNotice("Undone: restored deleted file(s).");
+                }
+            } else if (action.type === "renameFolder") {
+                setFolders((prev) => prev.map((f) => f.value === action.folderValue ? { ...f, label: action.oldLabel } : f));
+                setNotice(`Undone: renamed folder back to "${action.oldLabel}"`);
+            }
+            await loadDocuments();
+            await loadStorageStats();
+        } catch (err) {
+            setError(err.message || "Failed to undo action.");
+        } finally {
+            setBusy(false);
+        }
+    }, [undoStack, loadDocuments, loadStorageStats]);
+
+    const handleRedo = useCallback(async () => {
+        if (redoStack.length === 0) return;
+        const action = redoStack[redoStack.length - 1];
+        setRedoStack((prev) => prev.slice(0, -1));
+        setUndoStack((prev) => [...prev, action]);
+
+        try {
+            setBusy(true);
+            setError("");
+            if (action.type === "rename") {
+                await renameAdminDocument(action.fileId, action.newName);
+                setNotice(`Redone: renamed to "${action.newName}"`);
+            } else if (action.type === "move") {
+                await bulkMoveAdminDocuments(action.fileIds, action.newCategory);
+                setNotice("Redone: moved file(s).");
+            } else if (action.type === "delete") {
+                await bulkDeleteAdminDocuments(action.fileIds);
+                setNotice("Redone: deleted file(s).");
+            } else if (action.type === "renameFolder") {
+                setFolders((prev) => prev.map((f) => f.value === action.folderValue ? { ...f, label: action.newLabel } : f));
+                setNotice(`Redone: renamed folder to "${action.newLabel}"`);
+            }
+            await loadDocuments();
+            await loadStorageStats();
+        } catch (err) {
+            setError(err.message || "Failed to redo action.");
+        } finally {
+            setBusy(false);
+        }
+    }, [redoStack, loadDocuments, loadStorageStats]);
+
+    const pauseUpload = useCallback((id) => {
+        setUploadQueue((current) => current.map((item) => item.id === id ? { ...item, status: "paused" } : item));
+    }, []);
+
+    const resumeUpload = useCallback((id) => {
+        setUploadQueue((current) => current.map((item) => item.id === id ? { ...item, status: "uploading" } : item));
+    }, []);
+
+    const cancelUpload = useCallback((id) => {
+        setUploadQueue((current) => current.filter((item) => item.id !== id));
+    }, []);
+
+    const retryUpload = useCallback((id) => {
+        setUploadQueue((current) => current.map((item) => item.id === id ? { ...item, status: "uploading" } : item));
+    }, []);
 
     const shouldShowLogin = mode === "login" || !isAdminAuthenticated;
 

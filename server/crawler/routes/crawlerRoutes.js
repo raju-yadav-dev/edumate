@@ -10,6 +10,9 @@ router.use(authenticate);
 router.use(authorizeRoles("admin", "super_admin"));
 
 router.post("/start", crawlerController.startCrawl);
+router.post("/jobs/:jobId/cancel", crawlerController.cancelCrawl);
+router.post("/jobs/:jobId/recrawl", crawlerController.recrawlCrawlJob);
+router.delete("/jobs/:jobId", crawlerController.deleteCrawlJob);
 router.get("/jobs", crawlerController.getCrawlJobs);
 router.get("/jobs/:jobId", crawlerController.getCrawlJobDetails);
 

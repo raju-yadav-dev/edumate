@@ -137,23 +137,29 @@ section:not(.hero-section):not(.statistics){
 
 /* ======================================================
    CUSTOM SCROLLBAR
-====================================================== */
+   ====================================================== */
+
+* {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(168, 179, 207, 0.3) transparent;
+}
 
 ::-webkit-scrollbar{
 
-    width:10px;
+    width:8px;
+    height:8px;
 
 }
 
 ::-webkit-scrollbar-track{
 
-    background:var(--surface);
+    background:transparent;
 
 }
 
 ::-webkit-scrollbar-thumb{
 
-    background:var(--primary);
+    background:rgba(168, 179, 207, 0.3);
 
     border-radius:999px;
 
@@ -161,7 +167,7 @@ section:not(.hero-section):not(.statistics){
 
 ::-webkit-scrollbar-thumb:hover{
 
-    background:var(--primary-hover);
+    background:rgba(168, 179, 207, 0.45);
 
 }
 

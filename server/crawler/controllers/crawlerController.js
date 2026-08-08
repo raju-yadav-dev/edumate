@@ -29,8 +29,38 @@ const getCrawlJobDetails = asyncHandler(async (req, res) => {
     return sendSuccess(res, 200, "Crawl job details retrieved successfully.", job);
 });
 
+const cancelCrawl = asyncHandler(async (req, res) => {
+    const job = await crawlerService.cancelCrawl({
+        jobId: req.params.jobId,
+        user: req.user
+    });
+
+    return sendSuccess(res, 200, "Crawl job cancelled successfully.", job);
+});
+
+const recrawlCrawlJob = asyncHandler(async (req, res) => {
+    const job = await crawlerService.recrawlCrawlJob({
+        jobId: req.params.jobId,
+        user: req.user
+    });
+
+    return sendSuccess(res, 201, "Crawl job recrawl started successfully.", job);
+});
+
+const deleteCrawlJob = asyncHandler(async (req, res) => {
+    const result = await crawlerService.deleteCrawlJob({
+        jobId: req.params.jobId,
+        user: req.user
+    });
+
+    return sendSuccess(res, 200, "Crawl job history deleted successfully.", result);
+});
+
 module.exports = {
     startCrawl,
     getCrawlJobs,
-    getCrawlJobDetails
+    getCrawlJobDetails,
+    cancelCrawl,
+    recrawlCrawlJob,
+    deleteCrawlJob
 };

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Play, Loader2, Globe, Calendar, CheckCircle2, AlertTriangle, ListFilter } from "lucide-react";
-import { getCrawlJobs, startCrawl, getCrawlJobDetails } from "./crawlerService";
+import { Play, Loader2, Globe, Calendar, CheckCircle2, AlertTriangle, ListFilter, Square, RefreshCw, Trash2 } from "lucide-react";
+import { getCrawlJobs, startCrawl, getCrawlJobDetails, cancelCrawlJob, recrawlCrawlJob, deleteCrawlJob } from "./crawlerService";
 import "./Crawler.css";
 
 const CATEGORIES = [
@@ -24,6 +24,9 @@ export default function CrawlerManager({ user, setNotice, setError }) {
     const [jobs, setJobs] = useState([]);
     const [loading, setLoading] = useState(false);
     const [startingJob, setStartingJob] = useState(false);
+    const [cancellingJob, setCancellingJob] = useState(false);
+    const [recrawlingJobId, setRecrawlingJobId] = useState(null);
+    const [deletingJobId, setDeletingJobId] = useState(null);
     const [selectedJob, setSelectedJob] = useState(null);
     const logConsoleRef = useRef(null);
 
@@ -40,6 +43,8 @@ export default function CrawlerManager({ user, setNotice, setError }) {
                 const updatedSelected = fetchedJobs.find(j => j._id === selectedJob._id);
                 if (updatedSelected) {
                     setSelectedJob(updatedSelected);
+                } else {
+                    setSelectedJob(null);
                 }
             }
         } catch (err) {
@@ -96,6 +101,52 @@ export default function CrawlerManager({ user, setNotice, setError }) {
             setError(err.message || "Failed to start web crawl.");
         } finally {
             setStartingJob(false);
+        }
+    };
+
+    const handleCancelJob = async () => {
+        if (!selectedJob?._id) return;
+        setCancellingJob(true);
+        try {
+            await cancelCrawlJob(selectedJob._id);
+            setNotice("Crawl job cancellation requested.");
+            await loadJobs();
+        } catch (err) {
+            setError(err.message || "Failed to cancel crawl job.");
+        } finally {
+            setCancellingJob(false);
+        }
+    };
+
+    const handleRecrawlJob = async (job) => {
+        if (!job?._id) return;
+        setRecrawlingJobId(job._id);
+        try {
+            const response = await recrawlCrawlJob(job._id);
+            setNotice("Crawl job recrawl started.");
+            await loadJobs();
+            if (response.data) {
+                setSelectedJob(response.data);
+            }
+        } catch (err) {
+            setError(err.message || "Failed to recrawl crawl job.");
+        } finally {
+            setRecrawlingJobId(null);
+        }
+    };
+
+    const handleDeleteJob = async (job) => {
+        if (!job?._id) return;
+        if (!window.confirm("Delete this crawl job history entry?")) return;
+        setDeletingJobId(job._id);
+        try {
+            await deleteCrawlJob(job._id);
+            setNotice("Crawl job history deleted.");
+            await loadJobs();
+        } catch (err) {
+            setError(err.message || "Failed to delete crawl job history.");
+        } finally {
+            setDeletingJobId(null);
         }
     };
 
@@ -207,9 +258,39 @@ export default function CrawlerManager({ user, setNotice, setError }) {
                                         Category: <strong style={{ color: "var(--admin-gold)" }}>{selectedJob.category}</strong> | Limit: {selectedJob.maxPages} pages
                                     </p>
                                 </div>
-                                <span className={`crawler-badge ${selectedJob.status}`}>
-                                    {selectedJob.status}
-                                </span>
+                                <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                                    <button
+                                        type="button"
+                                        className="crawler-submit-btn"
+                                        onClick={() => handleRecrawlJob(selectedJob)}
+                                        disabled={recrawlingJobId === selectedJob._id || deletingJobId === selectedJob._id}
+                                        style={{ padding: "8px 12px", minWidth: "auto", background: "var(--admin-blue, #2563eb)" }}
+                                    >
+                                        {recrawlingJobId === selectedJob._id ? (
+                                            <><Loader2 className="animate-spin" size={14} /> Recrawling...</>
+                                        ) : (
+                                            <><RefreshCw size={14} /> Re-crawl</>
+                                        )}
+                                    </button>
+                                    {(selectedJob.status === "queued" || selectedJob.status === "crawling") && (
+                                        <button
+                                            type="button"
+                                            className="crawler-submit-btn"
+                                            onClick={handleCancelJob}
+                                            disabled={cancellingJob}
+                                            style={{ padding: "8px 12px", minWidth: "auto", background: "var(--admin-danger, #ef4444)" }}
+                                        >
+                                            {cancellingJob ? (
+                                                <><Loader2 className="animate-spin" size={14} /> Stopping...</>
+                                            ) : (
+                                                <><Square size={14} /> Stop</>
+                                            )}
+                                        </button>
+                                    )}
+                                    <span className={`crawler-badge ${selectedJob.status}`}>
+                                        {selectedJob.status}
+                                    </span>
+                                </div>
                             </div>
 
                             {/* Progress bar */}
@@ -217,7 +298,7 @@ export default function CrawlerManager({ user, setNotice, setError }) {
                                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.8125rem" }}>
                                     <span>Progress</span>
                                     <span>
-                                        {selectedJob.pagesCrawled} / {selectedJob.maxPages === "ALL" ? "∞" : selectedJob.maxPages} pages indexed
+                                        {selectedJob.progress?.indexed ?? selectedJob.pagesCrawled ?? 0} / {selectedJob.maxPages === "ALL" ? "∞" : selectedJob.maxPages} pages indexed
                                     </span>
                                 </div>
                                 <div className="crawler-progress-bar" style={{ marginBottom: "16px" }}>
@@ -226,8 +307,8 @@ export default function CrawlerManager({ user, setNotice, setError }) {
                                         style={{
                                             width: `${
                                                 selectedJob.maxPages === "ALL"
-                                                    ? Math.min(100, (selectedJob.pagesCrawled / 100) * 100) // fake progression if infinite
-                                                    : Math.min(100, (selectedJob.pagesCrawled / (Number(selectedJob.maxPages) || 1)) * 100)
+                                                    ? Math.min(100, ((selectedJob.progress?.indexed || selectedJob.pagesCrawled || 0) / 100) * 100)
+                                                    : Math.min(100, (((selectedJob.progress?.indexed ?? selectedJob.pagesCrawled ?? 0) + (selectedJob.progress?.processing || 0)) / (Number(selectedJob.maxPages) || 1)) * 100)
                                             }%`
                                         }}
                                     ></div>
@@ -236,12 +317,24 @@ export default function CrawlerManager({ user, setNotice, setError }) {
                                 {selectedJob.metadata && (
                                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: "10px", margin: "16px 0" }}>
                                         <div style={{ background: "var(--admin-panel-2)", border: "1px solid var(--admin-line)", borderRadius: "6px", padding: "10px", textAlign: "center" }}>
-                                            <div style={{ fontSize: "0.75rem", color: "var(--admin-muted)" }}>Pages Crawled</div>
-                                            <div style={{ fontSize: "1.25rem", fontWeight: 700, color: "var(--admin-text)" }}>{selectedJob.pagesCrawled || 0}</div>
+                                            <div style={{ fontSize: "0.75rem", color: "var(--admin-muted)" }}>Discovered</div>
+                                            <div style={{ fontSize: "1.25rem", fontWeight: 700, color: "var(--admin-text)" }}>{selectedJob.progress?.discovered ?? selectedJob.metadata.discoveredDocumentsCount ?? 0}</div>
                                         </div>
                                         <div style={{ background: "var(--admin-panel-2)", border: "1px solid var(--admin-line)", borderRadius: "6px", padding: "10px", textAlign: "center" }}>
-                                            <div style={{ fontSize: "0.75rem", color: "var(--admin-muted)" }}>Documents Discovered</div>
-                                            <div style={{ fontSize: "1.25rem", fontWeight: 700, color: "var(--admin-gold)" }}>{selectedJob.metadata.discoveredDocumentsCount || 0}</div>
+                                            <div style={{ fontSize: "0.75rem", color: "var(--admin-muted)" }}>Queued</div>
+                                            <div style={{ fontSize: "1.25rem", fontWeight: 700, color: "var(--admin-blue)" }}>{selectedJob.progress?.queued ?? 0}</div>
+                                        </div>
+                                        <div style={{ background: "var(--admin-panel-2)", border: "1px solid var(--admin-line)", borderRadius: "6px", padding: "10px", textAlign: "center" }}>
+                                            <div style={{ fontSize: "0.75rem", color: "var(--admin-muted)" }}>Processing</div>
+                                            <div style={{ fontSize: "1.25rem", fontWeight: 700, color: "var(--admin-gold)" }}>{selectedJob.progress?.processing ?? 0}</div>
+                                        </div>
+                                        <div style={{ background: "var(--admin-panel-2)", border: "1px solid var(--admin-line)", borderRadius: "6px", padding: "10px", textAlign: "center" }}>
+                                            <div style={{ fontSize: "0.75rem", color: "var(--admin-muted)" }}>Indexed</div>
+                                            <div style={{ fontSize: "1.25rem", fontWeight: 700, color: "var(--admin-green)" }}>{selectedJob.progress?.indexed ?? selectedJob.pagesCrawled ?? 0}</div>
+                                        </div>
+                                        <div style={{ background: "var(--admin-panel-2)", border: "1px solid var(--admin-line)", borderRadius: "6px", padding: "10px", textAlign: "center" }}>
+                                            <div style={{ fontSize: "0.75rem", color: "var(--admin-muted)" }}>Failed</div>
+                                            <div style={{ fontSize: "1.25rem", fontWeight: 700, color: "var(--admin-danger, #ef4444)" }}>{selectedJob.progress?.failed ?? 0}</div>
                                         </div>
                                         {selectedJob.metadata.discoveredDocuments && selectedJob.metadata.discoveredDocuments.length > 0 && (
                                             <div style={{ gridColumn: "1 / -1", maxHeight: "120px", overflowY: "auto", background: "rgba(0, 0, 0, 0.2)", borderRadius: "6px", padding: "10px", fontSize: "0.75rem", textAlign: "left" }}>
@@ -310,6 +403,7 @@ export default function CrawlerManager({ user, setNotice, setError }) {
                                             <th>Category</th>
                                             <th>Status</th>
                                             <th>Pages</th>
+                                            <th>Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -343,6 +437,28 @@ export default function CrawlerManager({ user, setNotice, setError }) {
                                                 </td>
                                                 <td>
                                                     {job.pagesCrawled} / {job.maxPages}
+                                                </td>
+                                                <td onClick={(event) => event.stopPropagation()}>
+                                                    <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
+                                                        <button
+                                                            type="button"
+                                                            className="crawler-submit-btn"
+                                                            onClick={() => handleRecrawlJob(job)}
+                                                            disabled={recrawlingJobId === job._id || deletingJobId === job._id}
+                                                            style={{ padding: "6px 10px", minWidth: "auto", background: "var(--admin-blue, #2563eb)" }}
+                                                        >
+                                                            {recrawlingJobId === job._id ? <Loader2 className="animate-spin" size={12} /> : <RefreshCw size={12} />}
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            className="crawler-submit-btn"
+                                                            onClick={() => handleDeleteJob(job)}
+                                                            disabled={recrawlingJobId === job._id || deletingJobId === job._id}
+                                                            style={{ padding: "6px 10px", minWidth: "auto", background: "var(--admin-danger, #ef4444)" }}
+                                                        >
+                                                            {deletingJobId === job._id ? <Loader2 className="animate-spin" size={12} /> : <Trash2 size={12} />}
+                                                        </button>
+                                                    </div>
                                                 </td>
                                             </tr>
                                         ))}

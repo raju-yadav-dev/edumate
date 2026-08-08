@@ -341,8 +341,6 @@
 
 @media (max-width: 720px) {
     .document-manager-shell { height: auto; padding-inline: 10px; }
-    .document-layout { height: auto; min-height: 0; grid-template-columns: 1fr; }
-    .document-sidebar { border-right: 0; border-bottom: 1px solid var(--admin-line); }
     .document-content > .toolbar,
     .document-filter-row { grid-template-columns: 1fr; }
     .document-content > .toolbar { min-height: 0; padding: 12px; }

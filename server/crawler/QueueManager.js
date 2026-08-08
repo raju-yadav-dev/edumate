@@ -4,10 +4,12 @@ class QueueManager {
     constructor(maxPages = 50, maxDepth = 3) {
         this.maxPages = maxPages === "ALL" ? Infinity : Number(maxPages);
         this.maxDepth = maxDepth;
-        this.queue = [];      // Array of objects: { url, depth }
+        this.queue = [];      // Array of objects: { url, depth, attempts, status }
         this.visited = new Set();
         this.crawledUrlsList = [];
         this.documentsList = []; // Track URLs of supported files (PDF, DOCX, etc.)
+        this.urlStatuses = new Map();
+        this.discoveredCount = 0;
         this.supportedExtensions = [
             ".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx",
             ".csv", ".txt", ".md", ".markdown", ".xml", ".json",
@@ -38,8 +40,9 @@ class QueueManager {
             // Verify if it is a document file URL or HTML page
             const parsedUrl = new URL(normalized);
             const ext = path.extname(parsedUrl.pathname).toLowerCase();
+            const isSitemapUrl = /sitemap(?:_index)?\.xml$/i.test(parsedUrl.pathname) || /\/sitemap/i.test(parsedUrl.pathname);
 
-            if (this.supportedExtensions.includes(ext)) {
+            if (this.supportedExtensions.includes(ext) && !isSitemapUrl) {
                 // If it is a document file, add to documentsList but do not enqueue for recursive crawl outlinks
                 if (!this.documentsList.includes(normalized)) {
                     this.documentsList.push(normalized);
@@ -49,8 +52,10 @@ class QueueManager {
 
             // Check if already in queue
             if (this.queue.some(item => item.url === normalized)) return;
+            if (this.urlStatuses.has(normalized)) return;
 
-            this.queue.push({ url: normalized, depth });
+            this.discoveredCount += 1;
+            this.queue.push({ url: normalized, depth, attempts: 0, status: "pending" });
         } catch {
             // Ignore parse errors
         }
@@ -67,6 +72,7 @@ class QueueManager {
 
         const item = this.queue.shift();
         this.visited.add(item.url);
+        this.setUrlStatus(item.url, "processing");
         return item;
     }
 
@@ -75,9 +81,37 @@ class QueueManager {
      */
     markCrawled(urlStr) {
         const normalized = this.normalizeUrl(urlStr);
-        if (normalized && !this.crawledUrlsList.includes(normalized)) {
+        if (!normalized) return;
+        if (!this.crawledUrlsList.includes(normalized)) {
             this.crawledUrlsList.push(normalized);
         }
+        this.setUrlStatus(normalized, "completed");
+    }
+
+    setUrlStatus(urlStr, status, error = null) {
+        const normalized = this.normalizeUrl(urlStr);
+        if (!normalized) return;
+        const current = this.urlStatuses.get(normalized) || { status: "pending", attempts: 0, errors: [] };
+        const next = {
+            ...current,
+            status,
+            attempts: status === "processing" ? current.attempts + 1 : current.attempts,
+            errors: error ? [...(current.errors || []), error] : current.errors || []
+        };
+        this.urlStatuses.set(normalized, next);
+    }
+
+    markFailed(urlStr, error) {
+        const normalized = this.normalizeUrl(urlStr);
+        if (!normalized) return;
+        const current = this.urlStatuses.get(normalized) || { status: "pending", attempts: 0, errors: [] };
+        const attempts = current.attempts + 1;
+        this.urlStatuses.set(normalized, {
+            ...current,
+            status: "failed",
+            attempts,
+            errors: [...(current.errors || []), error]
+        });
     }
 
     /**
@@ -114,12 +148,30 @@ class QueueManager {
      * Get crawl diagnostics
      */
     getStats() {
+        const statuses = Array.from(this.urlStatuses.values());
+        const pending = statuses.filter((item) => item.status === "pending" || item.status === "processing").length;
+        const completed = statuses.filter((item) => item.status === "completed").length;
+        const failed = statuses.filter((item) => item.status === "failed").length;
+
+        const queued = this.queue.length;
+        const processing = statuses.filter((item) => item.status === "processing").length;
+        const indexed = completed;
+
         return {
-            totalQueued: this.queue.length,
+            totalQueued: queued,
             totalVisited: this.visited.size,
             pagesCrawled: this.crawledUrlsList.length,
             crawledUrls: this.crawledUrlsList,
-            discoveredDocuments: this.documentsList
+            discoveredDocuments: this.documentsList,
+            discovered: this.discoveredCount,
+            queued,
+            processing,
+            indexed,
+            failed,
+            pending,
+            completed,
+            failed,
+            urlStatuses: Object.fromEntries(this.urlStatuses)
         };
     }
 }

@@ -79,6 +79,11 @@ const documentSchema = new mongoose.Schema(
             required: true,
             index: true
         },
+        contentHash: {
+            type: String,
+            default: "",
+            index: true
+        },
         storagePath: {
             type: String,
             required: true
