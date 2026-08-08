@@ -126,7 +126,26 @@ const permanentDeleteDocument = asyncHandler(async (req, res) => {
 
 const duplicateDocument = asyncHandler(async (req, res) => {
     const document = await documentService.duplicateDocument({ documentId: req.params.documentId, user: req.user });
+
     return sendSuccess(res, 201, "Document duplicated successfully.", document);
+});
+
+const bulkMoveDocuments = asyncHandler(async (req, res) => {
+    const { ids, category } = req.body;
+    const result = await documentService.bulkMove({ ids, category, user: req.user });
+    return sendSuccess(res, 200, "Documents moved successfully.", result);
+});
+
+const bulkCopyDocuments = asyncHandler(async (req, res) => {
+    const { ids, category } = req.body;
+    const result = await documentService.bulkCopy({ ids, category, user: req.user });
+    return sendSuccess(res, 201, "Documents copied successfully.", result);
+});
+
+const bulkDeleteDocuments = asyncHandler(async (req, res) => {
+    const { ids } = req.body;
+    const result = await documentService.bulkDelete({ ids, user: req.user });
+    return sendSuccess(res, 200, "Documents deleted successfully.", result);
 });
 
 module.exports = {
@@ -145,5 +164,8 @@ module.exports = {
     ignoreFailedDocument,
     restoreDocument,
     permanentDeleteDocument,
-    duplicateDocument
+    duplicateDocument,
+    bulkMoveDocuments,
+    bulkCopyDocuments,
+    bulkDeleteDocuments
 };

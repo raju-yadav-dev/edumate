@@ -30,11 +30,88 @@ const downloadFromSupabase = async (storagePath) => {
  * @param {Buffer} [fileBuffer] - Optional document buffer already in memory
  * @returns {Promise<void>}
  */
+const bufferCache = new Map();
+let isWorkerRunning = false;
+
+/**
+ * Wraps a promise in a timeout
+ * @param {Promise} promise 
+ * @param {number} ms 
+ * @param {string} message 
+ */
+const withTimeout = (promise, ms, message = "Operation timed out") => {
+    let timeoutId;
+    const timeoutPromise = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => {
+            reject(new Error(message));
+        }, ms);
+    });
+    return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
+};
+
+const processNextJob = async () => {
+    if (isWorkerRunning) return;
+    isWorkerRunning = true;
+
+    try {
+        while (true) {
+            const nextDoc = await Document.findOne({
+                status: { $ne: "deleted" },
+                embeddingStatus: "pending"
+            }).sort({ updatedAt: 1 });
+
+            if (!nextDoc) break;
+
+            await runIndexingJob(nextDoc._id);
+
+            // Wait 1.5 seconds between jobs to respect Gemini API rate limits
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+        }
+    } catch (err) {
+        console.error("Indexing worker queue error:", err);
+    } finally {
+        isWorkerRunning = false;
+    }
+};
+
+/**
+ * Indexes a PDF document in Qdrant in the background (queued)
+ * @param {string} documentId - MongoDB Document reference ID
+ * @param {Buffer} [fileBuffer] - Optional document buffer already in memory
+ * @returns {Promise<void>}
+ */
 const indexDocumentBackground = async (documentId, fileBuffer = null) => {
     const document = await Document.findById(documentId);
     if (!document || document.status === "deleted") {
         return;
     }
+
+    document.embeddingStatus = "pending";
+    await document.save();
+
+    if (fileBuffer) {
+        bufferCache.set(String(documentId), fileBuffer);
+    }
+
+    processNextJob().catch((err) => {
+        console.error("Background worker process start failure:", err);
+    });
+};
+
+/**
+ * Runs the actual extraction and embedding logic sequentially with timeouts
+ * @param {string} documentId
+ * @returns {Promise<void>}
+ */
+const runIndexingJob = async (documentId) => {
+    const document = await Document.findById(documentId);
+    if (!document || document.status === "deleted") {
+        return;
+    }
+
+    const cacheKey = String(documentId);
+    const fileBuffer = bufferCache.get(cacheKey);
+    bufferCache.delete(cacheKey);
 
     try {
         document.embeddingStatus = "processing";
@@ -42,12 +119,42 @@ const indexDocumentBackground = async (documentId, fileBuffer = null) => {
 
         let buffer = fileBuffer;
         if (!buffer) {
-            buffer = await downloadFromSupabase(document.storagePath);
+            buffer = await withTimeout(
+                downloadFromSupabase(document.storagePath),
+                35000,
+                "Supabase file download timed out (35s)"
+            );
         }
 
-        let rawChunks = [];
-        let numPages = 1;
-        let extractedText = "";
+        // Only index PDF files
+        if (document.mimeType !== "application/pdf") {
+            document.embeddingStatus = "not_required";
+            await document.save();
+            return;
+        }
+
+        // 1. Extract text page-by-page (45s timeout)
+        const parsed = await withTimeout(
+            pdfExtractor.extractText(buffer),
+            45000,
+            "PDF text extraction timed out (45s)"
+        );
+        
+        if (parsed.requiresOcr) {
+            document.embeddingStatus = "not_required";
+            document.metadata = {
+                ...(document.metadata || {}),
+                requiresOcr: true,
+                notes: (document.metadata?.notes || "") + "\n[Image-only PDF. Indexing skipped.]"
+            };
+            await document.save();
+            return;
+        }
+
+        // 2. Clear any existing chunks for this document in Qdrant
+        await deleteDocumentIndex(documentId);
+
+        // 3. Chunk page texts using the splitter
         const splitter = new RecursiveCharacterTextSplitter();
 
         const isPdf = document.mimeType === "application/pdf" || document.originalName.toLowerCase().endsWith(".pdf");
@@ -95,9 +202,13 @@ const indexDocumentBackground = async (documentId, fileBuffer = null) => {
         await deleteDocumentIndex(documentId);
 
         if (rawChunks.length > 0) {
-            // 4. Batch generate embeddings for all chunks
+            // 4. Batch generate embeddings for all chunks (50s timeout)
             const textsToEmbed = rawChunks.map((c) => c.content);
-            const embeddings = await embeddingService.getChunksEmbeddings(textsToEmbed);
+            const embeddings = await withTimeout(
+                embeddingService.getChunksEmbeddings(textsToEmbed),
+                50000,
+                "Gemini API embedding generation timed out (50s)"
+            );
 
             // 5. Structure payload points for Qdrant
             const points = [];
@@ -135,15 +246,15 @@ const indexDocumentBackground = async (documentId, fileBuffer = null) => {
                 });
             }
 
-            // 6. Bulk insert points to Qdrant collection in batches of 100 to prevent timeouts/failures
-            const qdrantBatchSize = 100;
-            for (let start = 0; start < points.length; start += qdrantBatchSize) {
-                const subPoints = points.slice(start, start + qdrantBatchSize);
-                await client.upsert(collectionName, {
+            // 6. Bulk insert points to Qdrant collection (30s timeout)
+            await withTimeout(
+                client.upsert(collectionName, {
                     wait: true,
-                    points: subPoints
-                });
-            }
+                    points
+                }),
+                30000,
+                "Qdrant vector database upload timed out (30s)"
+            );
         }
 
         document.embeddingStatus = "indexed";
@@ -164,6 +275,23 @@ const indexDocumentBackground = async (documentId, fileBuffer = null) => {
         await document.save();
     }
 };
+
+// Start queue processor on module load and reset any stuck tasks
+setTimeout(async () => {
+    try {
+        const stuckDocs = await Document.updateMany(
+            { status: { $ne: "deleted" }, embeddingStatus: "processing" },
+            { $set: { embeddingStatus: "pending" } }
+        );
+        if (stuckDocs.modifiedCount > 0) {
+            console.log(`[IndexingService] Reset ${stuckDocs.modifiedCount} stuck "processing" documents back to "pending".`);
+        }
+    } catch (err) {
+        console.error("Failed to reset stuck processing documents on start:", err);
+    }
+
+    processNextJob().catch(err => console.error("Initial worker queue start failed:", err));
+}, 3000);
 
 /**
  * Removes a document index from Qdrant using filter key match query

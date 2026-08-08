@@ -8,6 +8,8 @@ import { FaEye, FaEyeSlash } from "react-icons/fa";
 
 import useAdminAuth from "../hooks/useAdminAuth";
 import useAuth from "../hooks/useAuth";
+import { getApiRootUrl } from "../services/apiConfig";
+import { getAdminAccessToken } from "../services/adminSession";
 import {
     deleteAdminDocument,
     deleteAdminUser,
@@ -21,7 +23,17 @@ import {
     uploadAdminDocument,
     renameAdminDocument,
     moveAdminDocument,
-    copyAdminDocument
+    copyAdminDocument,
+    bulkMoveAdminDocuments,
+    bulkCopyAdminDocuments,
+    bulkDeleteAdminDocuments,
+    bulkReindexAdminDocuments,
+    getJobsStatus,
+    retryFailedDocuments,
+    ignoreFailedDocument,
+    restoreAdminDocument,
+    permanentDeleteAdminDocument,
+    duplicateAdminDocument
 } from "../services/adminService";
 
 import DashboardStats from "./components/dashboard/DashboardStats";
@@ -169,9 +181,33 @@ function formatFolderLabel(value) {
         .join(" ");
 }
 
+function breakFolderCycles(list) {
+    if (!Array.isArray(list)) return [];
+    const adj = {};
+    list.forEach(f => {
+        if (f && f.value) {
+            adj[f.value] = f.parent || null;
+        }
+    });
+
+    return list.map(f => {
+        if (!f) return f;
+        let current = f.value;
+        const visited = new Set();
+        while (current) {
+            if (visited.has(current)) {
+                return { ...f, parent: null };
+            }
+            visited.add(current);
+            current = adj[current] || null;
+        }
+        return f;
+    });
+}
+
 function sanitizeFolders(list) {
     if (!Array.isArray(list)) return [];
-    return list.map(f => {
+    const sanitized = list.map(f => {
         if (!f || typeof f !== "object") return null;
         return {
             label: String(f.label || "").trim(),
@@ -179,6 +215,23 @@ function sanitizeFolders(list) {
             parent: (f.parent && typeof f.parent === "string") ? f.parent : null
         };
     }).filter(Boolean);
+
+    return breakFolderCycles(sanitized);
+}
+
+function getDescendantFolders(foldersList, parentVal) {
+    const visited = new Set();
+    const recurse = (val) => {
+        if (visited.has(val)) return [];
+        visited.add(val);
+        let desc = [val];
+        const children = foldersList.filter(f => f.parent === val);
+        children.forEach(child => {
+            desc = [...desc, ...recurse(child.value)];
+        });
+        return desc;
+    };
+    return recurse(parentVal);
 }
 
 function Admin({ mode = "auto" }) {
@@ -242,6 +295,10 @@ function Admin({ mode = "auto" }) {
     });
     const [isDropActive, setIsDropActive] = useState(false);
     const [uploadProgress, setUploadProgress] = useState(null);
+    const [uploadQueue, setUploadQueue] = useState([]);
+    const [undoStack, setUndoStack] = useState([]);
+    const [redoStack, setRedoStack] = useState([]);
+    const [jobs, setJobs] = useState({ queue: [], running: [], failed: [], completedCount: 0, totalCount: 0 });
     const adminEmailRef = useRef(null);
     const adminPasswordRef = useRef(null);
 
@@ -256,13 +313,18 @@ function Admin({ mode = "auto" }) {
         });
 
         const recursiveCounts = {};
+        const visited = new Set();
         const getCount = (val) => {
             if (recursiveCounts[val] !== undefined) return recursiveCounts[val];
+            if (visited.has(val)) return 0;
+            visited.add(val);
+
             let sum = directCounts[val] || 0;
             const children = folders.filter(f => f.parent === val);
             children.forEach(child => {
                 sum += getCount(child.value);
             });
+            visited.delete(val);
             recursiveCounts[val] = sum;
             return sum;
         };
@@ -273,6 +335,114 @@ function Admin({ mode = "auto" }) {
 
         return recursiveCounts;
     }, [documents, folders, storageStats]);
+
+    const folderIndexStats = useMemo(() => {
+        const statsMap = {};
+        const visited = new Set();
+        const getStats = (val) => {
+            if (statsMap[val]) return statsMap[val];
+            if (visited.has(val)) {
+                return {
+                    indexed: 0,
+                    failed: 0,
+                    pending: 0,
+                    total: 0,
+                    bytes: 0,
+                    totalChunks: 0,
+                    totalEmbeddings: 0,
+                    lastIndexed: null,
+                    status: "empty",
+                    failedFiles: []
+                };
+            }
+            visited.add(val);
+
+            const category = storageStats?.categoryCounts?.[val] || {};
+            let indexed = Number(category.indexed || 0);
+            let failed = Number(category.failed || 0);
+            let pending = Number(category.pending || category.processing || 0);
+            let total = Number(category.count || 0);
+            let bytes = Number(category.bytes || 0);
+            let totalChunks = Number(category.totalChunks || 0);
+            let totalEmbeddings = Number(category.totalEmbeddings || 0);
+            let lastIndexed = category.lastIndexed ? new Date(category.lastIndexed) : null;
+            let failedFiles = [];
+
+            if (!storageStats?.categoryCounts) {
+                const docs = documents.filter(d => d.category === val && d.status !== "deleted");
+                total = docs.length;
+                docs.forEach(d => {
+                    bytes += Number(d.fileSize || d.size || 0);
+                    totalChunks += Number(d.chunkCount || 0);
+                    if (d.embeddingStatus === "indexed") {
+                        indexed++;
+                        totalEmbeddings += Number(d.chunkCount || 0);
+                        if (!lastIndexed || new Date(d.updatedAt) > lastIndexed) {
+                            lastIndexed = new Date(d.updatedAt);
+                        }
+                    } else if (d.embeddingStatus === "failed") {
+                        failed++;
+                        failedFiles.push(d.originalName || d.title);
+                    } else if (d.embeddingStatus === "pending" || d.embeddingStatus === "processing") {
+                        pending++;
+                    }
+                });
+            } else {
+                const docs = documents.filter(d => d.category === val && d.status !== "deleted" && d.embeddingStatus === "failed");
+                docs.forEach(d => {
+                    failedFiles.push(d.originalName || d.title);
+                });
+            }
+
+            const children = folders.filter(f => f.parent === val);
+            children.forEach(child => {
+                const childStats = getStats(child.value);
+                indexed += childStats.indexed;
+                failed += childStats.failed;
+                pending += childStats.pending;
+                total += childStats.total;
+                bytes += childStats.bytes;
+                totalChunks += childStats.totalChunks;
+                totalEmbeddings += childStats.totalEmbeddings;
+                failedFiles = [...failedFiles, ...(childStats.failedFiles || [])];
+                if (childStats.lastIndexed) {
+                    if (!lastIndexed || childStats.lastIndexed > lastIndexed) {
+                        lastIndexed = childStats.lastIndexed;
+                    }
+                }
+            });
+
+            let status = "empty";
+            if (total > 0) {
+                if (failed > 0) {
+                    status = "failed";
+                } else if (pending > 0) {
+                    status = "indexing";
+                } else {
+                    status = "success";
+                }
+            }
+
+            const result = {
+                indexed,
+                failed,
+                pending,
+                total,
+                bytes,
+                totalChunks,
+                totalEmbeddings,
+                lastIndexed,
+                status,
+                failedFiles: Array.from(new Set(failedFiles))
+            };
+            visited.delete(val);
+            statsMap[val] = result;
+            return result;
+        };
+
+        folders.forEach(f => getStats(f.value));
+        return statsMap;
+    }, [folders, documents, storageStats]);
 
     useEffect(() => {
         try {
@@ -393,6 +563,25 @@ function Admin({ mode = "auto" }) {
             setStorageStats(null);
         }
     }, [handleAuthError]);
+
+    const loadJobs = useCallback(async () => {
+        try {
+            const response = await getJobsStatus();
+            if (response && response.data) {
+                setJobs(response.data);
+            }
+        } catch (e) {
+            console.error("Failed to load background jobs:", e);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (isAdminAuthenticated && activeSection === "files") {
+            loadJobs();
+            const interval = setInterval(loadJobs, 8000);
+            return () => clearInterval(interval);
+        }
+    }, [isAdminAuthenticated, activeSection, loadJobs]);
 
     const handleShowStorageOverview = useCallback(() => {
         setActiveSection("storage");
@@ -563,11 +752,11 @@ function Admin({ mode = "auto" }) {
     function handleUploadDragOver(event) {
         event.preventDefault();
         setIsDropActive(true);
-    }
+    }, []);
 
-    function handleUploadDragLeave() {
+    const handleUploadDragLeave = useCallback(() => {
         setIsDropActive(false);
-    }
+    }, []);
 
     async function handleUploadDrop(event) {
         event.preventDefault();
@@ -702,6 +891,7 @@ function Admin({ mode = "auto" }) {
             setBusy(true);
             setError("");
             await deleteAdminDocument(id);
+            pushToUndo({ type: "delete", fileIds: [id], label: "Delete document" });
             setNotice("Document deleted.");
             await loadDocuments();
             await loadStorageStats();
@@ -744,6 +934,7 @@ function Admin({ mode = "auto" }) {
             setBusy(true);
             setError("");
             await renameAdminDocument(id, newName.trim());
+            pushToUndo({ type: "rename", fileId: id, oldName: currentName, newName: newName.trim(), label: `Rename file to "${newName.trim()}"` });
             setNotice("Document renamed.");
             await loadDocuments();
             await loadStorageStats();
@@ -778,6 +969,7 @@ function Admin({ mode = "auto" }) {
             setBusy(true);
             setError("");
             await moveAdminDocument(id, newCategory);
+            pushToUndo({ type: "move", fileIds: [id], oldCategory: currentCategory, newCategory: newCategory, label: `Move file to "${newCategoryLabel.trim()}"` });
             setNotice("Document moved.");
             await loadDocuments();
             await loadStorageStats();
@@ -912,7 +1104,8 @@ function Admin({ mode = "auto" }) {
         try {
             setBusy(true);
             setError("");
-            await Promise.all(selectedIds.map((id) => deleteAdminDocument(id)));
+            await bulkDeleteAdminDocuments(selectedIds);
+            pushToUndo({ type: "delete", fileIds: [...selectedIds], label: `Delete ${selectedIds.length} document(s)` });
             setSelectedIds([]);
             setNotice("Selected files deleted.");
             await loadDocuments();
@@ -968,7 +1161,7 @@ function Admin({ mode = "auto" }) {
         if (!folder) return;
 
         const newName = window.prompt("Rename folder to:", folder.label);
-        if (!newName || newName.trim() === "") return;
+        if (!newName || newName.trim() === "" || newName.trim() === folder.label) return;
 
         const nextFolders = sanitizeFolders(folders.map((f) => {
             if (f.value === folderValue) {
@@ -979,6 +1172,7 @@ function Admin({ mode = "auto" }) {
 
         setFolders(nextFolders);
         window.localStorage.setItem("edumate-admin-folders", JSON.stringify(nextFolders));
+        pushToUndo({ type: "renameFolder", folderValue, oldLabel: folder.label, newLabel: newName.trim(), label: `Rename folder to "${newName.trim()}"` });
         setNotice(`Folder renamed to ${newName.trim()}.`);
     }
 
@@ -986,16 +1180,7 @@ function Admin({ mode = "auto" }) {
         const folder = folders.find((f) => f.value === folderValue);
         if (!folder) return;
 
-        const getAllDescendantFolderValues = (parentVal) => {
-            let desc = [parentVal];
-            const children = folders.filter(f => f.parent === parentVal);
-            children.forEach(child => {
-                desc = [...desc, ...getAllDescendantFolderValues(child.value)];
-            });
-            return desc;
-        };
-
-        const descendantFolderValues = getAllDescendantFolderValues(folderValue);
+        const descendantFolderValues = getDescendantFolders(folders, folderValue);
 
         let filesToMove = [];
         try {
@@ -1055,15 +1240,7 @@ function Admin({ mode = "auto" }) {
         const folder = folders.find((f) => f.value === folderValue);
         if (!folder) return;
 
-        const getAllDescendantFolderValues = (parentVal) => {
-            let desc = [parentVal];
-            const children = folders.filter(f => f.parent === parentVal);
-            children.forEach(child => {
-                desc = [...desc, ...getAllDescendantFolderValues(child.value)];
-            });
-            return desc;
-        };
-        const descendantValues = getAllDescendantFolderValues(folderValue);
+        const descendantValues = getDescendantFolders(folders, folderValue);
 
         const eligibleParents = folders.filter(f => !descendantValues.includes(f.value));
         const parentOptionsStr = ["Root", ...eligibleParents.map(f => f.label)].join(", ");
@@ -1119,9 +1296,7 @@ function Admin({ mode = "auto" }) {
                 if (oldCat === newCat) continue;
                 const response = await listAdminDocuments({ category: oldCat, limit: 1000, ignoreInstitution: "true" });
                 if (response && response.data && response.data.length > 0) {
-                    for (const doc of response.data) {
-                        await moveAdminDocument(doc._id, newCat);
-                    }
+                    await bulkMoveAdminDocuments(response.data.map(d => d._id), newCat);
                 }
             }
 
@@ -1146,6 +1321,97 @@ function Admin({ mode = "auto" }) {
                 setActiveFolder(categoryRenames[activeFolder]);
                 setUpload(current => ({ ...current, category: categoryRenames[activeFolder] }));
             }
+
+            pushToUndo({
+                type: "moveFolder",
+                folderValue,
+                oldParent: folder.parent,
+                newParent: targetParentValue,
+                categoryRenames,
+                label: `Move folder "${folder.label}"`
+            });
+
+            setNotice(`Folder "${folder.label}" moved successfully.`);
+            await loadDocuments();
+            await loadStorageStats();
+        } catch (err) {
+            setError(err.message || "Failed to move folder.");
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    async function moveFolderDirect(folderValue, targetParentValue) {
+        const folder = folders.find((f) => f.value === folderValue);
+        if (!folder) return;
+
+        const descendantValues = getDescendantFolders(folders, folderValue);
+        if (descendantValues.includes(targetParentValue)) {
+            setError("Cannot move a folder into itself or its subfolders.");
+            return;
+        }
+
+        try {
+            setBusy(true);
+            setError("");
+
+            const categoryRenames = {};
+
+            const updateSubtree = (currentValue, newParentVal) => {
+                const f = folders.find(item => item.value === currentValue);
+                if (!f) return;
+
+                const slug = currentValue.split("_").pop();
+                const newCurrentValue = newParentVal ? `${newParentVal}_${slug}` : slug;
+
+                categoryRenames[currentValue] = newCurrentValue;
+
+                const children = folders.filter(item => item.parent === currentValue);
+                children.forEach(child => {
+                    updateSubtree(child.value, newCurrentValue);
+                });
+            };
+
+            updateSubtree(folderValue, targetParentValue);
+
+            for (const [oldCat, newCat] of Object.entries(categoryRenames)) {
+                if (oldCat === newCat) continue;
+                const response = await listAdminDocuments({ category: oldCat, limit: 1000, ignoreInstitution: "true" });
+                if (response && response.data && response.data.length > 0) {
+                    await bulkMoveAdminDocuments(response.data.map(d => d._id), newCat);
+                }
+            }
+
+            const nextFolders = folders.map(f => {
+                if (categoryRenames[f.value] !== undefined) {
+                    const newValue = categoryRenames[f.value];
+                    const newParent = f.value === folderValue ? targetParentValue : categoryRenames[f.parent];
+                    return {
+                        ...f,
+                        value: newValue,
+                        parent: newParent
+                    };
+                }
+                return f;
+            });
+
+            const sanitized = sanitizeFolders(nextFolders);
+            setFolders(sanitized);
+            window.localStorage.setItem("edumate-admin-folders", JSON.stringify(sanitized));
+
+            if (categoryRenames[activeFolder] !== undefined) {
+                setActiveFolder(categoryRenames[activeFolder]);
+                setUpload(current => ({ ...current, category: categoryRenames[activeFolder] }));
+            }
+
+            pushToUndo({
+                type: "moveFolder",
+                folderValue,
+                oldParent: folder.parent,
+                newParent: targetParentValue,
+                categoryRenames,
+                label: `Move folder "${folder.label}"`
+            });
 
             setNotice(`Folder "${folder.label}" moved successfully.`);
             await loadDocuments();
@@ -1189,16 +1455,18 @@ function Admin({ mode = "auto" }) {
             setBusy(true);
             setError("");
 
-            const promises = clipboard.fileIds.map((id) => {
-                if (clipboard.action === "copy") {
-                    return copyAdminDocument(id, pasteCategory);
-                } else if (clipboard.action === "cut") {
-                    return moveAdminDocument(id, pasteCategory);
-                }
-                return Promise.resolve();
-            });
-
-            await Promise.all(promises);
+            if (clipboard.action === "copy") {
+                await bulkCopyAdminDocuments(clipboard.fileIds, pasteCategory);
+            } else if (clipboard.action === "cut") {
+                await bulkMoveAdminDocuments(clipboard.fileIds, pasteCategory);
+                pushToUndo({
+                    type: "move",
+                    fileIds: [...clipboard.fileIds],
+                    oldCategory: clipboard.sourceCategory,
+                    newCategory: pasteCategory,
+                    label: `Move ${clipboard.fileIds.length} document(s)`
+                });
+            }
 
             const actionLabel = clipboard.action === "copy" ? "copied" : "moved";
             setNotice(`${clipboard.fileIds.length} file(s) successfully ${actionLabel}.`);
@@ -1353,6 +1621,7 @@ function Admin({ mode = "auto" }) {
                             onRenameFolder={handleRenameFolder}
                             onDeleteFolder={handleDeleteFolder}
                             onMoveFolder={handleMoveFolder}
+                            onMoveFolderDirect={moveFolderDirect}
                             onDrop={handleUploadDrop}
                             onDragOver={handleUploadDragOver}
                             onDragLeave={handleUploadDragLeave}
@@ -1370,6 +1639,22 @@ function Admin({ mode = "auto" }) {
                             onDelete={removeDocument}
                             onBulkDelete={bulkDeleteDocuments}
                             onContextMenu={openContextMenu}
+                            folderIndexStats={folderIndexStats}
+                            uploadQueue={uploadQueue}
+                            onPauseUpload={pauseUpload}
+                            onResumeUpload={resumeUpload}
+                            onCancelUpload={cancelUpload}
+                            onRetryUpload={retryUpload}
+                            onUndo={handleUndo}
+                            onRedo={handleRedo}
+                            undoStack={undoStack}
+                            redoStack={redoStack}
+                            onMoveDocuments={bulkMoveAdminDocuments}
+                            onCopyDocuments={bulkCopyAdminDocuments}
+                            onDeleteDocuments={bulkDeleteAdminDocuments}
+                            setSelectedIds={setSelectedIds}
+                            setFolders={setFolders}
+                            jobs={jobs}
                         />
                     </>
                 ) : null}

@@ -450,3 +450,91 @@ export async function duplicateAdminDocument(documentId) {
     });
     return parseResponse(response, "Unable to duplicate document.");
 }
+
+export async function bulkMoveAdminDocuments(ids, category) {
+    const token = getAdminAccessToken();
+    const response = await fetch(`${DOCUMENT_API_BASE_URL}/bulk-move`, {
+        method: "PUT",
+        headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({ ids, category })
+    });
+    return parseResponse(response, "Unable to bulk move documents.");
+}
+
+export async function bulkCopyAdminDocuments(ids, category) {
+    const token = getAdminAccessToken();
+    const response = await fetch(`${DOCUMENT_API_BASE_URL}/bulk-copy`, {
+        method: "PUT",
+        headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({ ids, category })
+    });
+    return parseResponse(response, "Unable to bulk copy documents.");
+}
+
+export async function bulkDeleteAdminDocuments(ids) {
+    const token = getAdminAccessToken();
+    const response = await fetch(`${DOCUMENT_API_BASE_URL}/bulk-delete`, {
+        method: "DELETE",
+        headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({ ids })
+    });
+    return parseResponse(response, "Unable to bulk delete documents.");
+}
+
+export async function clearAdminCache() {
+    const token = getAdminAccessToken();
+    const response = await fetch(`${ADMIN_API_BASE_URL}/cache/clear`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    return parseResponse(response, "Unable to clear cache.");
+}
+
+export async function backupAdminDatabase() {
+    const token = getAdminAccessToken();
+    const response = await fetch(`${ADMIN_API_BASE_URL}/backup`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    return parseResponse(response, "Unable to export database backup.");
+}
+
+export async function restoreAdminBackup(collections) {
+    const token = getAdminAccessToken();
+    const response = await fetch(`${ADMIN_API_BASE_URL}/restore`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({ collections })
+    });
+    return parseResponse(response, "Unable to restore database backup.");
+}
+
+export async function cleanupUnusedChunks() {
+    const token = getAdminAccessToken();
+    const response = await fetch(`${ADMIN_API_BASE_URL}/chunks/cleanup`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    return parseResponse(response, "Unable to clean up vector chunks.");
+}
+
+export async function rebuildAllEmbeddings() {
+    const token = getAdminAccessToken();
+    const response = await fetch(`${DOCUMENT_API_BASE_URL}/rebuild`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    return parseResponse(response, "Unable to rebuild embeddings.");
+}

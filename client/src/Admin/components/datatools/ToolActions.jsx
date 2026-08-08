@@ -13,7 +13,14 @@ import {
     X,
     Loader2
 } from "lucide-react";
-import { rebuildAdminDocumentEmbeddings } from "../../../services/adminService";
+import {
+    rebuildAdminDocumentEmbeddings,
+    clearAdminCache,
+    backupAdminDatabase,
+    restoreAdminBackup,
+    cleanupUnusedChunks,
+    rebuildAllEmbeddings
+} from "../../../services/adminService";
 
 export default function ToolActions({ onOperationComplete, documents = [], onRefresh }) {
     const [executingTool, setExecutingTool] = useState(null);
@@ -115,15 +122,82 @@ export default function ToolActions({ onOperationComplete, documents = [], onRef
     ];
 
     const triggerRealAction = async (tool) => {
-        if (tool.id === "export-data" || tool.id === "backup-database") {
-            // Real export download
+        if (tool.id === "export-data") {
             const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(documents, null, 2));
             const downloadAnchor = document.createElement("a");
             downloadAnchor.setAttribute("href", dataStr);
-            downloadAnchor.setAttribute("download", `edumate_${tool.id}_${Date.now()}.json`);
+            downloadAnchor.setAttribute("download", `edumate_export_${Date.now()}.json`);
             document.body.appendChild(downloadAnchor);
             downloadAnchor.click();
             downloadAnchor.remove();
+        } else if (tool.id === "backup-database") {
+            try {
+                const response = await backupAdminDatabase();
+                if (response && response.data) {
+                    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(response.data, null, 2));
+                    const downloadAnchor = document.createElement("a");
+                    downloadAnchor.setAttribute("href", dataStr);
+                    downloadAnchor.setAttribute("download", `edumate_db_backup_${Date.now()}.json`);
+                    document.body.appendChild(downloadAnchor);
+                    downloadAnchor.click();
+                    downloadAnchor.remove();
+                }
+            } catch (err) {
+                console.error("Backup failed:", err);
+            }
+        } else if (tool.id === "restore-backup") {
+            const input = document.createElement("input");
+            input.type = "file";
+            input.accept = ".json";
+            input.onchange = async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = async (event) => {
+                    try {
+                        const backupData = JSON.parse(event.target.result);
+                        if (backupData && backupData.collections) {
+                            await restoreAdminBackup(backupData.collections);
+                            if (typeof onRefresh === "function") {
+                                await onRefresh();
+                            }
+                        }
+                    } catch (err) {
+                        alert("Restore failed: " + err.message);
+                    }
+                };
+                reader.readAsText(file);
+            };
+            input.click();
+        } else if (tool.id === "import-data") {
+            const input = document.createElement("input");
+            input.type = "file";
+            input.accept = ".json";
+            input.onchange = async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = async (event) => {
+                    try {
+                        const importedDocs = JSON.parse(event.target.result);
+                        if (Array.isArray(importedDocs)) {
+                            await restoreAdminBackup({ documents: importedDocs });
+                            if (typeof onRefresh === "function") {
+                                await onRefresh();
+                            }
+                        } else if (importedDocs && importedDocs.collections) {
+                            await restoreAdminBackup(importedDocs.collections);
+                            if (typeof onRefresh === "function") {
+                                await onRefresh();
+                            }
+                        }
+                    } catch (err) {
+                        alert("Import failed: " + err.message);
+                    }
+                };
+                reader.readAsText(file);
+            };
+            input.click();
         } else if (tool.id === "clear-cache") {
             try {
                 sessionStorage.clear();
@@ -147,6 +221,12 @@ export default function ToolActions({ onOperationComplete, documents = [], onRef
             }
             if (typeof onRefresh === "function") {
                 await onRefresh();
+            }
+        } else if (tool.id === "reindex-database") {
+            try {
+                await rebuildAllEmbeddings();
+            } catch (err) {
+                console.error("Full re-index failed:", err);
             }
         } else if (tool.id === "generate-embeddings" && documents.length > 0) {
             try {

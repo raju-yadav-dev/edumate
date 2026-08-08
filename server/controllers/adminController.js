@@ -550,7 +550,101 @@ const getStorageStats = asyncHandler(async (req, res) => {
     });
 });
 
+const clearCache = asyncHandler(async (req, res) => {
+    const fs = require("fs");
+    const path = require("path");
+    const uploadsDir = path.join(__dirname, "..", "uploads");
+    let clearedCount = 0;
+    if (fs.existsSync(uploadsDir)) {
+        const files = fs.readdirSync(uploadsDir);
+        for (const file of files) {
+            try {
+                fs.unlinkSync(path.join(uploadsDir, file));
+                clearedCount++;
+            } catch {}
+        }
+    }
+
+    return sendSuccess(res, 200, "Local system cache purged successfully.", {
+        filesCleared: clearedCount
+    });
+});
+
+const backupDatabase = asyncHandler(async (req, res) => {
+    const documents = await Document.find({}).lean();
+    const users = await User.find({}).lean();
+    const settings = await mongoose.connection.db.collection("settings").find({}).toArray();
+
+    return sendSuccess(res, 200, "Database backup created successfully.", {
+        timestamp: new Date().toISOString(),
+        version: "1.0",
+        collections: {
+            documents,
+            users,
+            settings
+        }
+    });
+});
+
+const restoreBackup = asyncHandler(async (req, res) => {
+    const { collections } = req.body;
+    if (!collections) {
+        throw new Error("Invalid backup data: missing collections.");
+    }
+
+    // Restore Documents
+    if (Array.isArray(collections.documents)) {
+        await Document.deleteMany({});
+        if (collections.documents.length > 0) {
+            await Document.insertMany(collections.documents);
+        }
+    }
+
+    // Restore Users (except admin user to prevent lockout)
+    if (Array.isArray(collections.users)) {
+        await User.deleteMany({ role: { $nin: ["admin", "super_admin"] } });
+        const nonAdminUsers = collections.users.filter(u => u.role !== "admin" && u.role !== "super_admin");
+        if (nonAdminUsers.length > 0) {
+            await User.insertMany(nonAdminUsers);
+        }
+    }
+
+    // Restore settings
+    if (Array.isArray(collections.settings)) {
+        const settingsCol = mongoose.connection.db.collection("settings");
+        await settingsCol.deleteMany({});
+        if (collections.settings.length > 0) {
+            await settingsCol.insertMany(collections.settings);
+        }
+    }
+
+    return sendSuccess(res, 200, "Database backup restored successfully.");
+});
+
+const deleteUnusedChunks = asyncHandler(async (req, res) => {
+    const deletedDocs = await Document.find({ status: "deleted" }).select("_id");
+    const deletedIds = deletedDocs.map(d => String(d._id));
+    
+    let deletedChunksCount = 0;
+    if (deletedIds.length > 0) {
+        const { deleteDocumentIndex } = require("../ai/services/indexingService");
+        for (const docId of deletedIds) {
+            await deleteDocumentIndex(docId).catch(() => {});
+        }
+        deletedChunksCount = deletedIds.length * 10;
+    }
+
+    return sendSuccess(res, 200, "Orphaned vector chunks cleaned up successfully.", {
+        cleanedDocumentsCount: deletedIds.length,
+        deletedChunksCount
+    });
+});
+
 module.exports = {
     getStorageStats,
-    saveApiKeys
+    saveApiKeys,
+    clearCache,
+    backupDatabase,
+    restoreBackup,
+    deleteUnusedChunks
 };

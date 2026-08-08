@@ -19,7 +19,10 @@ const {
     ignoreFailedDocument,
     restoreDocument,
     permanentDeleteDocument,
-    duplicateDocument
+    duplicateDocument,
+    bulkMoveDocuments,
+    bulkCopyDocuments,
+    bulkDeleteDocuments
 } = require("../controllers/documentController");
 
 const router = express.Router();
@@ -36,6 +39,21 @@ router.post(
     "/reindex",
     authorizeRoles("admin", "super_admin"),
     bulkReindexDocuments
+);
+router.put(
+    "/bulk-move",
+    authorizeRoles("admin", "super_admin"),
+    bulkMoveDocuments
+);
+router.put(
+    "/bulk-copy",
+    authorizeRoles("admin", "super_admin"),
+    bulkCopyDocuments
+);
+router.delete(
+    "/bulk-delete",
+    authorizeRoles("admin", "super_admin"),
+    bulkDeleteDocuments
 );
 router.post(
     "/retry-failed",
