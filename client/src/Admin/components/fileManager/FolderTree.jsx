@@ -18,7 +18,11 @@ function FolderNode({
     folderDocs,
     loading,
     selectedDocument,
-    onMoveFolder
+    onMoveFolder,
+    folderIndexStats,
+    onMoveFolderDirect,
+    onMoveDocuments,
+    onRefresh
 }) {
     const isExpanded = !!expandedFolders[folder.value];
     const isLoading = !!loading[folder.value];
@@ -27,10 +31,56 @@ function FolderNode({
         .filter((f) => f.parent === folder.value)
         .sort((a, b) => (a.label || "").localeCompare(b.label || ""));
 
+    const stats = folderIndexStats?.[folder.value] || { status: "empty", failedCount: 0, failedFiles: [] };
+    const hasError = stats.status === "failed";
+    const failedFiles = stats.failedFiles || [];
+    const tooltipText = hasError
+        ? `Failed files inside: ${failedFiles.join(", ")}`
+        : stats.status === "processing"
+        ? "Indexing files in folder..."
+        : stats.status === "indexed"
+        ? "All files indexed successfully"
+        : "Empty folder";
+
     return (
         <div className="folder-node">
             <div
-                className={`folder-item-row ${activeFolder === folder.value ? "active" : ""}`}
+                className={`folder-item-row ${activeFolder === folder.value ? "active" : ""} ${hasError ? "has-error" : ""}`}
+                title={tooltipText}
+                draggable
+                onDragStart={(e) => {
+                    e.stopPropagation();
+                    e.dataTransfer.setData("text/plain", JSON.stringify({ type: "folder", value: folder.value }));
+                }}
+                onDragOver={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    e.currentTarget.classList.add("drag-over");
+                }}
+                onDragLeave={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    e.currentTarget.classList.remove("drag-over");
+                }}
+                onDrop={async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    e.currentTarget.classList.remove("drag-over");
+                    try {
+                        const rawData = e.dataTransfer.getData("text/plain");
+                        if (!rawData) return;
+                        const data = JSON.parse(rawData);
+                        if (data.type === "file") {
+                            await onMoveDocuments([data.id], folder.value);
+                            onRefresh?.();
+                        } else if (data.type === "folder") {
+                            if (data.value === folder.value) return;
+                            await onMoveFolderDirect(data.value, folder.value);
+                        }
+                    } catch (err) {
+                        console.error("Drop failed:", err);
+                    }
+                }}
                 onContextMenu={(e) => {
                     if (onContextMenu) {
                         onContextMenu(e, folder, true);
@@ -52,6 +102,7 @@ function FolderNode({
                     onClick={() => onSelectFolder(folder.value)}
                 >
                     <div className="folder-info">
+                        <span className={`folder-status-indicator ${stats.status}`} />
                         <Folder size={18} />
                         <span>{folder.label}</span>
                     </div>
@@ -121,6 +172,10 @@ function FolderNode({
                             loading={loading}
                             selectedDocument={selectedDocument}
                             onMoveFolder={onMoveFolder}
+                            folderIndexStats={folderIndexStats}
+                            onMoveFolderDirect={onMoveFolderDirect}
+                            onMoveDocuments={onMoveDocuments}
+                            onRefresh={onRefresh}
                         />
                     ))}
 
@@ -133,20 +188,28 @@ function FolderNode({
                     ) : docs.length === 0 && subfolders.length === 0 ? (
                         <div className="folder-child empty">No documents</div>
                     ) : (
-                        docs.map((doc) => (
-                            <button
-                                key={doc._id}
-                                type="button"
-                                className={`folder-child-doc ${selectedDocument?._id === doc._id ? "active" : ""
-                                    }`}
-                                onClick={() => {
-                                    onSelectTreeDoc?.(doc);
-                                }}
-                            >
-                                <File size={12} className="doc-icon" />
-                                <span>{doc.title || doc.originalName}</span>
-                            </button>
-                        ))
+                        docs.map((doc) => {
+                            const fileStatus = doc.embeddingStatus === "indexed" ? "✅" : doc.embeddingStatus === "failed" ? "❌" : "⏳";
+                            return (
+                                <button
+                                    key={doc._id}
+                                    type="button"
+                                    className={`folder-child-doc ${selectedDocument?._id === doc._id ? "active" : ""}`}
+                                    draggable
+                                    onDragStart={(e) => {
+                                        e.stopPropagation();
+                                        e.dataTransfer.setData("text/plain", JSON.stringify({ type: "file", id: doc._id }));
+                                    }}
+                                    onClick={() => {
+                                        onSelectTreeDoc?.(doc);
+                                    }}
+                                >
+                                    <File size={12} className="doc-icon" />
+                                    <span>{doc.title || doc.originalName}</span>
+                                    <span className="file-status-icon" title={`Indexing Status: ${doc.embeddingStatus || 'pending'}`}>{fileStatus}</span>
+                                </button>
+                            );
+                        })
                     )}
                 </div>
             )}
@@ -166,7 +229,11 @@ function FolderTree(props) {
         onContextMenu,
         selectedDocument,
         onSelectTreeDoc,
-        onMoveFolder
+        onMoveFolder,
+        folderIndexStats,
+        onMoveFolderDirect,
+        onMoveDocuments,
+        onRefresh
     } = props;
 
     const [expandedFolders, setExpandedFolders] = useState({});
@@ -240,6 +307,10 @@ function FolderTree(props) {
                         loading={loading}
                         selectedDocument={selectedDocument}
                         onMoveFolder={onMoveFolder}
+                        folderIndexStats={folderIndexStats}
+                        onMoveFolderDirect={onMoveFolderDirect}
+                        onMoveDocuments={onMoveDocuments}
+                        onRefresh={onRefresh}
                     />
                 ))}
             </div>

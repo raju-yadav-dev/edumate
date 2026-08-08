@@ -311,3 +311,41 @@
 .folder-item-row:hover .folder-count {
     display: none;
 }
+
+/* Drag and Drop hover state */
+.folder-item-row.drag-over {
+    border: 1px dashed var(--admin-gold) !important;
+    background: rgba(242, 163, 11, 0.1) !important;
+}
+
+/* Red error folder names */
+.folder-item-row.has-error .folder-info span {
+    color: #ef4444 !important;
+    font-weight: 600 !important;
+}
+.folder-item-row.has-error .folder-info svg {
+    color: #ef4444 !important;
+}
+
+/* Index status circle indicators */
+.folder-status-indicator {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    margin-right: 2px;
+    display: inline-block;
+    flex-shrink: 0;
+}
+.folder-status-indicator.indexed { background-color: #2ecc71; }
+.folder-status-indicator.indexing { background-color: #f1c40f; }
+.folder-status-indicator.failed { background-color: #e74c3c; }
+.folder-status-indicator.empty { background-color: rgba(255, 255, 255, 0.25); }
+
+/* File index icon states */
+.file-status-icon {
+    font-size: 10px;
+    margin-left: auto;
+    margin-right: 4px;
+    flex-shrink: 0;
+}
+

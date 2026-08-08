@@ -109,18 +109,20 @@ const uploadDocument = async ({ file, body, user }) => {
     }
 
     const category = sanitizeCategory(body.category);
-    const savedFile = await uploadToSupabase(file, category);
+    const extension = getSafeExtension(file.originalname);
+    const uniqueName = `${Date.now()}-${crypto.randomUUID()}${extension}`;
+    const storagePath = `${category}/${uniqueName}`;
 
     const document = await Document.create({
         originalName: file.originalname,
-        storedName: savedFile.storedName,
+        storedName: uniqueName,
         category,
         institution: body.institution?.trim() || user.institution || "",
         department: body.department?.trim() || user.department || "",
         mimeType: file.mimetype,
         fileSize: file.size,
         checksum,
-        storagePath: savedFile.storagePath,
+        storagePath: storagePath,
         metadata: {
             uploadedFrom: "api",
             notes: body.notes || ""
@@ -128,8 +130,8 @@ const uploadDocument = async ({ file, body, user }) => {
         versions: [
             {
                 version: 1,
-                storedName: savedFile.storedName,
-                storagePath: savedFile.storagePath,
+                storedName: uniqueName,
+                storagePath: storagePath,
                 fileSize: file.size,
                 checksum,
                 uploadedBy: user._id
@@ -139,17 +141,43 @@ const uploadDocument = async ({ file, body, user }) => {
         updatedBy: user._id
     });
 
-    // Delegate background indexing trigger to AI indexingService
-    indexingService.indexDocumentBackground(document._id, file.buffer).catch((err) => {
-        console.error(`Failed to trigger background indexing for ${document._id}:`, err);
-    });
+    // Run Supabase upload and indexing in the background asynchronously
+    (async () => {
+        try {
+            const { error: uploadError } = await supabase.storage
+                .from(BUCKET)
+                .upload(storagePath, file.buffer, {
+                    contentType: file.mimetype,
+                    upsert: false
+                });
 
-    const signedUrl = await getSignedUrlForDoc(savedFile.storagePath);
+            if (uploadError) {
+                throw uploadError;
+            }
+
+            // Once uploaded successfully, trigger background indexing
+            indexingService.indexDocumentBackground(document._id, file.buffer).catch((err) => {
+                console.error(`Failed to trigger background indexing for ${document._id}:`, err);
+            });
+        } catch (uploadErr) {
+            console.error(`Failed to upload ${document._id} to Supabase in background:`, uploadErr);
+            document.embeddingStatus = "failed";
+            document.metadata = {
+                ...(document.metadata || {}),
+                error: `Background upload failed: ${uploadErr.message}`,
+                notes: (document.metadata?.notes || "") + `\n[Upload Error: ${uploadErr.message}]`
+            };
+            await document.save();
+        }
+    })();
+
+    // Respond immediately with a placeholder signedUrl (real signedUrl is generated on listDocuments dynamically)
     return {
         ...document.toObject(),
-        signedUrl
+        signedUrl: ""
     };
 };
+
 
 const listDocuments = async ({ query, user }) => {
     const page = Math.max(Number(query.page || 1), 1);
@@ -172,7 +200,46 @@ const listDocuments = async ({ query, user }) => {
     }
 
     if (query.search) {
-        filter.$text = { $search: query.search };
+        const cleanSearch = String(query.search).trim();
+        const searchRegex = { $regex: cleanSearch, $options: "i" };
+
+        const orConditions = [
+            { originalName: searchRegex },
+            { category: searchRegex },
+            { department: searchRegex },
+            { institution: searchRegex },
+            { mimeType: searchRegex },
+            { "metadata.notes": searchRegex },
+            { "metadata.tags": searchRegex }
+        ];
+
+        try {
+            const { client: qdrantClient, collectionName: qdrantColl } = require("../ai/config/qdrant");
+            const embeddingService = require("../ai/services/embeddingService");
+            const queryEmbedding = await embeddingService.getQueryEmbedding(cleanSearch).catch(() => null);
+            if (queryEmbedding) {
+                const results = await qdrantClient.search(qdrantColl, {
+                    vector: queryEmbedding,
+                    limit: 50,
+                    with_payload: true
+                }).catch(() => []);
+                
+                if (Array.isArray(results) && results.length > 0) {
+                    const contentDocIds = results.map(r => r.payload?.documentId).filter(Boolean);
+                    if (contentDocIds.length > 0) {
+                        orConditions.push({ _id: { $in: contentDocIds } });
+                    }
+                }
+            }
+        } catch (e) {
+            console.error("Qdrant content search failed for query.search:", e);
+        }
+
+        if (cleanSearch.match(/^[0-9a-fA-F]{24}$/)) {
+            orConditions.push({ _id: cleanSearch });
+        }
+
+        filter.$or = orConditions;
     }
 
     if (query.institution) {
@@ -517,7 +584,7 @@ const bulkReindex = async ({ category, ids, user }) => {
         filter._id = { $in: ids };
     } else if (category && category !== "root") {
         const cleanCat = sanitizeCategory(category);
-        filter.category = { $regex: new RegExp(`^${cleanCat}(/|$)`, "i") };
+        filter.category = { $regex: new RegExp(`^${cleanCat}(_|\\/|$)`, "i") };
     }
     const documents = await Document.find(filter);
     for (const doc of documents) {
@@ -642,6 +709,48 @@ const duplicateDocument = async ({ documentId, user }) => {
     return newDocument;
 };
 
+const bulkMove = async ({ ids, category, user }) => {
+    if (!Array.isArray(ids)) throw new Error("ids must be an array");
+    const results = [];
+    for (const id of ids) {
+        try {
+            const doc = await moveDocument({ documentId: id, category, user });
+            results.push({ id, status: "success", document: doc });
+        } catch (error) {
+            results.push({ id, status: "failed", error: error.message });
+        }
+    }
+    return results;
+};
+
+const bulkCopy = async ({ ids, category, user }) => {
+    if (!Array.isArray(ids)) throw new Error("ids must be an array");
+    const results = [];
+    for (const id of ids) {
+        try {
+            const doc = await copyDocument({ documentId: id, category, user });
+            results.push({ id, status: "success", document: doc });
+        } catch (error) {
+            results.push({ id, status: "failed", error: error.message });
+        }
+    }
+    return results;
+};
+
+const bulkDelete = async ({ ids, user }) => {
+    if (!Array.isArray(ids)) throw new Error("ids must be an array");
+    const results = [];
+    for (const id of ids) {
+        try {
+            const doc = await archiveDocument({ documentId: id, user });
+            results.push({ id, status: "success", document: doc });
+        } catch (error) {
+            results.push({ id, status: "failed", error: error.message });
+        }
+    }
+    return results;
+};
+
 module.exports = {
     uploadDocument,
     listDocuments,
@@ -660,5 +769,8 @@ module.exports = {
     restoreDocument,
     permanentDeleteDocument,
     duplicateDocument,
+    bulkMove,
+    bulkCopy,
+    bulkDelete,
     DOCUMENT_CATEGORIES
 };
