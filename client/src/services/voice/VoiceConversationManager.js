@@ -9,7 +9,6 @@ import SpeechSynthesisService from "./SpeechSynthesisService";
 import LanguageDetectionService from "./LanguageDetectionService";
 import AudioAnalyserService from "./AudioAnalyserService";
 import VoiceCommandService from "./VoiceCommandService";
-import VadService from "./VadService";
 
 class VoiceConversationManager {
     constructor() {
@@ -154,10 +153,6 @@ class VoiceConversationManager {
         // Start elapsed timer
         this.startTimer();
 
-        // Initialize VAD interruption hook
-        void VadService.init(() => this.userInterruption());
-        VadService.start();
-
         // Speak Greeting
         this.setState("speaking");
         const greeting = this.getGreetingMessage(this.activeLang);
@@ -173,8 +168,12 @@ class VoiceConversationManager {
      */
     handleSpeechStart() {
         this.setState("speaking");
-        // Disable microphone while speaking to prevent feedback loops
-        SpeechRecognitionService.stop();
+        // Keep microphone active if in continuous mode to listen for interruptions!
+        if (this.isContinuousMode) {
+            this.startListeningCycle();
+        } else {
+            SpeechRecognitionService.stop();
+        }
     }
 
     /**
@@ -198,7 +197,16 @@ class VoiceConversationManager {
     startListeningCycle() {
         if (this.state === "ended" || !this.isContinuousMode) return;
 
-        this.setState("listening");
+        // Prevent duplicate starts if already listening
+        if (SpeechRecognitionService.isListening) {
+            return;
+        }
+
+        // Only change manager state to listening if we aren't generating or speaking answers
+        if (this.state !== "thinking" && this.state !== "speaking") {
+            this.setState("listening");
+        }
+
         const recLang = LanguageDetectionService.getSpeechRecognitionLang(this.activeLang);
 
         SpeechRecognitionService.start({
@@ -206,6 +214,12 @@ class VoiceConversationManager {
             onResult: (text, isFinal) => {
                 this.notifyTranscript(text, isFinal);
                 this.currentTranscript = text;
+
+                // Interruption check: If user starts speaking while AI is speaking or thinking, abort synthesis & requests!
+                if ((this.state === "speaking" || this.state === "thinking") && text.trim().length > 0) {
+                    console.log("[VoiceManager] Interrupted via speech result:", text);
+                    this.userInterruption();
+                }
             },
             onSilence: () => {
                 this.handleFinalInput();
@@ -222,12 +236,14 @@ class VoiceConversationManager {
                         this.startListeningCycle();
                     }, 1000);
                 } else {
-                    this.setState("paused");
+                    if (this.state !== "thinking" && this.state !== "speaking") {
+                        this.setState("paused");
+                    }
                 }
             },
             onEnd: () => {
-                // If browser ended the recognition session naturally but we are still in listening state and in continuous mode, auto-restart it
-                if (this.state === "listening" && this.isContinuousMode) {
+                // If browser ended the recognition session naturally but we are still in continuous mode, auto-restart it
+                if (this.isContinuousMode && ["listening", "speaking", "thinking", "interrupted"].includes(this.state)) {
                     console.log("[VoiceManager] SpeechRecognition ended naturally. Re-starting listening cycle.");
                     setTimeout(() => {
                         this.startListeningCycle();
@@ -278,6 +294,9 @@ class VoiceConversationManager {
 
         // 3. Normal LLM Query
         this.setState("thinking");
+        if (this.isContinuousMode) {
+            this.startListeningCycle();
+        }
         this.activeAbortController = new AbortController();
 
         try {
@@ -285,8 +304,8 @@ class VoiceConversationManager {
             const systemPrefix = LanguageDetectionService.getSystemPrompt(this.activeLang);
             const questionPayload = systemPrefix ? `${systemPrefix}\n\n${question}` : question;
 
-            // Call existing chat sendMessage function
-            const responseText = await this.sendMessageCallback(questionPayload);
+            // Call existing chat sendMessage function with clean display text as 6th parameter
+            const responseText = await this.sendMessageCallback(questionPayload, null, null, null, null, question);
             
             if (this.state === "interrupted") {
                 console.log("[VoiceManager] Response ignored because conversation was interrupted.");
@@ -319,8 +338,6 @@ class VoiceConversationManager {
             this.activeAbortController = null;
         }
     }
-
-
 
     userInterruption() {
         if (this.state === "speaking" || this.state === "thinking") {
@@ -367,7 +384,6 @@ class VoiceConversationManager {
         this.isContinuousMode = false;
         SpeechRecognitionService.abort();
         SpeechSynthesisService.cancel();
-        VadService.stop();
         if (this.activeAbortController) {
             this.activeAbortController.abort();
         }
@@ -379,16 +395,16 @@ class VoiceConversationManager {
             if (this.state === "ended") {
                 this.setState("idle");
             }
-        }, 1500);
+        }, 500);
     }
 
     /**
-     * Get welcome greetings for supported languages.
+     * Returns a language-specific greeting message.
      */
-    getGreetingMessage(lang) {
-        switch (lang) {
+    getGreetingMessage(langCode) {
+        switch (langCode) {
             case "hi":
-                return "नमस्ते! मैं एडुमेट हूँ। आज मैं आपकी क्या मदद कर सकता हूँ?";
+                return "नमस्ते! मैं एडुमेट हूँ। आज मैं आपकी क्या सहायता कर सकता हूँ?";
             case "bn":
                 return "হ্যালো! আমি এডুমেট। আজ আপনাকে কীভাবে সাহায্য করতে পারি?";
             case "en":

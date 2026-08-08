@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { FiArrowRight, FiPaperclip, FiSmile, FiUpload, FiX, FiSquare, FiMic, FiRadio } from "react-icons/fi";
+import { FiArrowRight, FiPaperclip, FiSmile, FiUpload, FiX, FiSquare, FiMic, FiVolume2 } from "react-icons/fi";
 
 import FilePreview from "./FilePreview";
 
@@ -140,17 +140,29 @@ function ChatInput({
                             <FiSmile />
                         </button>
 
-                        <button type="button" className="edu-chat-icon-button" onClick={handleClear} aria-label="Clear input">
-                            <FiX />
-                        </button>
+                        {text && (
+                            <button type="button" className="edu-chat-icon-button" onClick={handleClear} aria-label="Clear input">
+                                <FiX />
+                            </button>
+                        )}
 
                         <button
                             type="button"
                             className={`edu-chat-icon-button voice-btn-single ${isVoiceSingleActive ? "is-active" : ""}`}
-                            onClick={onVoiceSingleClick}
-                            title="Single Voice Query"
-                            aria-label="Single Voice Query"
-                            style={isVoiceSingleActive ? { color: "#10b981", backgroundColor: "rgba(16, 185, 129, 0.1)" } : {}}
+                            onClick={() => {
+                                const isSupported = typeof window !== "undefined" && !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+                                if (!isSupported) {
+                                    alert("Speech recognition is not supported in Firefox. Please use Google Chrome or Microsoft Edge for voice features!");
+                                    return;
+                                }
+                                onVoiceSingleClick();
+                            }}
+                            title="Voice Message"
+                            aria-label="Voice Message"
+                            style={{
+                                ...(isVoiceSingleActive ? { color: "#10b981", backgroundColor: "rgba(16, 185, 129, 0.1)" } : {}),
+                                ...((typeof window !== "undefined" && !(window.SpeechRecognition || window.webkitSpeechRecognition)) ? { opacity: 0.4, cursor: "not-allowed" } : {})
+                            }}
                         >
                             <FiMic />
                         </button>
@@ -158,12 +170,22 @@ function ChatInput({
                         <button
                             type="button"
                             className={`edu-chat-icon-button voice-btn-continuous ${isVoiceContinuousActive ? "is-active" : ""}`}
-                            onClick={onVoiceContinuousClick}
-                            title="Continuous Conversation Mode"
-                            aria-label="Continuous Conversation Mode"
-                            style={isVoiceContinuousActive ? { color: "#3b82f6", backgroundColor: "rgba(59, 130, 246, 0.1)" } : {}}
+                            onClick={() => {
+                                const isSupported = typeof window !== "undefined" && !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+                                if (!isSupported) {
+                                    alert("Speech recognition is not supported in Firefox. Please use Google Chrome or Microsoft Edge for voice features!");
+                                    return;
+                                }
+                                onVoiceContinuousClick();
+                            }}
+                            title="Voice Conversation"
+                            aria-label="Voice Conversation"
+                            style={{
+                                ...(isVoiceContinuousActive ? { color: "#3b82f6", backgroundColor: "rgba(59, 130, 246, 0.1)" } : {}),
+                                ...((typeof window !== "undefined" && !(window.SpeechRecognition || window.webkitSpeechRecognition)) ? { opacity: 0.4, cursor: "not-allowed" } : {})
+                            }}
                         >
-                            <FiRadio />
+                            <FiVolume2 />
                         </button>
                     </div>
 

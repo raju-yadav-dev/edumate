@@ -56,11 +56,20 @@ const deleteCrawlJob = asyncHandler(async (req, res) => {
     return sendSuccess(res, 200, "Crawl job history deleted successfully.", result);
 });
 
+const recrawlAllJobs = asyncHandler(async (req, res) => {
+    const result = await crawlerService.recrawlAllJobs({
+        user: req.user
+    });
+
+    return sendSuccess(res, 201, "All crawl jobs recrawl started successfully.", result);
+});
+
 module.exports = {
     startCrawl,
     getCrawlJobs,
     getCrawlJobDetails,
     cancelCrawl,
     recrawlCrawlJob,
-    deleteCrawlJob
+    deleteCrawlJob,
+    recrawlAllJobs
 };

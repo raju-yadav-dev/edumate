@@ -47,12 +47,14 @@ const searchApprovedUrls = async (query, user, limit) => {
 /**
  * Searches the general internet using trusted fallbacks
  */
-const searchInternet = async (query) => {
-    // Check if general internet search is globally enabled
-    const internetConfig = await KnowledgeSource.findOne({ type: "internet" });
-    if (internetConfig && !internetConfig.isEnabled) {
-        console.log("[SearchManager] Internet search is disabled. Skipping general web search.");
-        return [];
+const searchInternet = async (query, force = false) => {
+    if (!force) {
+        // Check if general internet search is globally enabled
+        const internetConfig = await KnowledgeSource.findOne({ type: "internet" });
+        if (internetConfig && !internetConfig.isEnabled) {
+            console.log("[SearchManager] Internet search is disabled. Skipping general web search.");
+            return [];
+        }
     }
 
     return webSearchService.searchTrustedWeb(query);

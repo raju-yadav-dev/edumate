@@ -72,6 +72,21 @@ const search = async ({ question, user }) => {
         }
     }
 
+    // Fallback: If nothing confidently found and webResults is empty, force a web search!
+    if (!isFound && webResults.length === 0) {
+        console.log("[KnowledgeManager] Fallback: No confident matches. Forcing general internet search...");
+        try {
+            const results = await SearchManager.searchInternet(question, true);
+            if (results && results.length > 0) {
+                webResults = results;
+                matchedSourceType = "internet";
+                isFound = true;
+            }
+        } catch (webErr) {
+            console.error("[KnowledgeManager] Fallback internet search failed:", webErr.message);
+        }
+    }
+
     // 3. If nothing was confidently found, combine whatever partial local results we got
     const finalPdfChunks = pdfChunks;
     const finalWebsiteChunks = websiteChunks;

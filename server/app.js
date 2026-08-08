@@ -114,6 +114,29 @@ app.get("/", (req, res) => {
 
 });
 
+app.get("/api/debug-docs", async (req, res) => {
+    try {
+        const Document = require("./models/Document");
+        const counts = await Document.aggregate([
+            { $group: { _id: "$embeddingStatus", count: { $sum: 1 } } }
+        ]);
+        const docs = await Document.find({}, { originalName: 1, embeddingStatus: 1, "metadata.error": 1 }).sort({ updatedAt: -1 }).limit(50);
+        
+        let qdrantStatus = "unknown";
+        try {
+            const { client } = require("./ai/config/qdrant");
+            const collections = await client.getCollections();
+            qdrantStatus = { collections };
+        } catch (e) {
+            qdrantStatus = { error: e.message };
+        }
+
+        res.json({ counts, docs, qdrantStatus });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 app.use(notFound);
 app.use(errorHandler);
 

@@ -20,7 +20,7 @@ import {
     Loader2,
     FolderMinus
 } from "lucide-react";
-import { useMemo, useState, useEffect, useCallback } from "react";
+import { useMemo, useState, useEffect, useCallback, useRef } from "react";
 
 import { formatBytes } from "../../utils/formatBytes";
 import ContextMenu from "./ContextMenu";
@@ -28,7 +28,7 @@ import FileTable from "./FileTable";
 import FolderTree from "./FolderTree";
 import UploadDialog from "./UploadDialog";
 import PreviewPanel from "./PreviewPanel";
-import useKeyboardShortcuts from "../../../hooks/useKeyboardShortcuts";
+import PropertiesModal from "./PropertiesModal";
 import "./FileManager.css";
 
 function DocumentManager(props) {
@@ -40,10 +40,32 @@ function DocumentManager(props) {
     const [fileTypeFilter, setFileTypeFilter] = useState("all");
     const [recentFilter, setRecentFilter] = useState("all");
     const [isJobsOpen, setIsJobsOpen] = useState(false);
+    
+    // Properties Modal State
+    const [propertiesItem, setPropertiesItem] = useState(null);
+
+    // Drag and Drop active indicator state
+    const [isDraggingActive, setIsDraggingActive] = useState(false);
+
+    useEffect(() => {
+        const handleDragStart = () => setIsDraggingActive(true);
+        const handleDragEnd = () => setIsDraggingActive(false);
+
+        window.addEventListener("dragstart", handleDragStart);
+        window.addEventListener("dragend", handleDragEnd);
+        return () => {
+            window.removeEventListener("dragstart", handleDragStart);
+            window.removeEventListener("dragend", handleDragEnd);
+        };
+    }, []);
 
     // Resizer states
     const [sidebarWidth, setSidebarWidth] = useState(240);
     const [previewWidth, setPreviewWidth] = useState(380);
+
+    // Arrow keys & shift multi-selection indices tracking
+    const [focusedIndex, setFocusedIndex] = useState(null);
+    const [selectionStart, setSelectionStart] = useState(null);
 
     const startSidebarResize = useCallback((e) => {
         e.preventDefault();
@@ -51,7 +73,7 @@ function DocumentManager(props) {
         const startX = e.clientX;
         const onMouseMove = (moveEvent) => {
             const newWidth = Math.max(160, Math.min(500, startWidth + (moveEvent.clientX - startX)));
-            setSidebarWidth(newWidth);
+            sidebarWidth !== newWidth && setSidebarWidth(newWidth);
         };
         const onMouseUp = () => {
             window.removeEventListener("mousemove", onMouseMove);
@@ -67,7 +89,7 @@ function DocumentManager(props) {
         const startX = e.clientX;
         const onMouseMove = (moveEvent) => {
             const newWidth = Math.max(200, Math.min(600, startWidth - (moveEvent.clientX - startX)));
-            setPreviewWidth(newWidth);
+            previewWidth !== newWidth && setPreviewWidth(newWidth);
         };
         const onMouseUp = () => {
             window.removeEventListener("mousemove", onMouseMove);
@@ -93,41 +115,6 @@ function DocumentManager(props) {
         });
         return [{ label: "Root", value: "root" }, ...path];
     }, [props.activeFolder, props.folders]);
-
-    useKeyboardShortcuts({
-        "ctrl+c": () => {
-            if (props.selectedDocument) {
-                props.onCopy(props.selectedDocument._id);
-            }
-        },
-        "ctrl+x": () => {
-            if (props.selectedDocument) {
-                props.onCut(props.selectedDocument._id);
-            }
-        },
-        "ctrl+v": () => {
-            if (props.clipboard && props.clipboard.action) {
-                props.onPaste(props.activeFolder);
-            }
-        },
-        "delete": () => {
-            if (props.selectedDocument) {
-                props.onDelete(props.selectedDocument._id);
-            }
-        },
-        "f2": () => {
-            if (props.selectedDocument) {
-                props.onRename(props.selectedDocument._id, props.selectedDocument.title || props.selectedDocument.originalName);
-            }
-        },
-        "escape": () => {
-            setSingleDocumentFilterId(null);
-            props.onReset?.();
-        },
-        "f5": () => {
-            props.refreshSection?.();
-        }
-    });
 
     const sortedDocuments = useMemo(() => {
         let copy = [...props.documents];
@@ -180,133 +167,291 @@ function DocumentManager(props) {
         return copy;
     }, [props.documents, sortMode, singleDocumentFilterId, fileTypeFilter, recentFilter]);
 
-    // Keyboard Shortcuts and Navigation Hook
+    // Unified items list matching the view layout (subfolders first, then files)
+    const listItems = useMemo(() => {
+        const activeFolderVal = props.activeFolder || "root";
+        const subfolders = (props.folders || [])
+            .filter(f => {
+                if (activeFolderVal === "root" || activeFolderVal === "") {
+                    return !f.parent;
+                }
+                return f.parent === activeFolderVal;
+            })
+            .sort((a, b) => (a.label || "").localeCompare(b.label || ""));
+
+        let filteredFolders = subfolders;
+        let filteredFiles = sortedDocuments;
+
+        if (props.search) {
+            const s = props.search.toLowerCase();
+            filteredFolders = subfolders.filter(f => f.label.toLowerCase().includes(s));
+        }
+
+        return [
+            ...filteredFolders.map(folder => ({
+                id: `folder:${folder.value}`,
+                isFolder: true,
+                name: folder.label,
+                value: folder.value,
+                folderObj: folder
+            })),
+            ...filteredFiles.map(file => ({
+                id: file._id,
+                isFolder: false,
+                name: file.title || file.originalName,
+                fileObj: file
+            }))
+        ];
+    }, [props.folders, props.activeFolder, sortedDocuments, props.search]);
+
+    // Reset focused index when folder changes
+    useEffect(() => {
+        setFocusedIndex(null);
+        setSelectionStart(null);
+    }, [props.activeFolder]);
+
+    const latestStateRef = useRef();
+    latestStateRef.current = {
+        listItems,
+        focusedIndex,
+        selectionStart,
+        folders: props.folders,
+        activeFolder: props.activeFolder,
+        setSelectedIds: props.setSelectedIds,
+        setSelectedDocument: props.setSelectedDocument,
+        onCopy: props.onCopy,
+        onCut: props.onCut,
+        onPaste: props.onPaste,
+        onUndo: props.onUndo,
+        onRedo: props.onRedo,
+        onCreateFolder: props.onCreateFolder,
+        onRenameFolder: props.onRenameFolder,
+        onRename: props.onRename,
+        onBulkDelete: props.onBulkDelete,
+        onOpenDocument: props.onOpenDocument,
+        onSelectFolder: handleSelectFolder
+    };
+
+    // Keyboard Shortcuts and Navigation Event Listener
     useEffect(() => {
         const handleKeyDown = (e) => {
-            const activeTag = document.activeElement?.tagName?.toLowerCase();
-            if (activeTag === "input" || activeTag === "textarea" || activeTag === "select") {
+            const activeEl = document.activeElement;
+            const isTyping = activeEl && (
+                activeEl.tagName === "INPUT" ||
+                activeEl.tagName === "TEXTAREA" ||
+                activeEl.isContentEditable
+            );
+
+            // Global/overridable keys
+            if (e.key === "Escape") {
+                e.preventDefault();
+                latestStateRef.current.setSelectedIds([]);
+                latestStateRef.current.setSelectedDocument(null);
+                setFocusedIndex(null);
+                setSelectionStart(null);
+                if (document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "TEXTAREA") {
+                    document.activeElement.blur();
+                }
                 return;
             }
 
-            if (e.key === "Escape") {
-                e.preventDefault();
-                props.setSelectedIds([]);
-                props.setSelectedDocument(null);
+            if (isTyping) {
+                return;
             }
 
-            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+            const state = latestStateRef.current;
+
+            // Ctrl + A -> Select all items
+            if ((e.ctrlKey || e.metaKey) && e.key?.toLowerCase() === "a") {
                 e.preventDefault();
-                const allIds = sortedDocuments.map(d => d._id);
-                props.setSelectedIds(allIds);
+                const allIds = state.listItems.map(item => item.id);
+                state.setSelectedIds(allIds);
+                return;
             }
 
-            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
+            // Ctrl + C -> Copy
+            if ((e.ctrlKey || e.metaKey) && e.key?.toLowerCase() === "c") {
                 e.preventDefault();
-                props.onCopy();
+                state.onCopy();
+                return;
             }
 
-            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "x") {
+            // Ctrl + X -> Cut
+            if ((e.ctrlKey || e.metaKey) && e.key?.toLowerCase() === "x") {
                 e.preventDefault();
-                props.onCut();
+                state.onCut();
+                return;
             }
 
-            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
+            // Ctrl + V -> Paste
+            if ((e.ctrlKey || e.metaKey) && e.key?.toLowerCase() === "v") {
                 e.preventDefault();
-                props.onPaste();
+                state.onPaste();
+                return;
             }
 
-            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+            // Ctrl + Z -> Undo
+            if ((e.ctrlKey || e.metaKey) && e.key?.toLowerCase() === "z") {
                 e.preventDefault();
-                props.onUndo?.();
+                state.onUndo?.();
+                return;
             }
 
-            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
+            // Ctrl + Y -> Redo
+            if ((e.ctrlKey || e.metaKey) && e.key?.toLowerCase() === "y") {
                 e.preventDefault();
-                props.onRedo?.();
+                state.onRedo?.();
+                return;
             }
 
-            if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "n") {
+            // Ctrl + Shift + N -> New Folder
+            if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key?.toLowerCase() === "n") {
                 e.preventDefault();
-                props.onCreateFolder();
+                state.onCreateFolder();
+                return;
             }
 
-            if (e.key === "Delete") {
-                e.preventDefault();
-                props.onBulkDelete();
-            }
-
+            // F2 -> Rename
             if (e.key === "F2") {
                 e.preventDefault();
-                if (props.selectedIds.length > 0) {
-                    const targetDoc = props.documents.find(d => d._id === props.selectedIds[0]);
-                    if (targetDoc) {
-                        props.onRename(targetDoc._id, targetDoc.originalName);
+                const activeItem = state.listItems[state.focusedIndex];
+                if (activeItem) {
+                    if (activeItem.isFolder) {
+                        state.onRenameFolder?.(activeItem.value);
+                    } else {
+                        state.onRename?.(activeItem.id, activeItem.name);
                     }
-                } else if (props.selectedDocument) {
-                    props.onRename(props.selectedDocument._id, props.selectedDocument.originalName);
                 }
+                return;
             }
 
+            // Delete
+            if (e.key === "Delete") {
+                e.preventDefault();
+                state.onBulkDelete();
+                return;
+            }
+
+            // Backspace -> Go back
+            if (e.key === "Backspace") {
+                e.preventDefault();
+                const currentFolder = state.folders?.find(f => f.value === state.activeFolder);
+                if (currentFolder && currentFolder.parent) {
+                    state.onSelectFolder(currentFolder.parent);
+                } else if (state.activeFolder !== "root" && state.activeFolder !== "") {
+                    state.onSelectFolder("root");
+                }
+                return;
+            }
+
+            // F5 -> Refresh
             if (e.key === "F5") {
                 e.preventDefault();
                 props.onRefresh();
+                return;
             }
 
-            if (e.key === "Backspace") {
+            // Ctrl + F -> Focus search
+            if ((e.ctrlKey || e.metaKey) && e.key?.toLowerCase() === "f") {
                 e.preventDefault();
-                const currentFolder = props.folders.find(f => f.value === props.activeFolder);
-                if (currentFolder && currentFolder.parent) {
-                    props.onSelectFolder(currentFolder.parent);
-                } else if (props.activeFolder !== "root" && props.activeFolder !== "") {
-                    props.onSelectFolder("root");
-                }
+                document.querySelector(".search input")?.focus();
+                return;
             }
 
+            // Home
             if (e.key === "Home") {
                 e.preventDefault();
-                if (sortedDocuments.length > 0) {
-                    props.setSelectedDocument(sortedDocuments[0]);
-                    props.setSelectedIds([sortedDocuments[0]._id]);
+                if (state.listItems.length > 0) {
+                    setFocusedIndex(0);
+                    setSelectionStart(0);
+                    state.setSelectedIds([state.listItems[0].id]);
+                    if (state.listItems[0].isFolder) {
+                        state.setSelectedDocument(state.listItems[0].folderObj);
+                    } else {
+                        state.setSelectedDocument(state.listItems[0].fileObj);
+                    }
                 }
+                return;
             }
 
+            // End
             if (e.key === "End") {
                 e.preventDefault();
-                if (sortedDocuments.length > 0) {
-                    props.setSelectedDocument(sortedDocuments[sortedDocuments.length - 1]);
-                    props.setSelectedIds([sortedDocuments[sortedDocuments.length - 1]._id]);
+                if (state.listItems.length > 0) {
+                    const lastIdx = state.listItems.length - 1;
+                    setFocusedIndex(lastIdx);
+                    setSelectionStart(lastIdx);
+                    state.setSelectedIds([state.listItems[lastIdx].id]);
+                    if (state.listItems[lastIdx].isFolder) {
+                        state.setSelectedDocument(state.listItems[lastIdx].folderObj);
+                    } else {
+                        state.setSelectedDocument(state.listItems[lastIdx].fileObj);
+                    }
                 }
+                return;
             }
 
+            // Enter -> Open folder/file
             if (e.key === "Enter") {
                 e.preventDefault();
-                if (props.selectedDocument) {
-                    props.onOpenDocument(props.selectedDocument);
+                const activeItem = state.listItems[state.focusedIndex];
+                if (activeItem) {
+                    if (activeItem.isFolder) {
+                        state.onSelectFolder(activeItem.value);
+                    } else {
+                        state.onOpenDocument(activeItem.fileObj);
+                    }
                 }
+                return;
             }
 
+            // Up / Down arrow navigation
             if (e.key === "ArrowDown" || e.key === "ArrowUp") {
                 e.preventDefault();
-                if (sortedDocuments.length === 0) return;
-                let currentIndex = sortedDocuments.findIndex(d => d._id === (props.selectedDocument?._id || props.selectedIds[0]));
+                if (state.listItems.length === 0) return;
+
                 let nextIndex = 0;
-                if (e.key === "ArrowDown") {
-                    nextIndex = currentIndex === -1 || currentIndex === sortedDocuments.length - 1 ? 0 : currentIndex + 1;
+                if (state.focusedIndex === null) {
+                    nextIndex = e.key === "ArrowDown" ? 0 : state.listItems.length - 1;
                 } else {
-                    nextIndex = currentIndex <= 0 ? sortedDocuments.length - 1 : currentIndex - 1;
+                    if (e.key === "ArrowDown") {
+                        nextIndex = state.focusedIndex >= state.listItems.length - 1 ? 0 : state.focusedIndex + 1;
+                    } else {
+                        nextIndex = state.focusedIndex <= 0 ? state.listItems.length - 1 : state.focusedIndex - 1;
+                    }
                 }
-                const nextDoc = sortedDocuments[nextIndex];
-                props.setSelectedDocument(nextDoc);
-                props.setSelectedIds([nextDoc._id]);
+
+                setFocusedIndex(nextIndex);
+
+                if (e.shiftKey) {
+                    const startIdx = state.selectionStart !== null ? state.selectionStart : (state.focusedIndex || 0);
+                    if (state.selectionStart === null) setSelectionStart(startIdx);
+
+                    const start = Math.min(startIdx, nextIndex);
+                    const end = Math.max(startIdx, nextIndex);
+                    const idsInRange = state.listItems.slice(start, end + 1).map(item => item.id);
+                    state.setSelectedIds(idsInRange);
+                } else {
+                    setSelectionStart(nextIndex);
+                    const item = state.listItems[nextIndex];
+                    state.setSelectedIds([item.id]);
+                    if (item.isFolder) {
+                        state.setSelectedDocument(item.folderObj);
+                    } else {
+                        state.setSelectedDocument(item.fileObj);
+                    }
+                }
             }
         };
 
         window.addEventListener("keydown", handleKeyDown);
         return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [sortedDocuments, props]);
+    }, []);
 
     function handleSelectFolder(value) {
         setSingleDocumentFilterId(null);
+        setFocusedIndex(null);
+        setSelectionStart(null);
         props.onSelectFolder(value);
     }
 
@@ -324,13 +469,24 @@ function DocumentManager(props) {
     }
 
     function downloadSelected() {
+        // Download files
         props.documents
             .filter((file) => props.selectedIds.includes(file._id))
             .forEach((file) => props.onDownload(file));
+
+        // Download folder zips recursively
+        props.folders
+            .filter(folder => props.selectedIds.includes(`folder:${folder.value}`))
+            .forEach(folder => props.onDownload(folder));
     }
 
     return (
-        <section className="document-manager-shell">
+        <section
+            className={`document-manager-shell ${isDraggingActive ? "dragging-active" : ""}`}
+            onDragOver={props.onDragOver}
+            onDragLeave={props.onDragLeave}
+            onDrop={props.onDrop}
+        >
 
             {/* ================= HEADER ================= */}
 
@@ -528,7 +684,7 @@ function DocumentManager(props) {
                                         <button
                                             type="button"
                                             className="jobs-retry-all-btn"
-                                            onClick={props.onRetryUpload}
+                                            onClick={props.onRetryFailedIndexing}
                                         >
                                             Retry All Failed
                                         </button>
@@ -707,6 +863,12 @@ function DocumentManager(props) {
                         viewMode={viewMode}
                         onSelectDocument={handleSelectTableDoc}
                         selectedDocument={props.selectedDocument}
+                        focusedIndex={focusedIndex}
+                        setFocusedIndex={setFocusedIndex}
+                        search={props.search}
+                        onProperties={(item) => setPropertiesItem(item)}
+                        onDuplicate={props.onDuplicate}
+                        onReindexFolder={props.onReindexFolder}
                     />
 
                     {/* Footer */}
@@ -728,7 +890,7 @@ function DocumentManager(props) {
                 {props.selectedDocument && <div className="preview-resizer" onMouseDown={startPreviewResize} />}
 
                 {/* ========== RIGHT SIDEBAR (PREVIEW) ========== */}
-                {props.selectedDocument && (
+                {props.selectedDocument && !props.selectedDocument.value && (
                     <aside className="document-preview-sidebar" style={{ width: previewWidth }}>
                         <PreviewPanel
                             file={props.selectedDocument}
@@ -743,7 +905,7 @@ function DocumentManager(props) {
             </div>
 
             {/* Hidden upload form keeps the top Upload Files button functional. */}
-            <div className={`document-upload-portal${props.upload.file ? " active" : ""}`}>
+            <div className={`document-upload-portal${props.upload.file || (props.upload.files && props.upload.files.length > 0) || props.isDropActive ? " active" : ""}`}>
                 <UploadDialog {...props} />
             </div>
 
@@ -752,22 +914,25 @@ function DocumentManager(props) {
                 <div className="upload-queue-panel">
                     <header className="upload-queue-header">
                         <h3>Uploading: {props.uploadQueue.filter(u => u.status === 'completed').length} / {props.uploadQueue.length} Files</h3>
-                        <button type="button" onClick={() => props.uploadQueue.forEach(u => props.onCancelUpload(u.id))}>Cancel All</button>
+                        <div style={{ display: "flex", gap: "8px" }}>
+                            <button type="button" onClick={props.onRetryFailedUploads} style={{ color: "var(--admin-gold)" }}>Retry Failed</button>
+                            <button type="button" onClick={props.onClearCompletedUploads}>Clear Done</button>
+                            <button type="button" onClick={props.onCancelAllUploads} style={{ color: "#ff5252" }}>Cancel All</button>
+                        </div>
                     </header>
                     <div className="upload-queue-list">
                         {props.uploadQueue.map(item => (
                             <div key={item.id} className="upload-queue-item">
-                                <div className="upload-item-name" title={item.name}>{item.name}</div>
+                                <div className="upload-item-name" title={item.relativePath || item.name}>{item.relativePath || item.name}</div>
                                 <div className="upload-item-status-row">
                                     <span className={`upload-item-badge ${item.status}`}>{item.status}</span>
-                                    {item.status === 'uploading' && <span className="upload-item-speed">{item.speed}</span>}
-                                    {item.status === 'failed' && <span className="upload-item-error" title={item.error}>{item.error}</span>}
+                                    {item.status === 'uploading' && <span className="upload-item-pct">{item.progress}%</span>}
+                                    {item.status === 'failed' && <span className="upload-item-error" style={{ color: "var(--admin-red)" }} title={item.error}>{item.error}</span>}
                                 </div>
                                 <div className="upload-item-progress-row">
                                     <div className="upload-item-progress-bar">
                                         <div className="upload-item-progress" style={{ width: `${item.progress}%` }} />
                                     </div>
-                                    <span className="upload-item-pct">{item.progress}%</span>
                                 </div>
                                 <div className="upload-item-controls">
                                     {item.status === 'uploading' && (
@@ -779,6 +944,12 @@ function DocumentManager(props) {
                                     {item.status === 'failed' && (
                                         <button type="button" onClick={() => props.onRetryUpload(item.id)}>Retry</button>
                                     )}
+                                    {item.status === 'queued' && (
+                                        <button type="button" onClick={() => props.onSkipUpload(item.id)}>Skip</button>
+                                    )}
+                                    {item.status === 'skipped' && (
+                                        <button type="button" onClick={() => props.onResumeUpload(item.id)}>Queue</button>
+                                    )}
                                     <button type="button" onClick={() => props.onCancelUpload(item.id)} className="cancel">Cancel</button>
                                 </div>
                             </div>
@@ -787,8 +958,19 @@ function DocumentManager(props) {
                 </div>
             )}
 
-            {/* Floating Context Menu */}
+            {/* Properties Modal Overlay */}
+            {propertiesItem && (
+                <PropertiesModal
+                    item={propertiesItem === "currentFolder" 
+                        ? props.folders.find(f => f.value === props.activeFolder) || { label: "Root", value: "root" }
+                        : propertiesItem}
+                    onClose={() => setPropertiesItem(null)}
+                    folders={props.folders}
+                    documents={props.documents}
+                />
+            )}
 
+            {/* Floating Context Menu */}
             <ContextMenu
                 menu={props.contextMenu}
                 onClose={props.closeContextMenu}
@@ -802,10 +984,15 @@ function DocumentManager(props) {
                 onCopy={props.onCopy}
                 onCut={props.onCut}
                 onPaste={props.onPaste}
-                onSelectFolder={props.onSelectFolder}
+                onSelectFolder={handleSelectFolder}
                 onRenameFolder={props.onRenameFolder}
                 onDeleteFolder={props.onDeleteFolder}
                 onMoveFolder={props.onMoveFolder}
+                onDuplicate={props.onDuplicate}
+                onReindex={props.onRebuild}
+                onReindexFolder={props.onReindexFolder}
+                onProperties={(item) => setPropertiesItem(item)}
+                selectedCount={props.selectedIds.length}
             />
 
         </section>

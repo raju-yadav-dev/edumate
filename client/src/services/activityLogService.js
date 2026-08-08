@@ -47,7 +47,12 @@ export function buildRealLogsFromSystemState({ documents = [], users = [], stora
             const fileName = doc.title || doc.originalName || doc.name || `Document_${idx + 1}.pdf`;
             const fileSizeStr = doc.fileSize ? formatBytes(doc.fileSize) : "1.2 MB";
             const timeStr = formatTimestamp(doc.createdAt || doc.uploadedAt || new Date());
-            const uploader = doc.uploadedBy || doc.author || "Raju (Super Admin)";
+            
+            // Resolve uploader name dynamically from creator details
+            const creator = doc.createdBy || {};
+            const uploader = creator.fullName || creator.name || creator.username || doc.uploadedBy || doc.author || "Raju (Super Admin)";
+            
+            const embeddingStatus = String(doc.embeddingStatus || doc.status || "indexed").toLowerCase();
 
             realLogs.push({
                 id: `doc-log-${doc.id || doc._id || idx}`,
@@ -58,11 +63,11 @@ export function buildRealLogsFromSystemState({ documents = [], users = [], stora
                 resource: fileName,
                 details: `File uploaded successfully (${fileSizeStr})`,
                 ipAddress: "192.168.1.10",
-                status: doc.status === "failed" ? "Failed" : "Success"
+                status: embeddingStatus === "failed" ? "Failed" : "Success"
             });
 
             // If document has embeddings, create a vector index log
-            if (doc.status === "indexed" || doc.embeddingsCount > 0) {
+            if (embeddingStatus === "indexed" || doc.embeddingsCount > 0) {
                 realLogs.push({
                     id: `vec-log-${doc.id || doc._id || idx}`,
                     time: timeStr,
@@ -131,7 +136,7 @@ export function buildRealLogsFromSystemState({ documents = [], users = [], stora
 }
 
 /**
- * Record a new real user action into session storage
+ * Record a new real user action into session storage and backend database
  */
 export function recordActivityLog({
     user = "Raju (Super Admin)",
@@ -166,8 +171,24 @@ export function recordActivityLog({
     try {
         localStorage.setItem(LOGS_STORAGE_KEY, JSON.stringify(updated));
     } catch (e) {
-        console.warn("Could not record activity log:", e);
+        console.warn("Could not record activity log locally:", e);
     }
+
+    // Send it to the backend database in the background
+    try {
+        const token = getAdminAccessToken();
+        fetch(`${API_ROOT}/admin/activity-logs`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                ...(token ? { Authorization: `Bearer ${token}` } : {})
+            },
+            body: JSON.stringify({ user, action, service, resource, details, ipAddress, status })
+        }).catch((err) => {
+            console.warn("Backend activity logging failure:", err);
+        });
+    } catch {}
+
     return updated;
 }
 

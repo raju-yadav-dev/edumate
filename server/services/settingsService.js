@@ -54,7 +54,32 @@ const getApiKeys = async () => {
     };
 };
 
+const saveSettings = async ({ key, value, user }) => {
+    const setting = await Setting.findOneAndUpdate(
+        { key },
+        {
+            key,
+            value,
+            visibility: "private",
+            updatedBy: user?._id || null
+        },
+        {
+            new: true,
+            upsert: true,
+            setDefaultsOnInsert: true
+        }
+    );
+    return setting.value;
+};
+
+const getSettings = async ({ key, defaultValue = {} }) => {
+    const setting = await Setting.findOne({ key }).lean();
+    return setting?.value || defaultValue;
+};
+
 module.exports = {
     saveApiKeys,
-    getApiKeys
+    getApiKeys,
+    saveSettings,
+    getSettings
 };

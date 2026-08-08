@@ -261,8 +261,10 @@ export default function ChatSidebar({ isOpen, isCollapsed, onToggleCollapse, onC
             </div>
 
             <div className="threads-scroll-area">
-                {grouped.map(([groupName, items]) => (
-                    <div key={groupName} className="thread-date-group">
+                {grouped.map(([groupName, items]) => {
+                    if (items.length === 0) return null;
+                    return (
+                        <div key={groupName} className="thread-date-group">
                         <h3 className="date-group-heading">{groupName}</h3>
                         <div className="group-threads-list">
                             {items.length === 0 ? (
@@ -356,7 +358,7 @@ export default function ChatSidebar({ isOpen, isCollapsed, onToggleCollapse, onC
                             )}
                         </div>
                     </div>
-                ))}
+                ); })}
             </div>
 
             <div className="sidebar-footer">

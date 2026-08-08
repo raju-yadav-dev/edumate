@@ -351,3 +351,16 @@
     flex-shrink: 0;
 }
 
+/* Drag and Drop drop target indicators for Folder Tree */
+.document-manager-shell.dragging-active .folder-item-row {
+    border: 1.5px dashed rgba(242, 163, 11, 0.45) !important;
+    background: rgba(242, 163, 11, 0.02) !important;
+    transition: all 0.15s ease-in-out;
+}
+
+.document-manager-shell.dragging-active .folder-item-row.drag-over {
+    border: 1.5px solid var(--admin-gold) !important;
+    background: rgba(242, 163, 11, 0.15) !important;
+    box-shadow: 0 0 8px rgba(242, 163, 11, 0.3) !important;
+}
+

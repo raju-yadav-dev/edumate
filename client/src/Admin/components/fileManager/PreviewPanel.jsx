@@ -1,13 +1,15 @@
 import "./PreviewPanel.css";
 import { useState, useEffect } from "react";
-
 import {
     Download,
     Eye as PreviewEye,
     FileText,
     X,
     AlertTriangle,
-    RefreshCw
+    RefreshCw,
+    FileSpreadsheet,
+    FileCode,
+    FileImage
 } from "lucide-react";
 
 import { formatDate } from "../../utils/formatData";
@@ -26,9 +28,13 @@ function PreviewPanel({ file, onClose, onOpen, onDownload, onRebuild }) {
     const url = file ? getDocumentUrl(file) : "";
     const isImage = file && (file.mimeType?.startsWith("image/") || /\.(jpg|jpeg|png|gif|svg|webp)$/i.test(file.originalName));
     const isText = file && (type === "TXT" || type === "MD" || type === "TEXT" || type === "Markdown" || (file.originalName || "").endsWith(".txt") || (file.originalName || "").endsWith(".md"));
+    const isCsv = file && (type === "CSV" || (file.originalName || "").endsWith(".csv"));
+    const isDocx = file && (type === "DOCX" || type === "DOC" || (file.originalName || "").endsWith(".docx") || (file.originalName || "").endsWith(".doc"));
+    const isPptx = file && (type === "PPTX" || type === "PPT" || (file.originalName || "").endsWith(".pptx") || (file.originalName || "").endsWith(".ppt"));
+    const isXlsx = file && (type === "XLSX" || type === "XLS" || (file.originalName || "").endsWith(".xlsx") || (file.originalName || "").endsWith(".xls"));
 
     useEffect(() => {
-        if (file && url && isText) {
+        if (file && url && (isText || isCsv)) {
             setLoadingText(true);
             fetch(url)
                 .then((res) => {
@@ -36,18 +42,18 @@ function PreviewPanel({ file, onClose, onOpen, onDownload, onRebuild }) {
                     return res.text();
                 })
                 .then((text) => {
-                    setTextContents(text.slice(0, 8000));
+                    setTextContents(text.slice(0, 15000));
                     setLoadingText(false);
                 })
                 .catch((err) => {
-                    console.error("Text preview fetch failed:", err);
-                    setTextContents("Unable to load text preview content.");
+                    console.error("Preview fetch failed:", err);
+                    setTextContents("Unable to load preview content.");
                     setLoadingText(false);
                 });
         } else {
             setTextContents("");
         }
-    }, [file, url, isText]);
+    }, [file, url, isText, isCsv]);
 
     if (!file) {
         return (
@@ -62,6 +68,59 @@ function PreviewPanel({ file, onClose, onOpen, onDownload, onRebuild }) {
     }
 
     const status = normalizeStatus(file);
+
+    // Spreadsheets-like CSV rendering
+    const renderCsvPreview = (text) => {
+        const lines = text.split(/\r?\n/).filter(line => line.trim() !== "");
+        const tableRows = lines.slice(0, 35).map(line => {
+            const cols = [];
+            let current = "";
+            let inQuotes = false;
+            for (let i = 0; i < line.length; i++) {
+                const char = line[i];
+                if (char === '"') {
+                    inQuotes = !inQuotes;
+                } else if (char === "," && !inQuotes) {
+                    cols.push(current.trim());
+                    current = "";
+                } else {
+                    current += char;
+                }
+            }
+            cols.push(current.trim());
+            return cols;
+        });
+
+        if (tableRows.length === 0) return <div className="csv-preview-empty">Empty CSV File</div>;
+
+        const maxCols = Math.max(...tableRows.map(r => r.length));
+
+        return (
+            <div className="csv-preview-table-container">
+                <table className="csv-preview-table">
+                    <thead>
+                        <tr>
+                            <th className="csv-corner-cell"></th>
+                            {Array.from({ length: maxCols }).map((_, idx) => (
+                                <th key={idx} className="csv-header-cell">{String.fromCharCode(65 + (idx % 26)) + (idx >= 26 ? Math.floor(idx / 26) : "")}</th>
+                            ))}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {tableRows.map((row, rowIdx) => (
+                            <tr key={rowIdx}>
+                                <td className="csv-row-num-cell">{rowIdx + 1}</td>
+                                {Array.from({ length: maxCols }).map((_, colIdx) => (
+                                    <td key={colIdx} className="csv-data-cell">{row[colIdx] || ""}</td>
+                                ))}
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+                {lines.length > 35 && <div className="csv-preview-more">Showing first 35 rows...</div>}
+            </div>
+        );
+    };
 
     return (
         <aside className="preview-panel">
@@ -83,11 +142,13 @@ function PreviewPanel({ file, onClose, onOpen, onDownload, onRebuild }) {
             {/* Preview Surface */}
             <div className="preview-surface">
                 {isImage && url ? (
-                    <img
-                        src={url}
-                        alt={file.originalName}
-                        style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }}
-                    />
+                    <div className="image-preview-wrapper">
+                        <img
+                            src={url}
+                            alt={file.originalName}
+                            style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }}
+                        />
+                    </div>
                 ) : isText && url ? (
                     loadingText ? (
                         <div className="preview-placeholder">Loading text preview...</div>
@@ -106,11 +167,38 @@ function PreviewPanel({ file, onClose, onOpen, onDownload, onRebuild }) {
                             {textContents}
                         </pre>
                     )
+                ) : isCsv && url ? (
+                    loadingText ? (
+                        <div className="preview-placeholder">Loading spreadsheet preview...</div>
+                    ) : (
+                        renderCsvPreview(textContents)
+                    )
                 ) : type === "PDF" && url ? (
                     <iframe
                         title={file.originalName}
                         src={url}
                     />
+                ) : isDocx ? (
+                    <div className="office-preview-card docx">
+                        <FileText size={72} className="office-icon" />
+                        <h3>Microsoft Word Document</h3>
+                        <p>Direct browser preview is not supported for Word documents.</p>
+                        <span>Size: {formatBytes(file.fileSize || file.size)}</span>
+                    </div>
+                ) : isXlsx ? (
+                    <div className="office-preview-card xlsx">
+                        <FileSpreadsheet size={72} className="office-icon" />
+                        <h3>Microsoft Excel Spreadsheet</h3>
+                        <p>Direct browser preview is not supported for Excel files.</p>
+                        <span>Size: {formatBytes(file.fileSize || file.size)}</span>
+                    </div>
+                ) : isPptx ? (
+                    <div className="office-preview-card pptx">
+                        <FileCode size={72} className="office-icon" />
+                        <h3>Microsoft PowerPoint Presentation</h3>
+                        <p>Direct browser preview is not supported for PowerPoint presentations.</p>
+                        <span>Size: {formatBytes(file.fileSize || file.size)}</span>
+                    </div>
                 ) : (
                     <div className="preview-placeholder">
                         <FileText size={60} />

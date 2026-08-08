@@ -889,7 +889,7 @@
 }
 
 .edu-chat-composer-toolbar .edu-chat-icon-button:last-child{
-    display:none;
+    /* display:none; */
 }
 
 .edu-chat-composer-hints{

@@ -21,6 +21,7 @@ import {
     cleanupUnusedChunks,
     rebuildAllEmbeddings
 } from "../../../services/adminService";
+import { recrawlAllCrawlerJobs } from "../../../crawler/crawlerService";
 
 export default function ToolActions({ onOperationComplete, documents = [], onRefresh }) {
     const [executingTool, setExecutingTool] = useState(null);
@@ -118,6 +119,16 @@ export default function ToolActions({ onOperationComplete, documents = [], onRef
             iconBg: "rgba(239, 68, 68, 0.14)",
             type: "Maintenance",
             details: "Orphaned chunk cleanup"
+        },
+        {
+            id: "recrawl-all",
+            title: "Re-crawl Web Pages",
+            description: "Trigger crawlers to scan all previously crawled websites.",
+            icon: RefreshCw,
+            iconColor: "#ff7a00",
+            iconBg: "rgba(255, 122, 0, 0.14)",
+            type: "Crawler",
+            details: "All active site sources"
         }
     ];
 
@@ -223,6 +234,12 @@ export default function ToolActions({ onOperationComplete, documents = [], onRef
                 }
             } catch (err) {
                 console.log("Embeddings API status:", err.message);
+            }
+        } else if (tool.id === "recrawl-all") {
+            try {
+                await recrawlAllCrawlerJobs();
+            } catch (err) {
+                console.error("Re-crawl all failed:", err);
             }
         }
     };

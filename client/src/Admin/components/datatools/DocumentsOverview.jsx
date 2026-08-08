@@ -1,19 +1,42 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 
 export default function DocumentsOverview({ documents = [], storageStats = {} }) {
     const [timeframe, setTimeframe] = useState("This Month");
 
     const kb = storageStats?.knowledgeBase || {};
 
-    // Dynamically calculate status breakdown from live documents array or storageStats
+    const filteredDocs = useMemo(() => {
+        if (!documents || documents.length === 0) return [];
+        const now = new Date();
+        const startOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+        const startOfThisYear = new Date(now.getFullYear(), 0, 1);
+
+        return documents.filter((doc) => {
+            const date = doc.createdAt ? new Date(doc.createdAt) : doc.updatedAt ? new Date(doc.updatedAt) : null;
+            if (!date) return true;
+
+            if (timeframe === "This Month") {
+                return date >= startOfThisMonth;
+            } else if (timeframe === "Last Month") {
+                return date >= startOfLastMonth && date <= endOfLastMonth;
+            } else if (timeframe === "This Year") {
+                return date >= startOfThisYear;
+            }
+            return true;
+        });
+    }, [documents, timeframe]);
+
+    // Dynamically calculate status breakdown from filtered documents array
     let indexed = 0;
     let processing = 0;
     let pending = 0;
     let failed = 0;
 
-    if (documents && documents.length > 0) {
-        documents.forEach((doc) => {
-            const st = (doc.status || "indexed").toLowerCase();
+    if (filteredDocs && filteredDocs.length > 0) {
+        filteredDocs.forEach((doc) => {
+            const st = (doc.embeddingStatus || doc.status || "indexed").toLowerCase();
             if (st === "indexed" || st === "ready" || st === "active") indexed++;
             else if (st === "processing") processing++;
             else if (st === "pending") pending++;

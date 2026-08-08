@@ -72,8 +72,12 @@ function Sidebar({
                 </div>
 
                 <div className="edu-chat-sidebar-sections">
-                    {sections.map((section) => (
-                        <section className="edu-chat-thread-section" key={section.label}>
+                    {sections.map((section) => {
+                        if (section.items.length === 0 && ["Yesterday", "Previous Week", "Archive", "Pinned"].includes(section.label)) {
+                            return null;
+                        }
+                        return (
+                            <section className="edu-chat-thread-section" key={section.label}>
                             <div className="edu-chat-section-header">
                                 <span>{section.label}</span>
                                 <small>{section.items.length}</small>
@@ -122,7 +126,7 @@ function Sidebar({
                                 )}
                             </div>
                         </section>
-                    ))}
+                    )})}
                 </div>
 
                 <div className="edu-chat-sidebar-footer">

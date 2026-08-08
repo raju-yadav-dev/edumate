@@ -139,7 +139,8 @@
 .users-table-wrap {
     border-top: 1px solid var(--um-border);
     overflow-x: auto;
-    overflow-y: visible;
+    max-height: 380px;
+    overflow-y: auto;
 }
 .analytics-title h3, .table-topline h3 {
   font-size: 1.08rem;
@@ -364,6 +365,8 @@
 .users-table-wrap {
   border-top: 1px solid var(--um-border);
   overflow-x: auto;
+  max-height: 380px;
+  overflow-y: auto;
 }
 
 .users-table {
@@ -380,6 +383,10 @@
   padding: 11px 18px;
   text-align: left;
   text-transform: uppercase;
+  position: sticky;
+  top: 0;
+  background: var(--um-panel, #0b1727);
+  z-index: 2;
 }
 
 .users-table td {

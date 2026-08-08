@@ -433,9 +433,10 @@ function Chat() {
         return branch;
     }, [activeThread?.messages, activeChildMap]);
 
-    const sendMessage = useCallback(async (question, overrideCoords = null, parentId = null, userMessageId = null, assistantMessageId = null) => {
+    const sendMessage = useCallback(async (question, overrideCoords = null, parentId = null, userMessageId = null, assistantMessageId = null, displayText = null) => {
         let currentThreadId = activeThreadId;
         const trimmedQuestion = question.trim();
+        const displayQuestion = displayText ? displayText.trim() : trimmedQuestion;
         let finalText = "";
 
         if ((!trimmedQuestion && attachments.length === 0) || loading) {
@@ -466,7 +467,7 @@ function Chat() {
             id: uMsgId,
             parentId: finalParentId,
             role: "user",
-            content: trimmedQuestion || (attachments.length ? `[Attached ${attachments.length} file(s)]` : ""),
+            content: displayQuestion || (attachments.length ? `[Attached ${attachments.length} file(s)]` : ""),
             timestamp: formatTimestamp(now)
         };
 
@@ -498,8 +499,8 @@ function Chat() {
         if (!currentThreadId) {
             const newThread = createBlankThread();
             currentThreadId = newThread.id;
-            newThread.title = trimmedQuestion ? trimmedQuestion.slice(0, 42) : "New chat";
-            newThread.preview = trimmedQuestion || (attachments.length ? `Attached ${attachments.length} file(s)` : "");
+            newThread.title = displayQuestion ? displayQuestion.slice(0, 42) : "New chat";
+            newThread.preview = displayQuestion || (attachments.length ? `Attached ${attachments.length} file(s)` : "");
             newThread.hasFiles = attachments.length > 0;
             newThread.messages = [userMessage, initialAssistantMessage];
 
@@ -511,12 +512,12 @@ function Chat() {
                     return thread;
                 }
 
-                const nextTitle = thread.title === "New chat" ? (trimmedQuestion ? trimmedQuestion.slice(0, 42) : "New chat") : thread.title;
+                const nextTitle = thread.title === "New chat" ? (displayQuestion ? displayQuestion.slice(0, 42) : "New chat") : thread.title;
 
                 return {
                     ...thread,
                     title: nextTitle,
-                    preview: trimmedQuestion || (attachments.length ? `Attached ${attachments.length} file(s)` : ""),
+                    preview: displayQuestion || (attachments.length ? `Attached ${attachments.length} file(s)` : ""),
                     updatedLabel: formatThreadLabel(now),
                     hasFiles: thread.hasFiles || attachments.length > 0,
                     messages: [...thread.messages, userMessage, initialAssistantMessage]

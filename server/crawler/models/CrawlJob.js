@@ -51,7 +51,8 @@ const crawlJobSchema = new mongoose.Schema(
         }
     },
     {
-        timestamps: true
+        timestamps: true,
+        suppressReservedKeysWarning: true
     }
 );
 

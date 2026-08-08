@@ -74,3 +74,13 @@ export async function deleteCrawlJob(jobId) {
     });
     return parseResponse(response, "Failed to delete crawl job history.");
 }
+
+export async function recrawlAllCrawlerJobs() {
+    const response = await fetch(`${CRAWLER_API_BASE_URL}/recrawl-all`, {
+        method: "POST",
+        headers: {
+            "Authorization": `Bearer ${getAdminAccessToken()}`
+        }
+    });
+    return parseResponse(response, "Failed to start re-crawl of all pages.");
+}

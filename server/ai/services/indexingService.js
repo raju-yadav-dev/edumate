@@ -73,7 +73,22 @@ const processNextJob = async () => {
 
                 emptyPolls = 0;
                 console.log(`[IndexingService] Worker ${workerId} indexing document ${nextDoc._id}`);
-                await runIndexingJob(nextDoc._id);
+                try {
+                    await runIndexingJob(nextDoc._id);
+                } catch (jobErr) {
+                    console.error(`[IndexingService] Worker ${workerId} failed to run indexing job for document ${nextDoc._id}:`, jobErr);
+                    try {
+                        await Document.findByIdAndUpdate(nextDoc._id, {
+                            $set: {
+                                embeddingStatus: "failed",
+                                "metadata.error": jobErr.message,
+                                "metadata.lastErrorAt": new Date().toISOString()
+                            }
+                        });
+                    } catch (saveErr) {
+                        console.error("Failed to mark document as failed:", saveErr);
+                    }
+                }
 
                 const moreWork = await Document.exists({
                     status: { $ne: "deleted" },

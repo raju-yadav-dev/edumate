@@ -287,3 +287,122 @@
         grid-template-columns: 30px 28px minmax(0, 1fr) 170px;
     }
 }
+
+/* Pagination Footer */
+.file-table-pagination {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 20px;
+    border-top: 1px solid var(--admin-line);
+    background: rgba(0, 0, 0, 0.2);
+    font-size: 12px;
+}
+
+.pagination-info {
+    color: var(--admin-muted);
+}
+
+.pagination-info strong {
+    color: #fff;
+}
+
+.pagination-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.pagination-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--admin-line);
+    color: var(--admin-text);
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.2s;
+}
+
+.pagination-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+}
+
+.pagination-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.pagination-pages {
+    display: flex;
+    gap: 4px;
+}
+
+.pagination-page-num {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--admin-muted);
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.pagination-page-num:hover:not(.active) {
+    background: rgba(255, 255, 255, 0.05);
+    color: #fff;
+}
+
+.pagination-page-num.active {
+    background: var(--admin-gold);
+    color: #000;
+    border-color: var(--admin-gold);
+    font-weight: 600;
+}
+
+.pagination-size-selector select {
+    background: #090f17;
+    border: 1px solid var(--admin-line);
+    color: var(--admin-text);
+    padding: 5px 8px;
+    border-radius: 6px;
+    font-size: 12px;
+    outline: none;
+    cursor: pointer;
+}
+
+.file-row.focused {
+    background: rgba(242, 163, 11, 0.04);
+    outline: 1px dashed var(--admin-gold);
+    outline-offset: -1px;
+}
+
+.file-row.folder-row.drag-over {
+    background: rgba(242, 163, 11, 0.15) !important;
+    border-color: var(--admin-gold) !important;
+}
+
+/* Drag and Drop drop target indicators for File Table */
+.document-manager-shell.dragging-active .file-row.folder-row {
+    border: 2px dashed rgba(242, 163, 11, 0.45) !important;
+    background: rgba(242, 163, 11, 0.02) !important;
+    border-radius: 4px;
+    margin: 3px 0;
+    transition: all 0.15s ease-in-out;
+}
+
+.document-manager-shell.dragging-active .file-row.folder-row.drag-over {
+    border: 2px solid var(--admin-gold) !important;
+    background: rgba(242, 163, 11, 0.15) !important;
+    box-shadow: 0 0 10px rgba(242, 163, 11, 0.3) !important;
+}

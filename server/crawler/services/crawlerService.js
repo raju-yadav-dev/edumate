@@ -623,6 +623,33 @@ const deleteCrawlJob = async ({ jobId, user }) => {
     return { deleted: true, jobId: String(jobId) };
 };
 
+const recrawlAllJobs = async ({ user }) => {
+    const jobs = await CrawlJob.find({});
+    const uniqueJobsMap = new Map();
+    for (const job of jobs) {
+        if (job.url) {
+            uniqueJobsMap.set(job.url, job);
+        }
+    }
+    
+    const triggered = [];
+    for (const job of uniqueJobsMap.values()) {
+        try {
+            const newJob = await startCrawl({
+                url: job.url,
+                maxPages: job.maxPages,
+                category: job.category,
+                institution: job.institution,
+                user
+            });
+            triggered.push(newJob);
+        } catch (err) {
+            console.error(`Failed to start crawl fallback for ${job.url}:`, err.message);
+        }
+    }
+    return { count: triggered.length, jobs: triggered };
+};
+
 /**
  * Lists past crawl jobs.
  */
@@ -657,6 +684,7 @@ module.exports = {
     cancelCrawl,
     recrawlCrawlJob,
     deleteCrawlJob,
+    recrawlAllJobs,
     listCrawlJobs,
     getCrawlJobDetails
 };

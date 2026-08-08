@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
     Settings,
     Shield,
@@ -14,7 +14,11 @@ import {
 import GeneralSettingsTab from "./GeneralSettingsTab";
 import ApiKeys from "../apikeys/ApiKeys";
 import { recordActivityLog } from "../../../services/activityLogService";
+import { getApiRootUrl } from "../../../services/apiConfig";
+import { getAdminAccessToken } from "../../../services/adminSession";
 import "./Settings.css";
+
+const API_ROOT = getApiRootUrl();
 
 export default function SettingsPage({
     adminTheme,
@@ -46,8 +50,69 @@ export default function SettingsPage({
     // Backup Option
     const [autoBackup, setAutoBackup] = useState(true);
 
-    const showToast = (msg) => {
+    // Load settings from backend on mount
+    useEffect(() => {
+        async function loadSettings() {
+            const token = getAdminAccessToken();
+            if (!token) return;
+            try {
+                // Load Security Settings
+                const secRes = await fetch(`${API_ROOT}/admin/settings/security`, {
+                    headers: { Authorization: `Bearer ${token}` }
+                });
+                if (secRes.ok) {
+                    const secData = await secRes.json();
+                    if (secData.data) setSecurityOpts(secData.data);
+                }
+
+                // Load Notification Settings
+                const notifRes = await fetch(`${API_ROOT}/admin/settings/notifications`, {
+                    headers: { Authorization: `Bearer ${token}` }
+                });
+                if (notifRes.ok) {
+                    const notifData = await notifRes.json();
+                    if (notifData.data) setNotifOpts(notifData.data);
+                }
+
+                // Load Backup Settings
+                const backRes = await fetch(`${API_ROOT}/admin/settings/backup`, {
+                    headers: { Authorization: `Bearer ${token}` }
+                });
+                if (backRes.ok) {
+                    const backData = await backRes.json();
+                    if (backData.data && backData.data.autoBackup !== undefined) {
+                        setAutoBackup(backData.data.autoBackup);
+                    }
+                }
+            } catch (err) {
+                console.error("Failed to load settings from database:", err);
+            }
+        }
+        loadSettings();
+    }, []);
+
+    const saveSettingsToDb = async (key, value) => {
+        const token = getAdminAccessToken();
+        if (!token) return;
+        try {
+            await fetch(`${API_ROOT}/admin/settings/${key}`, {
+                method: "PUT",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`
+                },
+                body: JSON.stringify(value)
+            });
+        } catch (err) {
+            console.error(`Failed to save settings for ${key}:`, err);
+        }
+    };
+
+    const showToast = (msg, key = null, value = null) => {
         setToastMessage(msg);
+        if (key && value !== null) {
+            saveSettingsToDb(key, value);
+        }
         recordActivityLog({
             action: "Updated Settings",
             service: "Settings",
@@ -153,7 +218,7 @@ export default function SettingsPage({
                             </div>
                         </div>
                         <div className="settings-card-foot">
-                            <button type="button" className="settings-gold-btn" onClick={() => showToast("Security Settings")}>
+                            <button type="button" className="settings-gold-btn" onClick={() => showToast("Security Settings", "security", securityOpts)}>
                                 <Save size={14} /> Save Changes
                             </button>
                         </div>
@@ -201,7 +266,7 @@ export default function SettingsPage({
                             </div>
                         </div>
                         <div className="settings-card-foot">
-                            <button type="button" className="settings-gold-btn" onClick={() => showToast("Notification Preferences")}>
+                            <button type="button" className="settings-gold-btn" onClick={() => showToast("Notification Preferences", "notifications", notifOpts)}>
                                 <Save size={14} /> Save Changes
                             </button>
                         </div>
@@ -246,7 +311,7 @@ export default function SettingsPage({
                             </div>
                         </div>
                         <div className="settings-card-foot">
-                            <button type="button" className="settings-gold-btn" onClick={() => showToast("Database Snapshot Created")}>
+                            <button type="button" className="settings-gold-btn" onClick={() => showToast("Database Snapshot Created", "backup", { autoBackup })}>
                                 <Save size={14} /> Create Snapshot
                             </button>
                         </div>

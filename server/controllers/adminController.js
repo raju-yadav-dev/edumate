@@ -640,11 +640,68 @@ const deleteUnusedChunks = asyncHandler(async (req, res) => {
     });
 });
 
+const ActivityLog = require("../models/ActivityLog");
+
+const getActivityLogs = asyncHandler(async (req, res) => {
+    const logs = await ActivityLog.find({}).sort({ createdAt: -1 }).limit(100).lean();
+    const formatted = logs.map(log => ({
+        id: String(log._id),
+        time: new Date(log.createdAt).toLocaleString("en-US", {
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: true
+        }),
+        user: log.user,
+        action: log.action,
+        service: log.service,
+        resource: log.resource,
+        details: log.details,
+        ipAddress: log.ipAddress,
+        status: log.status
+    }));
+    return sendSuccess(res, 200, "Activity logs retrieved successfully.", formatted);
+});
+
+const recordActivityLog = asyncHandler(async (req, res) => {
+    const { user, action, service, resource, details, ipAddress, status } = req.body;
+    const log = await ActivityLog.create({
+        user: user || req.user?.fullName || req.user?.email || "Admin",
+        action: action || "Unknown Action",
+        service: service || "System",
+        resource: resource || "General",
+        details: details || "",
+        ipAddress: ipAddress || req.ip || "127.0.0.1",
+        status: status || "Success"
+    });
+    return sendSuccess(res, 201, "Activity log recorded successfully.", log);
+});
+
+const getSystemSettings = asyncHandler(async (req, res) => {
+    const value = await settingsService.getSettings({ key: req.params.key });
+    return sendSuccess(res, 200, "Settings retrieved successfully.", value);
+});
+
+const saveSystemSettings = asyncHandler(async (req, res) => {
+    const value = await settingsService.saveSettings({
+        key: req.params.key,
+        value: req.body,
+        user: req.user
+    });
+    return sendSuccess(res, 200, "Settings saved successfully.", value);
+});
+
 module.exports = {
     getStorageStats,
     saveApiKeys,
     clearCache,
     backupDatabase,
     restoreBackup,
-    deleteUnusedChunks
+    deleteUnusedChunks,
+    getActivityLogs,
+    recordActivityLog,
+    getSystemSettings,
+    saveSystemSettings
 };
