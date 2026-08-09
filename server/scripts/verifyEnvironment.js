@@ -5,7 +5,7 @@ const colors = require("./colors");
 // Ensure environment variables are loaded
 const envPath = path.resolve(process.cwd(), ".env");
 if (fs.existsSync(envPath)) {
-    require("dotenv").config();
+    require("dotenv").config({ override: true });
 }
 
 // Auto-detect LLM provider if not set

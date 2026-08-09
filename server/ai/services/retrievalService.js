@@ -81,6 +81,8 @@ const retrieveRelevantChunks = async ({
 
 const embeddingService = require("./embeddingService");
 
+const Chunk = require("../../models/Chunk");
+
 /**
  * High-level coordinate retrieval function that handles query embedding and user filters
  * @param {Object} params
@@ -89,14 +91,15 @@ const embeddingService = require("./embeddingService");
  * @param {number} [params.limit=AI_CONSTANTS.DEFAULT_RETRIEVAL_LIMIT]
  * @returns {Promise<Array<Object>>}
  */
-const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL_LIMIT }) => {
+const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL_LIMIT, ignoreInstitution = false }) => {
+    let candidates = [];
+    
+    // 1. Vector Search
     const queryEmbedding = await embeddingService.getQueryEmbedding(question);
     
     // Construct robust Qdrant nested filter
     const must = [];
-
-    // Match user's institution OR general/empty values
-    if (user?.institution) {
+    if (user?.institution && !ignoreInstitution) {
         must.push({
             should: [
                 { key: "institution", match: { value: user.institution } },
@@ -106,9 +109,7 @@ const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL
             ]
         });
     }
-
-    // Match user's department OR general/empty values (essential for university-wide prospectus/admission docs)
-    if (user?.department) {
+    if (user?.department && !ignoreInstitution) {
         must.push({
             should: [
                 { key: "department", match: { value: user.department } },
@@ -121,8 +122,86 @@ const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL
     }
 
     const qdrantFilter = must.length > 0 ? { must } : undefined;
+    candidates = await retrieveRelevantChunks({ queryEmbedding, limit, filter: qdrantFilter, isRawFilter: true });
 
-    return retrieveRelevantChunks({ queryEmbedding, limit, filter: qdrantFilter, isRawFilter: true });
+    // 2. Keyword/Lexical Fallback (if vector search results are using mock embeddings, or if no confident matches were found)
+    const apiKey = process.env.GEMINI_API_KEY;
+    const isMockActive = !apiKey || !apiKey.startsWith("AIzaSy");
+
+    if (isMockActive || candidates.length === 0) {
+        console.log("[Retrieval Service] Mock embedding active or no vector candidates. Running MongoDB keyword search fallback...");
+        try {
+            const cleanQuery = question.toLowerCase().replace(/[^a-z0-9\s]/g, " ").trim();
+            const words = cleanQuery.split(/\s+/).filter(w => w.length > 1);
+            const stopWords = new Set(["give", "details", "about", "what", "is", "the", "for", "tell", "me", "show", "how", "course", "program", "programme"]);
+            const keywords = words.filter(w => !stopWords.has(w));
+
+            if (keywords.length > 0) {
+                const regexes = keywords.map(kw => {
+                    const escaped = kw.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+                    return new RegExp(`\\b${escaped}\\b`, "i");
+                });
+
+                const mustConditions = [
+                    { $or: regexes.map(r => ({ content: r })) }
+                ];
+
+                if (user?.institution && !ignoreInstitution) {
+                    mustConditions.push({
+                        "metadata.institution": { $in: [user.institution, "all", "general", ""] }
+                    });
+                }
+
+                if (user?.department && !ignoreInstitution) {
+                    mustConditions.push({
+                        $or: [
+                            { "metadata.department": { $in: [user.department, "all", "general", "academic", ""] } },
+                            { "metadata.category": { $regex: /cources|admission|broucher/i } }
+                        ]
+                    });
+                }
+
+                const mongoQuery = { $and: mustConditions };
+
+                const matchedChunks = await Chunk.find(mongoQuery).limit(limit).lean();
+                console.log(`[Retrieval Service] MongoDB keyword search found ${matchedChunks.length} chunks.`);
+
+                const fallbackCandidates = matchedChunks.map(c => ({
+                    id: c._id.toString(),
+                    content: c.content,
+                    metadata: {
+                        documentId: c.document?.toString() || "",
+                        originalName: c.metadata?.originalName || "",
+                        pageNumber: c.metadata?.pageNumber || 1,
+                        category: c.metadata?.category || "",
+                        department: c.metadata?.department || "",
+                        institution: c.metadata?.institution || "",
+                        uploadedBy: c.metadata?.uploadedBy || "",
+                        chunkIndex: c.metadata?.chunkIndex || 0,
+                        createdAt: c.createdAt || ""
+                    },
+                    score: 1.0 // Assign high score for keyword hits
+                }));
+
+                if (isMockActive) {
+                    // In mock mode, we prefer direct keyword matching
+                    candidates = fallbackCandidates;
+                } else {
+                    // Otherwise, merge unique ones
+                    const candidateIds = new Set(candidates.map(c => c.id));
+                    fallbackCandidates.forEach(fc => {
+                        if (!candidateIds.has(fc.id)) {
+                            candidates.push(fc);
+                        }
+                    });
+                }
+            }
+        } catch (mongoSearchError) {
+            console.error("[Retrieval Service] MongoDB keyword fallback failed:", mongoSearchError.message);
+        }
+    }
+
+    return candidates;
 };
 
 module.exports = {

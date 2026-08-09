@@ -137,8 +137,12 @@ const generateCompletion = async ({ messages, maxAttemptsPerProvider = 2, timeou
                     statusCode: error.statusCode || null
                 });
 
-                // Immediately failover on rate limits (429) or invalid auth error codes (400, 401, 403)
-                if (error.statusCode === 429 || error.statusCode === 401 || error.statusCode === 403 || error.statusCode === 400) {
+                // Handle rate limits (429) by sleeping and retrying, and other invalid auth codes by rotating
+                if (error.statusCode === 429) {
+                    console.warn(`[Groq Provider Manager] Provider ${provider.id} hit rate limit (429). Rotating key immediately...`);
+                    break;
+                }
+                if (error.statusCode === 401 || error.statusCode === 403 || error.statusCode === 400) {
                     console.warn(`[Groq Provider Manager] Provider ${provider.id} failed with status ${error.statusCode}. Rotating immediately...`);
                     break;
                 }
@@ -272,8 +276,12 @@ const generateStream = async ({ messages, onChunk, maxAttemptsPerProvider = 2, t
                     statusCode: error.statusCode || null
                 });
 
-                // Immediately failover on rate limits (429) or invalid auth error codes (400, 401, 403)
-                if (error.statusCode === 429 || error.statusCode === 401 || error.statusCode === 403 || error.statusCode === 400) {
+                // Handle rate limits (429) by sleeping and retrying, and other invalid auth codes by rotating
+                if (error.statusCode === 429) {
+                    console.warn(`[Groq Provider Manager] Provider ${provider.id} hit rate limit (429). Rotating key immediately...`);
+                    break;
+                }
+                if (error.statusCode === 401 || error.statusCode === 403 || error.statusCode === 400) {
                     console.warn(`[Groq Provider Manager] Provider ${provider.id} failed with status ${error.statusCode}. Rotating immediately...`);
                     break;
                 }

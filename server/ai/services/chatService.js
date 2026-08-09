@@ -21,6 +21,8 @@ const { SOURCE_LABELS } = responseFormattingService;
 const citationService = require("./citationService");
 const suggestionsService = require("./suggestionsService");
 const knowledgeManager = require("../../knowledge/KnowledgeManager");
+const SearchManager = require("../../knowledge/SearchManager");
+const RankingEngine = require("../../knowledge/RankingEngine");
 
 const deterministicGreeting = (user) => ({
     answer: `Hello ${user?.fullName || "there"}. I can help with institutional questions, documents, campus services, routes, and academic support.`,
@@ -57,23 +59,28 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
     }
 
     // 1. Retrieve dialogue history memory context
-    const { historyText } = await conversationService.getRecentMemory({
+    const { historyText, activeTopic } = await conversationService.getRecentMemory({
         userId: activeUser._id,
         conversationId,
         maxTokens: 1500,
         parentId
     });
 
-    // 2. Intent Detection
-    const intentResult = await intentDetectionService.detectIntent(normalizedQuestion);
-    const decision = decide({ intent: intentResult.intent, question: normalizedQuestion });
+    // 2. Query Analysis (Topic Switch, Rewrite Query, Intent, Entities, Repeat Check)
+    const analysisResult = await queryRewriterService.analyzeQuery({
+        question: normalizedQuestion,
+        historyText,
+        activeTopic
+    });
+    const { rewrittenQuery, intent, entities, isRepeat } = analysisResult;
+    const resolvedActiveTopic = analysisResult.activeTopic || activeTopic || "";
 
-    // 3. Entity Extraction
-    const entities = await entityExtractionService.extractEntities(normalizedQuestion);
+    const intentResult = { intent, confidence: 0.9 };
+    const decision = decide({ intent, question: rewrittenQuery });
 
-    // 4. Clarification Handling
+    // 3. Clarification Handling
     const clarification = clarificationService.checkClarification({
-        intent: intentResult.intent,
+        intent,
         entities,
         question: normalizedQuestion
     });
@@ -85,10 +92,15 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
             conversationId,
             question: normalizedQuestion,
             response: clarification,
-            intent: intentResult.intent,
+            intent,
             confidence: intentResult.confidence,
             provider: "system",
-            responseTimeMs
+            responseTimeMs,
+            userMessageId,
+            assistantMessageId,
+            parentId,
+            topic: resolvedActiveTopic,
+            entities
         });
 
         const suggestions = await suggestionsService.generateSuggestions({
@@ -100,7 +112,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
             conversationId: chat?._id || conversationId || null,
             mode: activeUser._id ? "authenticated" : "guest",
             message: clarification.answer,
-            intent: intentResult.intent,
+            intent,
             intentConfidence: intentResult.confidence,
             confidence: clarification.confidence,
             sources: clarification.sources,
@@ -111,13 +123,6 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
         };
     }
 
-    // 5. Query Rewriting
-    const rewrittenQuery = await queryRewriterService.rewriteQuery({
-        question: normalizedQuestion,
-        historyText
-    });
-    console.log(`Original: "${normalizedQuestion}" | Rewritten: "${rewrittenQuery}"`);
-
     let retrievedChunks = [];
     let universitySiteResults = [];
     let webResults = [];
@@ -125,9 +130,17 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
     let sourceLabel = SOURCE_LABELS.UNIVERSITY;
     let formatted;
     let provider = "system";
+    let textResponse = "";
+    let finalMessages = [];
+
+    // Counters for debug logging
+    let adminDocsCount = 0;
+    let adminUrlsCount = 0;
+    let internetCount = 0;
 
     if (decision.service === "deterministic") {
         formatted = deterministicGreeting(activeUser);
+        textResponse = formatted.answer;
     } else if (decision.service === "map") {
         const mapResult = await mapService.resolveLocationRequest({
             question: rewrittenQuery,
@@ -150,52 +163,145 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
         if (mapResult.requiresLocationPermission) {
             formatted.requiresLocationPermission = true;
         }
+        textResponse = formatted.answer;
     } else {
         // Perform 3-Tier Fallback Search Pipeline
-        const isUniversityRelated = classifyQuestionType(rewrittenQuery, intentResult.intent) !== QUESTION_TYPES.GENERAL_KNOWLEDGE;
+        const isUniversityRelated = classifyQuestionType(rewrittenQuery, intent) !== QUESTION_TYPES.GENERAL_KNOWLEDGE;
 
         if (isUniversityRelated) {
-            console.log(`Smart Search Pipeline: Querying KnowledgeManager for prioritized source retrieval...`);
-            try {
-                const knowledgeResult = await knowledgeManager.search({
-                    question: rewrittenQuery,
-                    user: activeUser
-                });
+            console.log("[CHAT] Parallel Search: Fetching all Tiers concurrently...");
+            const [docChunks, siteChunks, internetResults] = await Promise.all([
+                SearchManager.searchLocalPdfs(rewrittenQuery, activeUser, 5),
+                SearchManager.searchApprovedUrls(rewrittenQuery, activeUser, 5),
+                SearchManager.searchInternet(rewrittenQuery)
+            ]);
+
+            // TIER 1: ADMIN DOCUMENTS
+            console.log("[CHAT] Evaluating Tier 1 (Admin Documents)...");
+            const rankedDocChunks = await RankingEngine.rerankCandidates(rewrittenQuery, docChunks, activeUser);
+            adminDocsCount = rankedDocChunks.length;
+
+            const maxDocScore = rankedDocChunks.length > 0 ? Math.max(...rankedDocChunks.map(c => c.score)) : 0;
+            if (maxDocScore >= RankingEngine.SIMILARITY_CONFIDENCE_THRESHOLD) {
+                console.log("[CHAT] Tier 1 verified as SUFFICIENT by similarity score.");
                 
-                retrievedChunks = knowledgeResult.chunks;
-                webResults = knowledgeResult.webResults;
-                universitySiteResults = [];
+                const tempMessages = promptService.buildPromptMessages({
+                    question: rewrittenQuery,
+                    intent,
+                    retrievedChunks: rankedDocChunks,
+                    universitySiteResults: [],
+                    webResults: [],
+                    historyText,
+                    user: activeUser,
+                    questionType: QUESTION_TYPES.UNIVERSITY_SPECIFIC,
+                    isRepeat,
+                    activeTopic: resolvedActiveTopic
+                });
 
-                const hasLocal = retrievedChunks.length > 0;
-                const hasWeb = webResults.length > 0;
+                const attemptResponse = await llmService.generateCompletion(tempMessages);
+                textResponse = attemptResponse;
+                retrievedChunks = rankedDocChunks;
+                activeQuestionType = QUESTION_TYPES.UNIVERSITY_SPECIFIC;
+                sourceLabel = SOURCE_LABELS.UNIVERSITY;
+                provider = "groq";
+                finalMessages = tempMessages;
+            }
 
-                if (hasLocal && hasWeb) {
-                    activeQuestionType = QUESTION_TYPES.HYBRID;
-                    sourceLabel = SOURCE_LABELS.UNIVERSITY;
-                } else if (hasLocal) {
+            // TIER 2: ADMIN-APPROVED WEBSITE URLS
+            if (!textResponse) {
+                console.log("[CHAT] Evaluating Tier 2 (Crawled website URLs)...");
+                const rankedSiteChunks = await RankingEngine.rerankCandidates(rewrittenQuery, siteChunks, activeUser);
+                adminUrlsCount = rankedSiteChunks.length;
+
+                const maxSiteScore = rankedSiteChunks.length > 0 ? Math.max(...rankedSiteChunks.map(c => c.score)) : 0;
+                if (maxSiteScore >= RankingEngine.SIMILARITY_CONFIDENCE_THRESHOLD) {
+                    console.log("[CHAT] Tier 2 verified as SUFFICIENT by similarity score.");
+                    
+                    const tempMessages = promptService.buildPromptMessages({
+                        question: rewrittenQuery,
+                        intent,
+                        retrievedChunks: [],
+                        universitySiteResults: rankedSiteChunks.map(c => ({
+                            title: c.metadata?.originalName || "Webpage",
+                            url: c.metadata?.sourceUrl || "",
+                            snippet: c.content
+                        })),
+                        webResults: [],
+                        historyText,
+                        user: activeUser,
+                        questionType: QUESTION_TYPES.UNIVERSITY_SPECIFIC,
+                        isRepeat,
+                        activeTopic: resolvedActiveTopic
+                    });
+
+                    const attemptResponse = await llmService.generateCompletion(tempMessages);
+                    textResponse = attemptResponse;
+                    retrievedChunks = rankedSiteChunks;
                     activeQuestionType = QUESTION_TYPES.UNIVERSITY_SPECIFIC;
                     sourceLabel = SOURCE_LABELS.UNIVERSITY;
-                } else if (hasWeb) {
+                    provider = "groq";
+                    finalMessages = tempMessages;
+                }
+            }
+
+            // TIER 3: INTERNET SEARCH (as fallback)
+            if (!textResponse) {
+                console.log("[CHAT] Evaluating Tier 3 (Internet Search)...");
+                internetCount = internetResults.length;
+
+                if (internetResults.length > 0) {
+                    const tempMessages = promptService.buildPromptMessages({
+                        question: rewrittenQuery,
+                        intent,
+                        retrievedChunks: [],
+                        universitySiteResults: [],
+                        webResults: internetResults,
+                        historyText,
+                        user: activeUser,
+                        questionType: QUESTION_TYPES.GENERAL_KNOWLEDGE,
+                        isRepeat,
+                        activeTopic: resolvedActiveTopic
+                    });
+
+                    const attemptResponse = await llmService.generateCompletion(tempMessages);
+                    textResponse = attemptResponse;
+                    webResults = internetResults;
                     activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
                     sourceLabel = SOURCE_LABELS.WEB;
-                } else {
-                    activeQuestionType = QUESTION_TYPES.UNIVERSITY_SPECIFIC;
-                    sourceLabel = SOURCE_LABELS.UNIVERSITY;
+                    provider = "groq";
+                    finalMessages = tempMessages;
                 }
-            } catch (searchError) {
-                console.error("Parallel search pipeline encountered an unexpected error, falling back to General Web:", searchError);
-                webResults = await webSearchService.searchTrustedWeb(rewrittenQuery);
-                activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
-                sourceLabel = SOURCE_LABELS.WEB;
             }
         } else {
-            console.log(`Query is not university related. Searching general trusted web directly...`);
-            webResults = await webSearchService.searchTrustedWeb(rewrittenQuery);
-            activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
-            sourceLabel = SOURCE_LABELS.WEB;
+            console.log("[CHAT] General search: Skipping university context, going to Tier 3 directly...");
+            const internetResults = await SearchManager.searchInternet(rewrittenQuery);
+            internetCount = internetResults.length;
+
+            if (internetResults.length > 0) {
+                const tempMessages = promptService.buildPromptMessages({
+                    question: rewrittenQuery,
+                    intent,
+                    retrievedChunks: [],
+                    universitySiteResults: [],
+                    webResults: internetResults,
+                    historyText,
+                    user: activeUser,
+                    questionType: QUESTION_TYPES.GENERAL_KNOWLEDGE,
+                    isRepeat,
+                    activeTopic: resolvedActiveTopic
+                });
+
+                const attemptResponse = await llmService.generateCompletion(tempMessages);
+                textResponse = attemptResponse;
+                webResults = internetResults;
+                activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
+                sourceLabel = SOURCE_LABELS.WEB;
+                provider = "groq";
+                finalMessages = tempMessages;
+            }
         }
 
-        // Format Citations
+        // Format citations
         const sources = citationService.formatCitations(retrievedChunks, universitySiteResults, webResults);
 
         // Enrich citations with signed download URLs
@@ -248,41 +354,26 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
             }
         });
 
-        // If context is required but empty, format unavailable
-        if (decision.requiresVerifiedContext && sources.length === 0) {
+        // Call Unified LLM Service if streaming is active
+        if (onChunk && finalMessages.length > 0) {
+            textResponse = "";
+            textResponse = await llmService.generateStream(finalMessages, (chunk) => {
+                onChunk(chunk);
+            }, { signal });
+            provider = "groq";
+        }
+
+        if (!textResponse) {
             formatted = responseFormattingService.formatUnavailable({
-                reason: AI_CONSTANTS.FALLBACK_RESPONSE
+                reason: "The requested details are not available in university documents, official website pages, or trusted web search."
             });
         } else {
-            // Build Prompt Messages
-            const messages = promptService.buildPromptMessages({
-                question: rewrittenQuery,
-                intent: intentResult.intent,
-                retrievedChunks,
-                universitySiteResults,
-                webResults,
-                historyText,
-                user: activeUser,
-                questionType: activeQuestionType
-            });
-
-            // Call Unified LLM Service
-            let textResponse = "";
-            if (onChunk) {
-                textResponse = await llmService.generateStream(messages, (chunk) => {
-                    onChunk(chunk);
-                }, { signal });
-            } else {
-                textResponse = await llmService.generateCompletion(messages);
-            }
-            provider = "groq";
-
-            // Validate response against hallucinations
+            // Validate response
             const validation = responseValidator.validateResponse({
-                intent: intentResult.intent,
+                intent,
                 retrievedContext: { chunks: retrievedChunks, sources },
                 generatedAnswer: textResponse,
-                providerSuccess: true,
+                providerSuccess: provider === "groq",
                 questionType: activeQuestionType
             });
 
@@ -297,6 +388,28 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
         }
     }
 
+    // DEVELOPMENT DEBUG LOGGING
+    if (process.env.NODE_ENV === "development") {
+        const totalResults = (retrievedChunks ? retrievedChunks.length : 0) + (webResults ? webResults.length : 0);
+        const promptText = finalMessages.map(m => m.content).join("\n");
+        const contextLength = promptText ? promptText.length : 0;
+        
+        console.log("\n[CHAT]");
+        console.log(normalizedQuestion);
+        console.log("\n[CONTEXT]");
+        console.log(resolvedActiveTopic || "None");
+        console.log("\n[QUERY]");
+        console.log(rewrittenQuery);
+        console.log("\n[RETRIEVAL]");
+        console.log(`Admin Documents: ${adminDocsCount} results`);
+        console.log(`Admin URLs: ${adminUrlsCount} results`);
+        console.log(`Internet: ${internetCount} results`);
+        console.log("\n[RERANK]");
+        console.log(`Selected Results: ${totalResults}`);
+        console.log("\n[LLM]");
+        console.log(`Context Length: ${contextLength}\n`);
+    }
+
     // 6. Save conversation turn to database
     const responseTimeMs = Date.now() - startedAt;
     const chat = await conversationService.saveMessageTurn({
@@ -304,13 +417,21 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
         conversationId,
         question: normalizedQuestion,
         response: formatted,
-        intent: intentResult.intent,
+        intent,
         confidence: intentResult.confidence,
         provider,
         responseTimeMs,
         userMessageId,
         assistantMessageId,
-        parentId
+        parentId,
+        topic: resolvedActiveTopic,
+        entities,
+        retrievalContext: {
+            rewrittenQuery,
+            adminDocsFound: adminDocsCount,
+            adminUrlsFound: adminUrlsCount,
+            internetResultsFound: internetCount
+        }
     });
 
     // 7. Generate Follow-up Suggestions
@@ -323,7 +444,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
         conversationId: chat?._id || conversationId || null,
         mode: activeUser._id ? "authenticated" : "guest",
         message: formatted.answer,
-        intent: intentResult.intent,
+        intent,
         intentConfidence: intentResult.confidence,
         confidence: formatted.confidence,
         sources: formatted.sources,
@@ -498,26 +619,36 @@ const regenerateResponse = async ({ user, conversationId }) => {
     }
 
     const messages = chat.messages;
-    if (messages.length < 2) {
-        throw new Error("No responses exist to regenerate.");
+    if (messages.length === 0) {
+        throw new Error("No messages exist to regenerate.");
     }
 
-    if (messages[messages.length - 1].role === "assistant") {
-        messages.pop();
+    // Find the last assistant message to regenerate
+    let lastAssistantIdx = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].role === "assistant") {
+            lastAssistantIdx = i;
+            break;
+        }
     }
 
-    if (messages[messages.length - 1].role !== "user") {
-        throw new Error("Invalid conversation state.");
+    if (lastAssistantIdx === -1) {
+        throw new Error("No assistant responses exist to regenerate.");
     }
 
-    const lastUserQuery = messages[messages.length - 1].content;
-    messages.pop();
-    await chat.save();
+    const assistantMsg = messages[lastAssistantIdx];
+    // The parent of the assistant message is the user message
+    const userMsg = messages.find(m => m.id === assistantMsg.parentId);
+    if (!userMsg) {
+        throw new Error("Matching user message not found.");
+    }
 
+    // Call askQuestion with the user message content and its parentId, to create a sibling branch
     return askQuestion({
         user,
-        question: lastUserQuery,
-        conversationId
+        question: userMsg.content,
+        conversationId,
+        parentId: userMsg.parentId
     });
 };
 

@@ -5,8 +5,22 @@ const SIMILARITY_CONFIDENCE_THRESHOLD = 0.65; // Matches the AI pipeline thresho
 /**
  * Reranks retrieval candidates and scores them for keyword overlap.
  */
-const rerankCandidates = async (query, chunks) => {
-    return rerankService.rerank(query, chunks);
+const rerankCandidates = async (query, chunks, user = null) => {
+    const ranked = await rerankService.rerank(query, chunks);
+    
+    if (user && user.institution) {
+        const userInst = String(user.institution).toLowerCase().trim();
+        ranked.forEach(chunk => {
+            const chunkInst = String(chunk.metadata?.institution || "").toLowerCase().trim();
+            if (chunkInst === userInst || chunkInst === "all" || chunkInst === "general" || chunkInst === "") {
+                chunk.score += 0.15; // Boost score for user's own institution
+            }
+        });
+        // Sort again since scores changed
+        ranked.sort((a, b) => b.score - a.score);
+    }
+    
+    return ranked;
 };
 
 /**

@@ -10,7 +10,7 @@
  * @param {string} params.questionType - classified question type (university_specific, general_knowledge, hybrid)
  * @returns {Array<Object>} - Format ready for completion provider
  */
-const buildMessages = ({ question, intent, retrievedChunks, universitySiteResults = [], webResults = [], memory, user, questionType }) => {
+const buildMessages = ({ question, intent, retrievedChunks, universitySiteResults = [], webResults = [], memory, user, questionType, isRepeat = false, activeTopic = "" }) => {
     // Format retrieved university document chunks
     const sourceContext = retrievedChunks && retrievedChunks.length > 0
         ? retrievedChunks.map((chunk, index) => 
@@ -41,6 +41,9 @@ const buildMessages = ({ question, intent, retrievedChunks, universitySiteResult
         "# EduMate AI - System Prompt",
         "",
         "You are EduMate AI, an intelligent, reliable, and student-focused AI assistant designed to help students, teachers, parents, and educational institutions.",
+        "",
+        isRepeat ? "## AVOID REPEATED ANSWERS RULE\nThe user is asking a follow-up or repeating a question already asked. Do not repeat the exact same paragraph or response style. Provide additional helpful details, clarify nuances, or offer new angles of explanation." : "",
+        activeTopic ? `## ACTIVE TOPIC CONTEXT: ${activeTopic}\nThe active topic is ${activeTopic}. Ensure related follow-up answers focus on ${activeTopic} and maintain a consistent answer structure (such as Course Overview, Eligibility, Duration, Fees) matching previous responses in the ongoing chat.` : "",
         "",
         "## Core Objective",
         "",
@@ -100,7 +103,10 @@ const buildMessages = ({ question, intent, retrievedChunks, universitySiteResult
         "",
         "## Response Format",
         "",
-        "Whenever appropriate, structure responses as:",
+        "Whenever presenting structured details (such as course details, eligibility criteria, required documents, fee structures, or program descriptions), you MUST structure your answer using a clear hierarchical tree structure (using nested bullet points, e.g., '-' and '  -' for sub-items) rather than simple lists or raw paragraphs. This provides a clear mind-map or tree representation of the information for the user.",
+        "Ensure you keep the structure/pattern of previous answers in mind from the conversation history and answer in the same matching pattern when talking about related topics.",
+        "",
+        "For other responses, format as:",
         "1. Direct Answer",
         "2. Explanation",
         "3. Important Notes",

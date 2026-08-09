@@ -20,7 +20,9 @@ const buildPromptMessages = ({
     webResults = [],
     historyText,
     user,
-    questionType
+    questionType,
+    isRepeat = false,
+    activeTopic = ""
 }) => {
     const memory = historyText ? [{ role: "user", content: "Conversation History summary: " + historyText }] : [];
 
@@ -32,7 +34,9 @@ const buildPromptMessages = ({
         webResults,
         memory,
         user,
-        questionType
+        questionType,
+        isRepeat,
+        activeTopic
     });
 };
 

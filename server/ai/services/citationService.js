@@ -12,7 +12,33 @@ const formatCitations = (retrievedChunks = [], universitySiteResults = [], webRe
         const docGroups = {};
         retrievedChunks.forEach((chunk) => {
             const metadata = chunk.metadata || {};
-            // Use documentId or originalName to uniquely identify the document
+            
+            // Check if this chunk is a crawled website page
+            const isCrawledWeb = metadata.uploadedFrom === "crawler" || metadata.sourceUrl || (metadata.originalName && metadata.originalName.startsWith("[Webpage]"));
+            
+            if (isCrawledWeb) {
+                const url = metadata.sourceUrl || "";
+                let domain = "University Website";
+                try {
+                    if (url) {
+                        domain = new URL(url).hostname;
+                    }
+                } catch {}
+                
+                citations.push({
+                    type: "university_website",
+                    title: metadata.originalName || "University Page",
+                    reference: url,
+                    similarity: chunk.score !== undefined ? Math.max(0, Math.min(100, Math.round(chunk.score * 100))) : 100,
+                    metadata: {
+                        snippet: chunk.content || "",
+                        domain
+                    }
+                });
+                return;
+            }
+
+            // Standard uploaded document grouping
             const docKey = metadata.documentId || metadata.originalName || "University Document";
             
             if (!docGroups[docKey]) {

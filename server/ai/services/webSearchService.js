@@ -1,3 +1,27 @@
+const fetch = (() => {
+    try {
+        return require("node-fetch");
+    } catch {
+        return global.fetch;
+    }
+})();
+
+const fetchWithTimeout = async (url, options = {}, timeoutMs = 3500) => {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        const response = await fetch(url, {
+            ...options,
+            signal: controller.signal
+        });
+        clearTimeout(id);
+        return response;
+    } catch (err) {
+        clearTimeout(id);
+        throw err;
+    }
+};
+
 const TRUSTED_DOMAINS = [
     ".edu",
     ".gov",
@@ -73,7 +97,7 @@ const isTrustedUrl = (urlStr) => {
  */
 const searchDuckDuckGo = async (query) => {
     try {
-        const response = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
+        const response = await fetchWithTimeout(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
             headers: {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
             }
@@ -85,7 +109,7 @@ const searchDuckDuckGo = async (query) => {
 
         const html = await response.text();
         const results = [];
-        const resultBlocks = html.split('class="result');
+        const resultBlocks = html.split(/class="result(?!\w)/i);
 
         for (let i = 1; i < resultBlocks.length && results.length < 10; i++) {
             const block = resultBlocks[i];
@@ -120,10 +144,14 @@ const searchDuckDuckGo = async (query) => {
  */
 const searchJina = async (query) => {
     try {
-        const response = await fetch(`https://s.jina.ai/${encodeURIComponent(query)}`, {
-            headers: {
-                "Accept": "application/json"
-            }
+        const headers = {
+            "Accept": "application/json"
+        };
+        if (process.env.JINA_API_KEY) {
+            headers["Authorization"] = `Bearer ${process.env.JINA_API_KEY}`;
+        }
+        const response = await fetchWithTimeout(`https://s.jina.ai/${encodeURIComponent(query)}`, {
+            headers
         });
 
         if (!response.ok) {

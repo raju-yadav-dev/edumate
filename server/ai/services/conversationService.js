@@ -70,6 +70,15 @@ const getRecentMemory = async ({ userId, conversationId, maxTokens = 1500, paren
         content: m.content || ""
     }));
 
+    // Find the active topic from the branch messages (last non-empty topic)
+    let activeTopic = "";
+    for (let i = branchMessages.length - 1; i >= 0; i--) {
+        if (branchMessages[i].topic) {
+            activeTopic = branchMessages[i].topic;
+            break;
+        }
+    }
+
     // Trim history to stay within memory limits
     const trimmed = tokenizer.trimToContextLimit(rawHistory, maxTokens);
 
@@ -79,7 +88,8 @@ const getRecentMemory = async ({ userId, conversationId, maxTokens = 1500, paren
 
     return {
         historyText,
-        rawHistory: trimmed
+        rawHistory: trimmed,
+        activeTopic
     };
 };
 
@@ -133,7 +143,7 @@ const getOrCreateChat = async ({ user, conversationId, question }) => {
     });
 };
 
-const saveMessageTurn = async ({ user, conversationId, question, response, intent, confidence, provider, responseTimeMs, userMessageId, assistantMessageId, parentId }) => {
+const saveMessageTurn = async ({ user, conversationId, question, response, intent, confidence, provider, responseTimeMs, userMessageId, assistantMessageId, parentId, topic, entities, retrievalContext }) => {
     const chat = await getOrCreateChat({
         user,
         conversationId,
@@ -167,7 +177,9 @@ const saveMessageTurn = async ({ user, conversationId, question, response, inten
             content: question,
             intent: intent,
             confidence: confidence,
-            provider: "user"
+            provider: "user",
+            topic: topic || "",
+            entities: entities || {}
         });
 
         chat.messages.push({
@@ -180,7 +192,10 @@ const saveMessageTurn = async ({ user, conversationId, question, response, inten
             sources: response.sources || [],
             provider,
             responseTimeMs,
-            mapData: response.mapData || null
+            mapData: response.mapData || null,
+            topic: topic || "",
+            entities: entities || {},
+            retrievalContext: retrievalContext || null
         });
 
         chat.updatedBy = user._id;

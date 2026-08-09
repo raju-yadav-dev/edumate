@@ -4,7 +4,7 @@ const sourceSchema = new mongoose.Schema(
     {
         type: {
             type: String,
-            enum: ["document", "official_web", "trusted_web", "map", "system"],
+            enum: ["document", "official_web", "trusted_web", "university_website", "web", "map", "system"],
             required: true
         },
         title: {
@@ -69,6 +69,18 @@ const messageSchema = new mongoose.Schema(
             default: 0
         },
         mapData: {
+            type: mongoose.Schema.Types.Mixed,
+            default: null
+        },
+        topic: {
+            type: String,
+            default: ""
+        },
+        entities: {
+            type: mongoose.Schema.Types.Mixed,
+            default: {}
+        },
+        retrievalContext: {
             type: mongoose.Schema.Types.Mixed,
             default: null
         },

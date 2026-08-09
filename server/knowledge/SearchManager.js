@@ -2,46 +2,82 @@ const retrievalService = require("../ai/services/retrievalService");
 const webSearchService = require("../ai/services/webSearchService");
 const KnowledgeSource = require("../models/KnowledgeSource");
 
+const Document = require("../models/Document");
+
 /**
- * Searches only uploaded PDFs in the vector database
+ * Retrieves chunks from Qdrant and enriches them with MongoDB Document metadata.
  */
-const searchLocalPdfs = async (query, user, limit) => {
-    // 1. Fetch chunks from Qdrant via retrievalService
-    const chunks = await retrievalService.retrieve({ question: query, user, limit });
-    
-    // 2. Filter in-memory to only include standard uploaded PDFs (non-webpages)
-    return chunks.filter((chunk) => {
-        const name = chunk.metadata?.originalName || "";
-        return !name.startsWith("[Webpage]") && name.toLowerCase().endsWith(".pdf");
+const retrieveAndEnrichChunks = async (query, user, limit, ignoreInstitution = true) => {
+    // Retrieve a larger candidate pool to ensure enough results after filtering
+    const candidates = await retrievalService.retrieve({
+        question: query,
+        user,
+        limit: Math.max(limit * 3, 30),
+        ignoreInstitution
     });
+    if (candidates.length === 0) return [];
+
+    const docIds = candidates.map(c => c.metadata?.documentId).filter(Boolean);
+    const docs = await Document.find({ _id: { $in: docIds }, status: "active" }).lean();
+    
+    const docMap = {};
+    docs.forEach(doc => {
+        docMap[doc._id.toString()] = doc;
+    });
+
+    const enriched = candidates.map(chunk => {
+        const doc = docMap[chunk.metadata?.documentId?.toString()];
+        if (!doc) return null; // Discard chunks belonging to missing/deleted documents
+
+        return {
+            ...chunk,
+            metadata: {
+                ...chunk.metadata,
+                uploadedFrom: doc.metadata?.uploadedFrom || "api",
+                sourceUrl: doc.metadata?.sourceUrl || "",
+                originalName: doc.originalName || chunk.metadata?.originalName || ""
+            }
+        };
+    }).filter(Boolean);
+
+    return enriched;
+};
+
+/**
+ * Searches only uploaded local documents in the vector database
+ */
+const searchLocalPdfs = async (query, user, limit, ignoreInstitution = true) => {
+    const enriched = await retrieveAndEnrichChunks(query, user, limit, ignoreInstitution);
+    
+    // Filter to only include local admin-uploaded documents (uploadedFrom is not "crawler")
+    const filtered = enriched.filter(chunk => chunk.metadata?.uploadedFrom !== "crawler");
+    return filtered.slice(0, limit);
 };
 
 /**
  * Searches only crawled pages that belong to approved and enabled website URLs
  */
-const searchApprovedUrls = async (query, user, limit) => {
+const searchApprovedUrls = async (query, user, limit, ignoreInstitution = true) => {
     // 1. Fetch all enabled website URLs configured in DB
     const approvedUrls = await KnowledgeSource.find({ type: "url", isEnabled: true });
     if (approvedUrls.length === 0) return [];
 
-    // 2. Fetch chunks from Qdrant
-    const chunks = await retrievalService.retrieve({ question: query, user, limit });
+    const enriched = await retrieveAndEnrichChunks(query, user, limit, ignoreInstitution);
 
-    // 3. Filter chunks in-memory to match crawled page metadata and configured URLs
-    return chunks.filter((chunk) => {
-        const name = chunk.metadata?.originalName || "";
+    // Filter to only include crawled website content (uploadedFrom is "crawler") matching approved URLs
+    const filtered = enriched.filter(chunk => {
+        if (chunk.metadata?.uploadedFrom !== "crawler") return false;
         const sourceUrl = chunk.metadata?.sourceUrl || "";
-        const isCrawled = name.startsWith("[Webpage]") || sourceUrl !== "";
+        if (!sourceUrl) return false;
 
-        if (!isCrawled) return false;
-
-        // Check if the crawled source matches any of the active approved URLs
         return approvedUrls.some((approved) => {
             const cleanApproved = String(approved.url || "").trim().toLowerCase();
             const cleanSource = String(sourceUrl || "").trim().toLowerCase();
             return cleanSource.includes(cleanApproved) || cleanApproved.includes(cleanSource);
         });
     });
+
+    return filtered.slice(0, limit);
 };
 
 /**
