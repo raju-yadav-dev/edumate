@@ -45,10 +45,11 @@ const slugify = (text) => {
 };
 
 /**
- * Helper to upload a buffer to Supabase storage.
- */
+const { crawlerSupabase } = require("../../config/supabase");
+
 const uploadBufferToSupabase = async (buffer, storagePath, mimeType) => {
-    const { error } = await supabase.storage
+    const targetSupabase = crawlerSupabase || supabase;
+    const { error } = await targetSupabase.storage
         .from(BUCKET)
         .upload(storagePath, buffer, {
             contentType: mimeType,
@@ -142,7 +143,7 @@ const runCrawlBackground = async (jobId) => {
                 downloadedCount++;
 
                 // Upload clean text to Supabase storage
-                const folderName = slugify(job.institution) || job.category || "others";
+                const folderName = (job.category && job.category !== "others" && job.category !== "general") ? job.category : "crawled";
                 const uniqueFilename = `${Date.now()}-${crypto.randomUUID()}.txt`;
                 const storagePath = `${folderName}/${uniqueFilename}`;
                 const uploadResult = await uploadBufferToSupabase(textBuffer, storagePath, "text/plain");
@@ -332,7 +333,7 @@ const runCrawlBackground = async (jobId) => {
                 const originalName = path.basename(parsedUrl.pathname) || "document";
                 const documentExtension = path.extname(originalName) || ".txt";
                 const uniqueName = `${Date.now()}-${crypto.randomUUID()}${documentExtension}`;
-                const folderName = slugify(job.institution) || job.category || "others";
+                const folderName = (job.category && job.category !== "others" && job.category !== "general") ? job.category : "crawled";
                 const storagePath = `${folderName}/${uniqueName}`;
                 const contentType = fileResponse.headers.get("content-type") || "application/octet-stream";
                 const detectedMimeType = contentType.split(";")[0].trim() || "application/octet-stream";

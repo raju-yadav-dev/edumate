@@ -55,6 +55,7 @@ import { formatBytes } from "./utils/formatBytes";
 import slugifyFolder from "./utils/slugify";
 
 const DEFAULT_FOLDERS = [
+    { label: "Crawled", value: "crawled" },
     { label: "Admissions", value: "admissions" },
     { label: "Academics", value: "academics" },
     { label: "Hostel", value: "hostel" },
@@ -243,7 +244,15 @@ function Admin({ mode = "auto" }) {
             const stored = window?.localStorage?.getItem("edumate-admin-folders");
             if (!stored) return DEFAULT_FOLDERS;
             const parsed = JSON.parse(stored);
-            if (Array.isArray(parsed) && parsed.length > 0) return sanitizeFolders(parsed);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+                const sanitized = sanitizeFolders(parsed);
+                DEFAULT_FOLDERS.forEach((def) => {
+                    if (!sanitized.some((f) => f.value === def.value)) {
+                        sanitized.push(def);
+                    }
+                });
+                return sanitized;
+            }
             return DEFAULT_FOLDERS;
         } catch {
             return DEFAULT_FOLDERS;
@@ -300,6 +309,22 @@ function Admin({ mode = "auto" }) {
     const [undoStack, setUndoStack] = useState([]);
     const [redoStack, setRedoStack] = useState([]);
     const [jobs, setJobs] = useState({ queue: [], running: [], failed: [], completedCount: 0, totalCount: 0 });
+    const [deletedFolders, setDeletedFolders] = useState(() => {
+        try {
+            const saved = window.localStorage.getItem("edumate-admin-deleted-folders");
+            return saved ? JSON.parse(saved) : [];
+        } catch {
+            return [];
+        }
+    });
+
+    useEffect(() => {
+        try {
+            window.localStorage.setItem("edumate-admin-deleted-folders", JSON.stringify(deletedFolders));
+        } catch {
+            // ignore
+        }
+    }, [deletedFolders]);
     
     // Pagination states
     const [currentPage, setCurrentPage] = useState(1);
@@ -487,7 +512,7 @@ function Admin({ mode = "auto" }) {
                 const nextFolders = [...currentFolders];
 
                 countsKeys.forEach((key) => {
-                    if (key && !nextFolders.some((f) => f.value === key)) {
+                    if (key && !deletedFolders.includes(key) && !nextFolders.some((f) => f.value === key)) {
                         const label = formatFolderLabel(key);
                         nextFolders.push({ label, value: key });
                         updated = true;
@@ -497,7 +522,7 @@ function Admin({ mode = "auto" }) {
                 return sanitizeFolders(updated ? nextFolders : currentFolders);
             });
         }
-    }, [storageStats]);
+    }, [storageStats, deletedFolders]);
 
     const handleAuthError = useCallback((fetchError) => {
         console.warn("API operation status:", fetchError);
@@ -524,16 +549,35 @@ function Admin({ mode = "auto" }) {
                 category: activeFolder === "root" ? "" : activeFolder,
                 page: currentPage,
                 limit: pageSize,
+                ignoreInstitution: "true",
                 ...filters
             });
 
-            setDocuments(response.data || []);
+            const docs = response.data || [];
+            setDocuments(docs);
             if (response.pagination) {
                 setTotalItems(response.pagination.total || 0);
                 setTotalPages(response.pagination.pages || 1);
             } else {
-                setTotalItems(response.data?.length || 0);
+                setTotalItems(docs.length || 0);
                 setTotalPages(1);
+            }
+
+            // Auto-detect and register missing folders from document categories
+            if (docs.length > 0) {
+                setFolders((currentFolders) => {
+                    let updated = false;
+                    const nextFolders = [...currentFolders];
+                    docs.forEach(doc => {
+                        const cat = doc.category;
+                        if (cat && !deletedFolders.includes(cat) && !nextFolders.some(f => f.value === cat)) {
+                            const label = formatFolderLabel(cat);
+                            nextFolders.push({ label, value: cat });
+                            updated = true;
+                        }
+                    });
+                    return updated ? sanitizeFolders(nextFolders) : currentFolders;
+                });
             }
         } catch (fetchError) {
             console.error("Failed to load documents:", fetchError);
@@ -1131,8 +1175,8 @@ function Admin({ mode = "auto" }) {
         }
     }
 
-    async function renameDocument(id, currentName) {
-        const newName = window.prompt("Rename file:", currentName);
+    async function renameDocument(id, currentName, newNameInput = null) {
+        const newName = newNameInput !== null ? newNameInput : window.prompt("Rename file:", currentName);
         if (!newName || newName.trim() === "" || newName === currentName) {
             return;
         }
@@ -1152,21 +1196,24 @@ function Admin({ mode = "auto" }) {
         }
     }
 
-    async function moveDocument(id, currentCategory) {
-        const folderOptions = folders.map(f => f.label).join(", ");
-        const newCategoryLabel = window.prompt(
-            `Move to folder (${folderOptions}):`,
-            folders.find(f => f.value === currentCategory)?.label || currentCategory
-        );
-        if (!newCategoryLabel || newCategoryLabel.trim() === "") {
-            return;
-        }
+    async function moveDocument(id, currentCategory, newCategoryVal = null) {
+        let newCategory = newCategoryVal;
+        if (newCategory === null) {
+            const folderOptions = folders.map(f => f.label).join(", ");
+            const newCategoryLabel = window.prompt(
+                `Move to folder (${folderOptions}):`,
+                folders.find(f => f.value === currentCategory)?.label || currentCategory
+            );
+            if (!newCategoryLabel || newCategoryLabel.trim() === "") {
+                return;
+            }
 
-        const matchedFolder = folders.find(
-            f => f.label.toLowerCase() === newCategoryLabel.trim().toLowerCase() ||
-                f.value.toLowerCase() === newCategoryLabel.trim().toLowerCase()
-        );
-        const newCategory = matchedFolder ? matchedFolder.value : slugifyFolder(newCategoryLabel);
+            const matchedFolder = folders.find(
+                f => f.label.toLowerCase() === newCategoryLabel.trim().toLowerCase() ||
+                    f.value.toLowerCase() === newCategoryLabel.trim().toLowerCase()
+            );
+            newCategory = matchedFolder ? matchedFolder.value : slugifyFolder(newCategoryLabel);
+        }
 
         if (newCategory === currentCategory) {
             return;
@@ -1176,7 +1223,7 @@ function Admin({ mode = "auto" }) {
             setBusy(true);
             setError("");
             await moveAdminDocument(id, newCategory);
-            pushToUndo({ type: "move", fileIds: [id], oldCategory: currentCategory, newCategory: newCategory, label: `Move file to "${newCategoryLabel.trim()}"` });
+            pushToUndo({ type: "move", fileIds: [id], oldCategory: currentCategory, newCategory: newCategory, label: `Move file` });
             setNotice("Document moved.");
             await loadDocuments();
             await loadStorageStats();
@@ -1202,8 +1249,8 @@ function Admin({ mode = "auto" }) {
         }
     }
 
-    async function removeUser(id) {
-        if (!window.confirm("Delete this user?")) {
+    async function removeUser(id, skipConfirm = false) {
+        if (!skipConfirm && !window.confirm("Delete this user?")) {
             return;
         }
 
@@ -1303,8 +1350,8 @@ function Admin({ mode = "auto" }) {
         setContextMenu(null);
     }
 
-    async function bulkDeleteDocuments() {
-        if (!selectedIds.length || !window.confirm(`Delete ${selectedIds.length} selected file(s)?`)) {
+    async function bulkDeleteDocuments(skipConfirm = false) {
+        if (!selectedIds.length || (!skipConfirm && !window.confirm(`Delete ${selectedIds.length} selected file(s)?`))) {
             return;
         }
 
@@ -1350,6 +1397,10 @@ function Admin({ mode = "auto" }) {
         }
 
         const value = targetParent ? `${targetParent}_${slug}` : slug;
+        
+        // Remove from deleted blocklist if re-creating
+        setDeletedFolders((prev) => prev.filter((v) => v !== value));
+
         const exists = folders.some((folder) => folder.value === value);
 
         if (exists) {
@@ -1390,7 +1441,7 @@ function Admin({ mode = "auto" }) {
         setNotice(`Folder renamed to ${name.trim()}.`);
     }
 
-    async function handleDeleteFolder(folderValue) {
+    async function handleDeleteFolder(folderValue, skipConfirm = false) {
         const folder = folders.find((f) => f.value === folderValue);
         if (!folder) return;
 
@@ -1416,7 +1467,7 @@ function Admin({ mode = "auto" }) {
             confirmMsg += ` This will move all ${filesToMove.length} file(s) inside this folder and its subfolders to Admissions.`;
         }
 
-        if (!window.confirm(confirmMsg)) {
+        if (!skipConfirm && !window.confirm(confirmMsg)) {
             return;
         }
 
@@ -1426,10 +1477,12 @@ function Admin({ mode = "auto" }) {
             const defaultFolder = folders.find((f) => !descendantFolderValues.includes(f.value))?.value || "admissions";
 
             if (filesToMove.length > 0) {
-                for (const doc of filesToMove) {
-                    await moveAdminDocument(doc._id, defaultFolder);
-                }
+                const fileIds = filesToMove.map(d => d._id);
+                await bulkMoveAdminDocuments(fileIds, defaultFolder);
             }
+
+            // Register deleted folder values in deletedFolders blocklist so auto-sync never restores them
+            setDeletedFolders((prev) => Array.from(new Set([...prev, ...descendantFolderValues])));
 
             const nextFolders = sanitizeFolders(folders.filter((f) => !descendantFolderValues.includes(f.value)));
             setFolders(nextFolders);
@@ -1450,33 +1503,38 @@ function Admin({ mode = "auto" }) {
         }
     }
 
-    async function handleMoveFolder(folderValue) {
+    async function handleMoveFolder(folderValue, targetParentValueInput = undefined) {
         const folder = folders.find((f) => f.value === folderValue);
         if (!folder) return;
 
         const descendantValues = getDescendantFolders(folders, folderValue);
-
         const eligibleParents = folders.filter(f => !descendantValues.includes(f.value));
-        const parentOptionsStr = ["Root", ...eligibleParents.map(f => f.label)].join(", ");
 
-        const targetParentLabel = window.prompt(
-            `Move folder "${folder.label}" to parent (${parentOptionsStr}):`,
-            folder.parent ? (folders.find(f => f.value === folder.parent)?.label || "Root") : "Root"
-        );
+        let targetParentValue = undefined;
 
-        if (targetParentLabel === null) return;
-
-        let targetParentValue = null;
-        if (targetParentLabel.trim().toLowerCase() !== "root") {
-            const matchedParent = eligibleParents.find(
-                f => f.label.toLowerCase() === targetParentLabel.trim().toLowerCase() ||
-                    f.value.toLowerCase() === targetParentLabel.trim().toLowerCase()
+        if (targetParentValueInput !== undefined) {
+            targetParentValue = targetParentValueInput;
+        } else {
+            const parentOptionsStr = ["Root", ...eligibleParents.map(f => f.label)].join(", ");
+            const targetParentLabel = window.prompt(
+                `Move folder "${folder.label}" to parent (${parentOptionsStr}):`,
+                folder.parent ? (folders.find(f => f.value === folder.parent)?.label || "Root") : "Root"
             );
-            if (!matchedParent) {
-                setError("Invalid parent folder selected.");
-                return;
+
+            if (targetParentLabel === null) return;
+
+            targetParentValue = null;
+            if (targetParentLabel.trim().toLowerCase() !== "root") {
+                const matchedParent = eligibleParents.find(
+                    f => f.label.toLowerCase() === targetParentLabel.trim().toLowerCase() ||
+                        f.value.toLowerCase() === targetParentLabel.trim().toLowerCase()
+                );
+                if (!matchedParent) {
+                    setError("Invalid parent folder selected.");
+                    return;
+                }
+                targetParentValue = matchedParent.value;
             }
-            targetParentValue = matchedParent.value;
         }
 
         if (targetParentValue === folder.parent) {

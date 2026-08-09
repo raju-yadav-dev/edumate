@@ -62,15 +62,19 @@ const retrieveRelevantChunks = async ({
                 metadata: {
                     documentId: payload.documentId || "",
                     originalName: payload.originalName || "",
+                    filename: payload.originalName || "",
                     pageNumber: payload.pageNumber || 1,
+                    page: payload.pageNumber || 1,
                     category: payload.category || "",
                     department: payload.department || "",
                     institution: payload.institution || "",
                     uploadedBy: payload.uploadedBy || "",
                     chunkIndex: payload.chunkIndex || 0,
-                    createdAt: payload.createdAt || ""
+                    createdAt: payload.createdAt || "",
+                    sourceType: payload.sourceType || (payload.uploadedFrom === "crawler" ? "url" : "document"),
+                    URL: payload.sourceUrl || ""
                 },
-                score: point.score // Qdrant cosine similarity score (typically between -1 and 1, or 0 and 1)
+                score: point.score // Qdrant cosine similarity score
             };
         });
     } catch (e) {
@@ -124,17 +128,25 @@ const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL
     const qdrantFilter = must.length > 0 ? { must } : undefined;
     candidates = await retrieveRelevantChunks({ queryEmbedding, limit, filter: qdrantFilter, isRawFilter: true });
 
-    // 2. Keyword/Lexical Fallback (if vector search results are using mock embeddings, or if no confident matches were found)
+    // 2. Keyword/Lexical Fallback
     const apiKey = process.env.GEMINI_API_KEY;
     const isMockActive = !apiKey || !apiKey.startsWith("AIzaSy");
 
-    if (isMockActive || candidates.length === 0) {
-        console.log("[Retrieval Service] Mock embedding active or no vector candidates. Running MongoDB keyword search fallback...");
+    if (isMockActive || candidates.length < Math.min(limit, 3)) {
+        console.log("[Retrieval Service] Running MongoDB keyword search fallback...");
         try {
             const cleanQuery = question.toLowerCase().replace(/[^a-z0-9\s]/g, " ").trim();
             const words = cleanQuery.split(/\s+/).filter(w => w.length > 1);
             const stopWords = new Set(["give", "details", "about", "what", "is", "the", "for", "tell", "me", "show", "how", "course", "program", "programme"]);
             const keywords = words.filter(w => !stopWords.has(w));
+
+            // Domain term expansion: For BCA faculty queries, include Computational Sciences
+            if (cleanQuery.includes("faculty") || cleanQuery.includes("faculties")) {
+                if (cleanQuery.includes("bca") || cleanQuery.includes("computational") || cleanQuery.includes("computer")) {
+                    if (!keywords.includes("computational")) keywords.push("computational");
+                    if (!keywords.includes("sciences")) keywords.push("sciences");
+                }
+            }
 
             if (keywords.length > 0) {
                 const regexes = keywords.map(kw => {
@@ -152,19 +164,9 @@ const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL
                     });
                 }
 
-                if (user?.department && !ignoreInstitution) {
-                    mustConditions.push({
-                        $or: [
-                            { "metadata.department": { $in: [user.department, "all", "general", "academic", ""] } },
-                            { "metadata.category": { $regex: /cources|admission|broucher/i } }
-                        ]
-                    });
-                }
-
                 const mongoQuery = { $and: mustConditions };
 
                 const matchedChunks = await Chunk.find(mongoQuery).limit(limit).lean();
-                console.log(`[Retrieval Service] MongoDB keyword search found ${matchedChunks.length} chunks.`);
 
                 const fallbackCandidates = matchedChunks.map(c => ({
                     id: c._id.toString(),
@@ -172,22 +174,24 @@ const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL
                     metadata: {
                         documentId: c.document?.toString() || "",
                         originalName: c.metadata?.originalName || "",
+                        filename: c.metadata?.originalName || "",
                         pageNumber: c.metadata?.pageNumber || 1,
+                        page: c.metadata?.pageNumber || 1,
                         category: c.metadata?.category || "",
                         department: c.metadata?.department || "",
                         institution: c.metadata?.institution || "",
                         uploadedBy: c.metadata?.uploadedBy || "",
                         chunkIndex: c.metadata?.chunkIndex || 0,
-                        createdAt: c.createdAt || ""
+                        createdAt: c.createdAt || "",
+                        sourceType: "document",
+                        URL: ""
                     },
-                    score: 1.0 // Assign high score for keyword hits
+                    score: 0.85 // High baseline for direct keyword hits
                 }));
 
                 if (isMockActive) {
-                    // In mock mode, we prefer direct keyword matching
                     candidates = fallbackCandidates;
                 } else {
-                    // Otherwise, merge unique ones
                     const candidateIds = new Set(candidates.map(c => c.id));
                     fallbackCandidates.forEach(fc => {
                         if (!candidateIds.has(fc.id)) {

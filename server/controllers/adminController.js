@@ -20,15 +20,14 @@ const toStorageLimit = () => {
 };
 
 const getSupabaseConfig = () => {
-    const url = process.env.SUPABASE_URL || process.env.SUPABASE_PROJECT_URL;
-    const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY;
-    const bucket = process.env.SUPABASE_BUCKET || process.env.SUPABASE_STORAGE_BUCKET || process.env.SUPABASE_BUCKET_NAME;
+    const url = process.env.CRAWLER_SUPABASE_URL || process.env.SUPABASE_URL || process.env.SUPABASE_PROJECT_URL;
+    const key = process.env.CRAWLER_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+    const bucket = process.env.CRAWLER_SUPABASE_STORAGE_BUCKET || process.env.SUPABASE_STORAGE_BUCKET || process.env.SUPABASE_BUCKET || "edumate-crawler";
     
-    let quota = Number(process.env.SUPABASE_STORAGE_LIMIT_BYTES || process.env.SUPABASE_QUOTA_BYTES);
-    if (!Number.isFinite(quota) || quota <= 0) {
-        const quotaMB = Number(process.env.SUPABASE_STORAGE_QUOTA_MB || process.env.SUPABASE_QUOTA_MB);
-        quota = quotaMB ? quotaMB * 1024 * 1024 : DEFAULT_STORAGE_LIMIT;
-    }
+    const mainQuotaMB = Number(process.env.SUPABASE_STORAGE_QUOTA_MB || 1024);
+    const crawlerQuotaMB = Number(process.env.CRAWLER_SUPABASE_STORAGE_QUOTA_MB || 1024);
+    const totalQuotaMB = mainQuotaMB + crawlerQuotaMB;
+    const quota = totalQuotaMB * 1024 * 1024;
 
     return {
         url,
@@ -172,78 +171,18 @@ const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes cache TTL
 
 const getSupabaseStorageStats = async (fallbackBytes = 0, fallbackCount = 0) => {
     const config = getSupabaseConfig();
-
-    if (!config.configured) {
-        return {
-            configured: false,
-            bucket: config.bucket || "",
-            quota: config.quota,
-            used: fallbackBytes,
-            remaining: Math.max(config.quota - fallbackBytes, 0),
-            usage: config.quota ? Math.min((fallbackBytes / config.quota) * 100, 100) : 0,
-            files: fallbackCount,
-            averageFileSize: fallbackCount ? fallbackBytes / fallbackCount : 0,
-            largestFile: null
-        };
-    }
-
-    const now = Date.now();
-    if (cachedSupabaseStats && (now - lastSupabaseStatsFetch < CACHE_TTL_MS)) {
-        return cachedSupabaseStats;
-    }
-
-    try {
-        if (cachedSupabaseStats) {
-            // Trigger background revalidation (Stale-While-Revalidate)
-            walkSupabaseStorage(config).then(({ used, files, largestFile }) => {
-                cachedSupabaseStats = {
-                    configured: true,
-                    bucket: config.bucket,
-                    quota: config.quota,
-                    used,
-                    remaining: Math.max(config.quota - used, 0),
-                    usage: config.quota ? Math.min((used / config.quota) * 100, 100) : 0,
-                    files,
-                    averageFileSize: files ? used / files : 0,
-                    largestFile
-                };
-                lastSupabaseStatsFetch = Date.now();
-            }).catch((err) => {
-                console.error("Background revalidation of Supabase stats failed:", err);
-            });
-            return cachedSupabaseStats;
-        }
-
-        // Fresh walk on first request
-        const { used, files, largestFile } = await walkSupabaseStorage(config);
-
-        cachedSupabaseStats = {
-            configured: true,
-            bucket: config.bucket,
-            quota: config.quota,
-            used,
-            remaining: Math.max(config.quota - used, 0),
-            usage: config.quota ? Math.min((used / config.quota) * 100, 100) : 0,
-            files,
-            averageFileSize: files ? used / files : 0,
-            largestFile
-        };
-        lastSupabaseStatsFetch = now;
-        return cachedSupabaseStats;
-    } catch (error) {
-        console.error("Error fetching Supabase storage stats, using fallbacks:", error);
-        return {
-            configured: false,
-            bucket: config.bucket || "",
-            quota: config.quota,
-            used: fallbackBytes,
-            remaining: Math.max(config.quota - fallbackBytes, 0),
-            usage: config.quota ? Math.min((fallbackBytes / config.quota) * 100, 100) : 0,
-            files: fallbackCount,
-            averageFileSize: fallbackCount ? fallbackBytes / fallbackCount : 0,
-            largestFile: null
-        };
-    }
+    const quota = config.quota || 25 * 1024 * 1024 * 1024;
+    return {
+        configured: config.configured,
+        bucket: config.bucket || "documents",
+        quota,
+        used: fallbackBytes,
+        remaining: Math.max(quota - fallbackBytes, 0),
+        usage: quota ? Math.min((fallbackBytes / quota) * 100, 100) : 0,
+        files: fallbackCount,
+        averageFileSize: fallbackCount ? fallbackBytes / fallbackCount : 0,
+        largestFile: null
+    };
 };
 
 const sumBsonSizeByFilter = async (Model, filter) => {
@@ -418,9 +357,15 @@ const getStorageStats = asyncHandler(async (req, res) => {
             }
         ]),
         (async () => {
+            let timerId;
             try {
                 const { client: qdrantClient, collectionName: qdrantCollection } = require("../ai/config/qdrant");
-                const stats = await qdrantClient.getCollection(qdrantCollection);
+                const statsPromise = qdrantClient.getCollection(qdrantCollection);
+                const timeoutPromise = new Promise((_, reject) => {
+                    timerId = setTimeout(() => reject(new Error("Qdrant stats timeout")), 2000);
+                });
+                const stats = await Promise.race([statsPromise, timeoutPromise]);
+                clearTimeout(timerId);
                 return {
                     connected: true,
                     status: stats.status || "green",
@@ -428,6 +373,7 @@ const getStorageStats = asyncHandler(async (req, res) => {
                     collection: qdrantCollection
                 };
             } catch (err) {
+                clearTimeout(timerId);
                 return {
                     connected: false,
                     status: "offline",

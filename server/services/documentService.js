@@ -31,6 +31,8 @@ const DOCUMENT_CATEGORIES = Object.freeze([
     "reports",
     "gallery",
     "contact",
+    "crawled",
+    "crawle",
     "others"
 ]);
 
@@ -54,11 +56,20 @@ const getSafeExtension = (originalName) => {
     return extension.replace(/[^a-z0-9.]/g, "") || ".bin";
 };
 
-const getSignedUrlForDoc = async (storagePath) => {
+const getSignedUrlForDoc = async (storagePath, isCrawlerDoc = false) => {
     try {
-        const { data, error } = await supabase.storage
-            .from(BUCKET)
-            .createSignedUrl(storagePath, Number(process.env.SUPABASE_SIGNED_URL_TTL_SECONDS) || 315360000);
+        const { crawlerSupabase } = require("../config/supabase");
+        const client = isCrawlerDoc && crawlerSupabase ? crawlerSupabase : supabase;
+        const bucketName = isCrawlerDoc 
+            ? (process.env.CRAWLER_SUPABASE_STORAGE_BUCKET || "edumate-crawler")
+            : BUCKET;
+        const ttl = isCrawlerDoc 
+            ? (Number(process.env.CRAWLER_SUPABASE_SIGNED_URL_TTL_SECONDS) || 3600)
+            : (Number(process.env.SUPABASE_SIGNED_URL_TTL_SECONDS) || 315360000);
+
+        const { data, error } = await client.storage
+            .from(bucketName)
+            .createSignedUrl(storagePath, ttl);
         return data?.signedUrl || "";
     } catch (e) {
         console.error("Error creating signed URL:", e);
@@ -193,7 +204,9 @@ const listDocuments = async ({ query, user }) => {
     }
 
     if (query.category) {
-        filter.category = sanitizeCategory(query.category);
+        const cat = sanitizeCategory(query.category);
+        const escapedCat = cat.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        filter.category = { $regex: `^${escapedCat}(_|$)`, $options: "i" };
     }
 
     if (query.embeddingStatus) {
@@ -245,8 +258,13 @@ const listDocuments = async ({ query, user }) => {
 
     if (query.institution) {
         filter.institution = query.institution;
-    } else if (user.institution && query.ignoreInstitution !== "true" && query.ignoreInstitution !== true) {
-        filter.institution = user.institution;
+    } else if (user && user.institution && query.ignoreInstitution !== "true" && query.ignoreInstitution !== true) {
+        filter.$or = [
+            { institution: user.institution },
+            { institution: "" },
+            { institution: null },
+            { institution: { $exists: false } }
+        ];
     }
 
     const [documents, total] = await Promise.all([
@@ -622,12 +640,24 @@ const getJobsStatus = async () => {
 
 const retryFailed = async ({ user }) => {
     const failedDocs = await Document.find({ status: { $ne: "deleted" }, embeddingStatus: "failed" });
+    let count = 0;
     for (const doc of failedDocs) {
-        doc.embeddingStatus = "pending";
-        await doc.save();
-        indexDocumentBackground(doc._id).catch(() => {});
+        const errorMsg = doc.metadata?.error || "";
+        if (errorMsg.includes("empty text") || errorMsg.includes("Image-only") || errorMsg.includes("scanned PDF")) {
+            doc.embeddingStatus = "not_required";
+            doc.metadata = {
+                ...(doc.metadata || {}),
+                notes: (doc.metadata?.notes || "") + " [Skipped auto-retry: Image-only/Scanned PDF with no text layer]"
+            };
+            await doc.save();
+        } else {
+            doc.embeddingStatus = "pending";
+            await doc.save();
+            indexingService.indexDocumentBackground(doc._id).catch(() => {});
+            count++;
+        }
     }
-    return { count: failedDocs.length };
+    return { count };
 };
 
 const ignoreFailed = async ({ documentId, user }) => {

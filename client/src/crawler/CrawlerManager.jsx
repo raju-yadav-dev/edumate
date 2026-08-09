@@ -4,6 +4,7 @@ import { getCrawlJobs, startCrawl, getCrawlJobDetails, cancelCrawlJob, recrawlCr
 import "./Crawler.css";
 
 const CATEGORIES = [
+    { label: "Crawled", value: "crawled" },
     { label: "Admissions", value: "admissions" },
     { label: "Academics", value: "academics" },
     { label: "Hostel", value: "hostel" },
@@ -20,7 +21,7 @@ const CATEGORIES = [
 export default function CrawlerManager({ user, setNotice, setError }) {
     const [url, setUrl] = useState("");
     const [maxPages, setMaxPages] = useState(10);
-    const [category, setCategory] = useState("admissions");
+    const [category, setCategory] = useState("crawled");
     const [jobs, setJobs] = useState([]);
     const [loading, setLoading] = useState(false);
     const [startingJob, setStartingJob] = useState(false);
@@ -249,22 +250,22 @@ export default function CrawlerManager({ user, setNotice, setError }) {
                     {/* Active job panel */}
                     {selectedJob && (
                         <div className="crawler-job-details-card" style={{ marginBottom: "20px" }}>
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                                <div>
-                                    <h3 className="crawler-section-title" style={{ marginBottom: "4px" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+                                <div style={{ flex: "1 1 240px", minWidth: "200px" }}>
+                                    <h3 className="crawler-section-title" style={{ marginBottom: "4px", wordBreak: "break-all" }}>
                                         Active Crawl: {selectedJob.url}
                                     </h3>
                                     <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--admin-muted)" }}>
                                         Category: <strong style={{ color: "var(--admin-gold)" }}>{selectedJob.category}</strong> | Limit: {selectedJob.maxPages} pages
                                     </p>
                                 </div>
-                                <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                                <div style={{ display: "flex", gap: "8px", alignItems: "center", flexShrink: 0 }}>
                                     <button
                                         type="button"
                                         className="crawler-submit-btn"
                                         onClick={() => handleRecrawlJob(selectedJob)}
                                         disabled={recrawlingJobId === selectedJob._id || deletingJobId === selectedJob._id}
-                                        style={{ padding: "8px 12px", minWidth: "auto", background: "var(--admin-blue, #2563eb)" }}
+                                        style={{ padding: "6px 14px", whiteSpace: "nowrap", flexShrink: 0, background: "var(--admin-blue, #2563eb)", height: "34px" }}
                                     >
                                         {recrawlingJobId === selectedJob._id ? (
                                             <><Loader2 className="animate-spin" size={14} /> Recrawling...</>
@@ -278,7 +279,7 @@ export default function CrawlerManager({ user, setNotice, setError }) {
                                             className="crawler-submit-btn"
                                             onClick={handleCancelJob}
                                             disabled={cancellingJob}
-                                            style={{ padding: "8px 12px", minWidth: "auto", background: "var(--admin-danger, #ef4444)" }}
+                                            style={{ padding: "6px 14px", whiteSpace: "nowrap", flexShrink: 0, background: "var(--admin-danger, #ef4444)", height: "34px" }}
                                         >
                                             {cancellingJob ? (
                                                 <><Loader2 className="animate-spin" size={14} /> Stopping...</>

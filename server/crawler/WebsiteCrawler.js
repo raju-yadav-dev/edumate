@@ -151,9 +151,9 @@ class WebsiteCrawler {
 
                 let html = await response.text();
                 if (this.shouldRenderWithPlaywright(currentUrl, html)) {
-                    const renderedHtml = await this.renderWithPlaywright(currentUrl);
-                    if (renderedHtml) {
-                        html = renderedHtml;
+                    const rendered = await this.renderWithPlaywright(currentUrl);
+                    if (rendered && rendered.content) {
+                        html = rendered.content;
                     }
                 }
 
@@ -208,6 +208,70 @@ class WebsiteCrawler {
         }
 
         this.domainLastRequestAt.set(domain, Date.now());
+    }
+
+    shouldRenderWithPlaywright(url, html) {
+        if (!html) return true;
+        const cleanText = html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+        if (cleanText.length < 250) return true;
+
+        const dynamicMarkers = [
+            '<div id="root"></div>',
+            '<div id="app"></div>',
+            'noscript',
+            'enable javascript',
+            'loading...',
+            '__initial_state__',
+            'ng-app',
+            'v-app'
+        ];
+        const lowerHtml = html.toLowerCase();
+        return dynamicMarkers.some(marker => lowerHtml.includes(marker) && cleanText.length < 500);
+    }
+
+    async renderWithPlaywright(url) {
+        try {
+            console.log(`[WebsiteCrawler] Playwright rendering triggered for dynamic page: ${url}`);
+            let chromium;
+            try {
+                chromium = require("playwright").chromium;
+            } catch {
+                try {
+                    chromium = require("playwright-core").chromium;
+                } catch {
+                    console.log(`[WebsiteCrawler] Playwright not installed. Skipping JS rendering.`);
+                    return null;
+                }
+            }
+
+            const browser = await chromium.launch({ headless: true });
+            const page = await browser.newPage();
+            await page.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
+            await page.waitForTimeout(1000);
+
+            // Scroll to trigger lazy loading
+            await page.evaluate(() => window.scrollBy(0, window.innerHeight * 2));
+            await page.waitForTimeout(500);
+
+            const content = await page.content();
+            const cleanText = content.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+
+            let pdfBuffer = null;
+            if (cleanText.length < 250) {
+                console.log(`[WebsiteCrawler] DOM text length < 250. Generating PDF snapshot fallback for: ${url}`);
+                try {
+                    pdfBuffer = await page.pdf({ format: "A4", printBackground: true });
+                } catch (pdfErr) {
+                    console.log(`[WebsiteCrawler] PDF fallback creation failed: ${pdfErr.message}`);
+                }
+            }
+
+            await browser.close();
+            return { content, pdfBuffer };
+        } catch (err) {
+            console.error(`[WebsiteCrawler] Playwright rendering failed for ${url}:`, err.message);
+            return null;
+        }
     }
 }
 

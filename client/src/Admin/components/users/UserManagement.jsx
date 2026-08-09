@@ -9,7 +9,8 @@ import {
     ShieldCheck,
     Trash2,
     UserPlus,
-    Users
+    Users,
+    X
 } from "lucide-react";
 import "./UserManagement.css";
 
@@ -41,6 +42,7 @@ const formatDate = (value, withTime = false) => {
 function UserManagement({ users = [], userSearch, setUserSearch, roleFilter, setRoleFilter, loadUsers, removeUser }) {
     const [page, setPage] = useState(1);
     const [metricFilter, setMetricFilter] = useState("all");
+    const [userToDelete, setUserToDelete] = useState(null);
     const totalUsers = users.length;
     const activeUsers = users.filter(isActive).length;
     const adminUsers = users.filter((user) => ["admin", "super_admin", "superadmin"].includes(String(user.role || "").toLowerCase())).length;
@@ -174,11 +176,45 @@ function UserManagement({ users = [], userSearch, setUserSearch, roleFilter, set
                 </div>
                 <div className="users-table-wrap">
                     <table className="users-table"><thead><tr><th>#</th><th>User</th><th>Email</th><th>Department</th><th>Role</th><th>Status</th><th>Last Login</th><th>Joined Date</th><th aria-label="Actions" /></tr></thead>
-                        <tbody>{visibleUsers.length ? visibleUsers.map((user, index) => <tr key={user._id || user.id || user.email || index}><td>{(page - 1) * PAGE_SIZE + index + 1}</td><td><div className="table-user"><span className="user-avatar">{initials(user.fullName || user.name || user.username || user.email)}</span><b>{user.fullName || user.name || user.username || "Unnamed user"}</b></div></td><td><small className="email-cell"><Mail size={13} />{user.email || "No email address"}</small></td><td>{user.department || user.departmentName || user.dept || "—"}</td><td><span className={`role-badge ${roleClass(user.role)}`}>{titleCase(user.role)}</span></td><td><span className={`status-badge ${isActive(user) ? "is-active" : "is-inactive"}`}>{isActive(user) ? "Active" : titleCase(user.status || "Inactive")}</span></td><td>{formatDate(user.lastLogin || user.lastActiveAt || user.updatedAt, true)}</td><td>{formatDate(user.createdAt || user.joinedAt || user.registeredAt)}</td><td><button type="button" className="user-remove" onClick={() => removeUser(user._id || user.id)} title={`Remove ${user.fullName || user.name || user.username || "user"}`}><Trash2 size={16} /><span>Remove</span></button></td></tr>) : <tr><td className="no-users" colSpan="9">No users match the current search and filter.</td></tr>}</tbody>
+                        <tbody>{visibleUsers.length ? visibleUsers.map((user, index) => <tr key={user._id || user.id || user.email || index}><td>{(page - 1) * PAGE_SIZE + index + 1}</td><td><div className="table-user"><span className="user-avatar">{initials(user.fullName || user.name || user.username || user.email)}</span><b>{user.fullName || user.name || user.username || "Unnamed user"}</b></div></td><td><small className="email-cell"><Mail size={13} />{user.email || "No email address"}</small></td><td>{user.department || user.departmentName || user.dept || "—"}</td><td><span className={`role-badge ${roleClass(user.role)}`}>{titleCase(user.role)}</span></td><td><span className={`status-badge ${isActive(user) ? "is-active" : "is-inactive"}`}>{isActive(user) ? "Active" : titleCase(user.status || "Inactive")}</span></td><td>{formatDate(user.lastLogin || user.lastActiveAt || user.updatedAt, true)}</td><td>{formatDate(user.createdAt || user.joinedAt || user.registeredAt)}</td><td><button type="button" className="user-remove" onClick={() => setUserToDelete(user)} title={`Remove ${user.fullName || user.name || user.username || "user"}`}><Trash2 size={16} /><span>Remove</span></button></td></tr>) : <tr><td className="no-users" colSpan="9">No users match the current search and filter.</td></tr>}</tbody>
                     </table>
                 </div>
                 <footer className="users-pagination"><span>Showing {filteredUsers.length ? (page - 1) * PAGE_SIZE + 1 : 0}–{Math.min(page * PAGE_SIZE, filteredUsers.length)} of {filteredUsers.length} users</span><div><button type="button" disabled={page === 1} onClick={() => setPage(page - 1)} aria-label="Previous page"><ChevronLeft size={17} /></button><b>{page}</b><button type="button" disabled={page === pages} onClick={() => setPage(page + 1)} aria-label="Next page"><ChevronRight size={17} /></button></div></footer>
             </section>
+
+            {userToDelete && (
+                <div className="properties-modal-overlay" onClick={() => setUserToDelete(null)}>
+                    <div className="properties-modal-card" onClick={(e) => e.stopPropagation()}>
+                        <header className="properties-modal-header" style={{ borderBottom: "1px solid rgba(255,82,82,0.2)" }}>
+                            <div className="properties-title" style={{ color: "#ff5252" }}>
+                                <h3>Delete User</h3>
+                            </div>
+                            <button type="button" className="properties-close-btn" onClick={() => setUserToDelete(null)} aria-label="Close delete user dialog">
+                                <X size={18} />
+                            </button>
+                        </header>
+                        <div className="properties-modal-body">
+                            <p style={{ margin: 0, fontSize: "14px", lineHeight: "1.6", color: "#fff" }}>
+                                Are you sure you want to delete user <strong>{userToDelete.fullName || userToDelete.name || userToDelete.username || "Unnamed user"}</strong>?
+                            </p>
+                            <p style={{ margin: 0, fontSize: "12px", color: "var(--admin-muted)" }}>
+                                This action is permanent and cannot be undone.
+                            </p>
+                        </div>
+                        <footer className="properties-modal-footer" style={{ gap: "10px" }}>
+                            <button type="button" className="properties-btn-ok" style={{ background: "rgba(255,255,255,0.06)", color: "#fff", border: "1px solid var(--admin-line)" }} onClick={() => setUserToDelete(null)}>
+                                Cancel
+                            </button>
+                            <button type="button" className="properties-btn-ok" style={{ background: "#ff5252", color: "#fff" }} onClick={() => {
+                                removeUser(userToDelete._id || userToDelete.id, true);
+                                setUserToDelete(null);
+                            }}>
+                                Delete User
+                            </button>
+                        </footer>
+                    </div>
+                </div>
+            )}
         </section>
     );
 }

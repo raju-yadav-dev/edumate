@@ -72,7 +72,8 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
         historyText,
         activeTopic
     });
-    const { rewrittenQuery, intent, entities, isRepeat } = analysisResult;
+    const { rewrittenQuery, intent, entities, isRepeat, subqueries = [] } = analysisResult;
+    const activeSubqueries = (Array.isArray(subqueries) && subqueries.length > 0) ? subqueries : [rewrittenQuery];
     const resolvedActiveTopic = analysisResult.activeTopic || activeTopic || "";
 
     const intentResult = { intent, confidence: 0.9 };
@@ -165,30 +166,64 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
         }
         textResponse = formatted.answer;
     } else {
-        // Perform 3-Tier Fallback Search Pipeline
+        // Perform 3-Tier Sequential Fallback Search Pipeline with Query Decomposition
         const isUniversityRelated = classifyQuestionType(rewrittenQuery, intent) !== QUESTION_TYPES.GENERAL_KNOWLEDGE;
 
         if (isUniversityRelated) {
-            console.log("[CHAT] Parallel Search: Fetching all Tiers concurrently...");
-            const [docChunks, siteChunks, internetResults] = await Promise.all([
-                SearchManager.searchLocalPdfs(rewrittenQuery, activeUser, 5),
-                SearchManager.searchApprovedUrls(rewrittenQuery, activeUser, 5),
-                SearchManager.searchInternet(rewrittenQuery)
-            ]);
+            console.log(`[CHAT] Subquery RAG Search with ${activeSubqueries.length} subqueries:`, activeSubqueries);
 
-            // TIER 1: ADMIN DOCUMENTS
-            console.log("[CHAT] Evaluating Tier 1 (Admin Documents)...");
-            const rankedDocChunks = await RankingEngine.rerankCandidates(rewrittenQuery, docChunks, activeUser);
-            adminDocsCount = rankedDocChunks.length;
+            // ==========================================
+            // TIER 1: ADMIN-UPLOADED DOCUMENTS
+            // ==========================================
+            console.log("[CHAT] Evaluating Tier 1 (Admin-Uploaded Documents)...");
+            const combinedDocChunks = [];
+            const docSeenIds = new Set();
 
-            const maxDocScore = rankedDocChunks.length > 0 ? Math.max(...rankedDocChunks.map(c => c.score)) : 0;
-            if (maxDocScore >= RankingEngine.SIMILARITY_CONFIDENCE_THRESHOLD) {
-                console.log("[CHAT] Tier 1 verified as SUFFICIENT by similarity score.");
-                
+            for (const subq of activeSubqueries) {
+                const subCandidates = await SearchManager.searchLocalPdfs(subq, activeUser, 6);
+                const subRanked = await RankingEngine.rerankCandidates(subq, subCandidates, activeUser);
+
+                // Detailed retrieval logging format as requested
+                console.log("\n==================================================");
+                console.log(`QUERY: ${normalizedQuestion}`);
+                console.log(`SUBQUERY: ${subq}`);
+                console.log(`SOURCE: Admin-Uploaded Documents (Tier 1)`);
+                if (subRanked.length === 0) {
+                    console.log("DOCUMENT: None matched");
+                    console.log("SCORE: 0");
+                    console.log("RERANK SCORE: 0");
+                    console.log("SELECTED CHUNKS: 0");
+                } else {
+                    subRanked.forEach((chunk, idx) => {
+                        console.log(`DOCUMENT: ${chunk.metadata?.originalName || chunk.metadata?.filename || "Unknown"}`);
+                        console.log(`SCORE: ${chunk.initialScore ?? chunk.score}`);
+                        console.log(`RERANK SCORE: ${chunk.rerankScore ?? chunk.score}`);
+                        console.log(`SELECTED CHUNKS [${idx + 1}]: ${chunk.content.slice(0, 150).replace(/\n/g, " ")}...`);
+                    });
+                }
+                console.log("==================================================\n");
+
+                const topSubChunks = subRanked.filter(c => c.score >= RankingEngine.SIMILARITY_CONFIDENCE_THRESHOLD);
+                const selectedForSub = topSubChunks.length > 0 ? topSubChunks.slice(0, 3) : subRanked.slice(0, 2);
+
+                for (const chunk of selectedForSub) {
+                    if (!docSeenIds.has(chunk.id)) {
+                        docSeenIds.add(chunk.id);
+                        combinedDocChunks.push(chunk);
+                    }
+                }
+            }
+
+            adminDocsCount = combinedDocChunks.length;
+            const maxDocScore = combinedDocChunks.length > 0 ? Math.max(...combinedDocChunks.map(c => c.score)) : 0;
+
+            if (maxDocScore >= RankingEngine.SIMILARITY_CONFIDENCE_THRESHOLD && combinedDocChunks.length > 0) {
+                console.log(`[CHAT] Tier 1 verified as SUFFICIENT with ${combinedDocChunks.length} chunks.`);
+
                 const tempMessages = promptService.buildPromptMessages({
                     question: rewrittenQuery,
                     intent,
-                    retrievedChunks: rankedDocChunks,
+                    retrievedChunks: combinedDocChunks,
                     universitySiteResults: [],
                     webResults: [],
                     historyText,
@@ -200,28 +235,66 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
 
                 const attemptResponse = await llmService.generateCompletion(tempMessages);
                 textResponse = attemptResponse;
-                retrievedChunks = rankedDocChunks;
+                retrievedChunks = combinedDocChunks;
                 activeQuestionType = QUESTION_TYPES.UNIVERSITY_SPECIFIC;
                 sourceLabel = SOURCE_LABELS.UNIVERSITY;
                 provider = "groq";
                 finalMessages = tempMessages;
             }
 
-            // TIER 2: ADMIN-APPROVED WEBSITE URLS
+            // ==========================================
+            // TIER 2: ADMIN-APPROVED WEBSITE URLS (Only if Tier 1 insufficient)
+            // ==========================================
             if (!textResponse) {
-                console.log("[CHAT] Evaluating Tier 2 (Crawled website URLs)...");
-                const rankedSiteChunks = await RankingEngine.rerankCandidates(rewrittenQuery, siteChunks, activeUser);
-                adminUrlsCount = rankedSiteChunks.length;
+                console.log("[CHAT] Tier 1 insufficient. Evaluating Tier 2 (Crawled Website URLs)...");
+                const combinedSiteChunks = [];
+                const siteSeenIds = new Set();
 
-                const maxSiteScore = rankedSiteChunks.length > 0 ? Math.max(...rankedSiteChunks.map(c => c.score)) : 0;
-                if (maxSiteScore >= RankingEngine.SIMILARITY_CONFIDENCE_THRESHOLD) {
-                    console.log("[CHAT] Tier 2 verified as SUFFICIENT by similarity score.");
-                    
+                for (const subq of activeSubqueries) {
+                    const subCandidates = await SearchManager.searchApprovedUrls(subq, activeUser, 6);
+                    const subRanked = await RankingEngine.rerankCandidates(subq, subCandidates, activeUser);
+
+                    console.log("\n==================================================");
+                    console.log(`QUERY: ${normalizedQuestion}`);
+                    console.log(`SUBQUERY: ${subq}`);
+                    console.log(`SOURCE: Crawled Website URLs (Tier 2)`);
+                    if (subRanked.length === 0) {
+                        console.log("DOCUMENT: None matched");
+                        console.log("SCORE: 0");
+                        console.log("RERANK SCORE: 0");
+                        console.log("SELECTED CHUNKS: 0");
+                    } else {
+                        subRanked.forEach((chunk, idx) => {
+                            console.log(`DOCUMENT: ${chunk.metadata?.originalName || chunk.metadata?.sourceUrl || "Webpage"}`);
+                            console.log(`SCORE: ${chunk.initialScore ?? chunk.score}`);
+                            console.log(`RERANK SCORE: ${chunk.rerankScore ?? chunk.score}`);
+                            console.log(`SELECTED CHUNKS [${idx + 1}]: ${chunk.content.slice(0, 150).replace(/\n/g, " ")}...`);
+                        });
+                    }
+                    console.log("==================================================\n");
+
+                    const topSubChunks = subRanked.filter(c => c.score >= RankingEngine.SIMILARITY_CONFIDENCE_THRESHOLD);
+                    const selectedForSub = topSubChunks.length > 0 ? topSubChunks.slice(0, 3) : subRanked.slice(0, 2);
+
+                    for (const chunk of selectedForSub) {
+                        if (!siteSeenIds.has(chunk.id)) {
+                            siteSeenIds.add(chunk.id);
+                            combinedSiteChunks.push(chunk);
+                        }
+                    }
+                }
+
+                adminUrlsCount = combinedSiteChunks.length;
+                const maxSiteScore = combinedSiteChunks.length > 0 ? Math.max(...combinedSiteChunks.map(c => c.score)) : 0;
+
+                if (maxSiteScore >= RankingEngine.SIMILARITY_CONFIDENCE_THRESHOLD && combinedSiteChunks.length > 0) {
+                    console.log(`[CHAT] Tier 2 verified as SUFFICIENT with ${combinedSiteChunks.length} chunks.`);
+
                     const tempMessages = promptService.buildPromptMessages({
                         question: rewrittenQuery,
                         intent,
                         retrievedChunks: [],
-                        universitySiteResults: rankedSiteChunks.map(c => ({
+                        universitySiteResults: combinedSiteChunks.map(c => ({
                             title: c.metadata?.originalName || "Webpage",
                             url: c.metadata?.sourceUrl || "",
                             snippet: c.content
@@ -236,7 +309,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
 
                     const attemptResponse = await llmService.generateCompletion(tempMessages);
                     textResponse = attemptResponse;
-                    retrievedChunks = rankedSiteChunks;
+                    retrievedChunks = combinedSiteChunks;
                     activeQuestionType = QUESTION_TYPES.UNIVERSITY_SPECIFIC;
                     sourceLabel = SOURCE_LABELS.UNIVERSITY;
                     provider = "groq";
@@ -244,18 +317,33 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
                 }
             }
 
-            // TIER 3: INTERNET SEARCH (as fallback)
+            // ==========================================
+            // TIER 3: INTERNET SEARCH (Only if Tiers 1 & 2 insufficient)
+            // ==========================================
             if (!textResponse) {
-                console.log("[CHAT] Evaluating Tier 3 (Internet Search)...");
-                internetCount = internetResults.length;
+                console.log("[CHAT] Tiers 1 & 2 insufficient. Evaluating Tier 3 (Internet Search)...");
+                const combinedWebResults = [];
+                const webSeenUrls = new Set();
 
-                if (internetResults.length > 0) {
+                for (const subq of activeSubqueries) {
+                    const internetResults = await SearchManager.searchInternet(subq);
+                    for (const res of internetResults) {
+                        if (res.url && !webSeenUrls.has(res.url)) {
+                            webSeenUrls.add(res.url);
+                            combinedWebResults.push(res);
+                        }
+                    }
+                }
+
+                internetCount = combinedWebResults.length;
+
+                if (combinedWebResults.length > 0) {
                     const tempMessages = promptService.buildPromptMessages({
                         question: rewrittenQuery,
                         intent,
                         retrievedChunks: [],
                         universitySiteResults: [],
-                        webResults: internetResults,
+                        webResults: combinedWebResults,
                         historyText,
                         user: activeUser,
                         questionType: QUESTION_TYPES.GENERAL_KNOWLEDGE,
@@ -265,7 +353,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
 
                     const attemptResponse = await llmService.generateCompletion(tempMessages);
                     textResponse = attemptResponse;
-                    webResults = internetResults;
+                    webResults = combinedWebResults;
                     activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
                     sourceLabel = SOURCE_LABELS.WEB;
                     provider = "groq";

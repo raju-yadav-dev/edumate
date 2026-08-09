@@ -205,7 +205,7 @@ const runIndexingJob = async (documentId) => {
             text = fullText;
 
             if (ocrFlag || text.trim().length === 0) {
-                throw new Error("Extraction returned empty text (Image-only or corrupt PDF).");
+                throw new Error("Extraction returned empty text (Image-only or scanned PDF with no text layer).");
             }
 
             // 2. Chunking Stage
@@ -221,7 +221,7 @@ const runIndexingJob = async (documentId) => {
             text = extracted.text || "";
             
             if (text.trim().length === 0) {
-                throw new Error("Extraction returned empty text.");
+                throw new Error("Extraction returned empty text (Empty or unreadable file).");
             }
 
             // 2. Chunking Stage
@@ -299,20 +299,61 @@ const runIndexingJob = async (documentId) => {
         await withTimeout(client.upsert(collectionName, { wait: true, points }), 30000, "Qdrant vector database upload timed out (30s)");
         console.log(`[QDRANT] Upsert completed`);
 
-        // Verify vectors are inserted in Qdrant
-        const collectionInfo = await client.getCollection(collectionName);
-        console.log(`[QDRANT] Verified collection point count: ${collectionInfo.points_count}`);
+        // Verify vectors are inserted in Qdrant PER DOCUMENT
+        const qCountRes = await withTimeout(
+            client.count(collectionName, {
+                filter: {
+                    must: [
+                        { key: "documentId", match: { value: String(documentId) } }
+                    ]
+                }
+            }),
+            10000,
+            "Qdrant point count verification timed out (10s)"
+        );
 
-        // 5. MongoDB Update & Completion
+        const pointCount = qCountRes?.count || 0;
+        console.log(`[QDRANT] Verified point count for document ${documentId}: ${pointCount}`);
+
+        if (pointCount === 0) {
+            throw new Error(`Qdrant vector verification failed: 0 points found for document ${documentId}`);
+        }
+
+        // 5. Save/Sync MongoDB Chunk collection
+        try {
+            const Chunk = require("../../models/Chunk");
+            await Chunk.deleteMany({ document: documentId });
+            const chunkDocs = rawChunks.map((chunk, index) => ({
+                document: documentId,
+                content: chunk.content,
+                embedding: embeddings[index] || [],
+                metadata: {
+                    pageNumber: chunk.pageNumber || 1,
+                    originalName: document.originalName || "",
+                    category: document.category || "",
+                    institution: document.institution || "",
+                    department: document.department || ""
+                }
+            }));
+            if (chunkDocs.length > 0) {
+                await Chunk.insertMany(chunkDocs);
+            }
+        } catch (mongoChunkErr) {
+            console.error(`Failed to sync MongoDB Chunk collection for ${documentId}:`, mongoChunkErr);
+        }
+
+        // 6. MongoDB Update & Completion (ONLY AFTER VERIFYING QDRANT POINTS > 0)
         document.embeddingStatus = "indexed";
         document.chunkCount = rawChunks.length;
         document.metadata = {
             ...(document.metadata || {}),
             pages: pageCount,
+            extractedLength: text.length,
+            qdrantPoints: pointCount,
             indexedAt: new Date().toISOString()
         };
         await document.save();
-        console.log(`[INDEX] Document completed`);
+        console.log(`[INDEX] Document completed successfully with ${pointCount} Qdrant vectors`);
     } catch (err) {
         console.error(`[INDEX] Background Indexing failed for ${documentId}:`, err);
         document.embeddingStatus = "failed";

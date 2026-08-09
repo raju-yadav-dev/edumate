@@ -24,6 +24,7 @@ function ContextMenu({
     onRename,
     onMove,
     onDelete,
+    onBulkDelete,
     onCreateFolder,
     clipboard,
     onCopy,
@@ -97,7 +98,7 @@ function ContextMenu({
 
                     <div className="context-divider" />
 
-                    <button className="danger" onClick={() => handleAction(onDelete)}>
+                    <button className="danger" onClick={() => handleAction(onBulkDelete)}>
                         <Trash2 size={16} />
                         <span>Delete Selection</span>
                     </button>

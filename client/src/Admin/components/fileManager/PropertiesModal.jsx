@@ -186,20 +186,26 @@ function PropertiesModal({ item, onClose, folders = [], documents = [] }) {
                                     <span className="detail-label">Last Indexed:</span>
                                     <span className="detail-value">{item.embeddingStatus === "indexed" ? formatDate(item.updatedAt) : "N/A"}</span>
                                 </div>
-                                {item.originalUrl && (
+                                {(item.originalUrl || item.metadata?.sourceUrl || item.sourceUrl) && (
                                     <div className="detail-row">
                                         <span className="detail-label">Source URL:</span>
                                         <span className="detail-value-link">
-                                            <a href={item.originalUrl} target="_blank" rel="noopener noreferrer">
-                                                {item.originalUrl}
+                                            <a href={item.originalUrl || item.metadata?.sourceUrl || item.sourceUrl} target="_blank" rel="noopener noreferrer">
+                                                {item.originalUrl || item.metadata?.sourceUrl || item.sourceUrl}
                                             </a>
                                         </span>
                                     </div>
                                 )}
                                 <div className="detail-row">
                                     <span className="detail-label">Storage Location:</span>
-                                    <span className="detail-value-code">{item.storagePath}</span>
+                                    <span className="detail-value-code">{item.metadata?.uploadedFrom === "crawler" ? `[edumate-crawler] ${item.storagePath}` : item.storagePath}</span>
                                 </div>
+                                {item.metadata?.uploadedFrom === "crawler" && (
+                                    <div className="detail-row">
+                                        <span className="detail-label">Source Type:</span>
+                                        <span className="detail-value" style={{ color: "var(--admin-gold)", fontWeight: "600" }}>🌐 Crawled Web Resource</span>
+                                    </div>
+                                )}
                                 <div className="detail-row">
                                     <span className="detail-label">SHA-256 Hash:</span>
                                     <span className="detail-value-code" style={{ fontSize: "10px" }}>{item.checksum || item.contentHash || item.metadata?.hash || "N/A"}</span>

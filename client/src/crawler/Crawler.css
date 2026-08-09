@@ -95,11 +95,14 @@
 }
 
 .crawler-submit-btn {
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 8px;
-    padding: 12px;
+    padding: 10px 16px;
+    white-space: nowrap;
+    flex-shrink: 0;
+    line-height: 1.2;
     background: var(--admin-gold);
     color: #fff;
     border: none;

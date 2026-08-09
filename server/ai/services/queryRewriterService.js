@@ -52,7 +52,7 @@ Follow-up Question: "${question}"`;
  * @param {string} params.question
  * @param {string} params.historyText
  * @param {string} params.activeTopic
- * @returns {Promise<Object>} - { rewrittenQuery, activeTopic, intent, entities, isRepeat }
+ * @returns {Promise<Object>} - { rewrittenQuery, activeTopic, intent, entities, isRepeat, subqueries }
  */
 const analyzeQuery = async ({ question, historyText, activeTopic }) => {
     const systemPrompt = `You are a precise conversational analyzer for an academic assistant chatbot at a university.
@@ -70,6 +70,9 @@ Identify the following and return ONLY a valid JSON object:
      "institution": "e.g., Heritage, or null"
    }
 5. "isRepeat": A boolean indicating if the user is asking the exact same question they already asked in the conversation history.
+6. "subqueries": If the user question is a multi-part query asking about multiple distinct aspects (e.g. course info, fee structure, faculty members, eligibility, etc.), decompose it into 2 to 4 distinct, highly focused subqueries for search retrieval. If it is a simple single-topic question, return a 1-element array with the rewritten query.
+   - Example 1: Question "Tell me about BCA course, fee structure and faculties" -> subqueries: ["BCA course overview and details", "BCA fee structure and tuition fee", "BCA faculty information Department of Computational Sciences"]
+   - Example 2: Question "What is the BCA fee?" -> subqueries: ["BCA fee structure and tuition fee"]
 
 Return ONLY a valid JSON block, without markdown formatting or backticks.`;
 
@@ -79,11 +82,18 @@ ${historyText || "No prior history"}
 
 User Question: "${question}"`;
 
+    let activeTopicRes = activeTopic || "";
+    let rewrittenQueryRes = question;
+    let intentRes = "general_chat";
+    let entitiesRes = {};
+    let isRepeatRes = false;
+    let subqueriesRes = [];
+
     try {
         const response = await llmService.generateCompletion([
             { role: "system", content: "You are a precise JSON query analyzer." },
             { role: "user", content: systemPrompt + "\n\n" + userPrompt }
-        ], { temperature: 0.1, maxOutputTokens: 350 });
+        ], { temperature: 0.1, maxOutputTokens: 400 });
 
         const cleaned = String(response)
             .replace(/```json/g, "")
@@ -91,23 +101,53 @@ User Question: "${question}"`;
             .trim();
         const parsed = JSON.parse(cleaned);
 
-        return {
-            activeTopic: parsed.activeTopic || activeTopic || "",
-            rewrittenQuery: parsed.rewrittenQuery || question,
-            intent: parsed.intent || "general_chat",
-            entities: parsed.entities || {},
-            isRepeat: !!parsed.isRepeat
-        };
+        activeTopicRes = parsed.activeTopic || activeTopic || "";
+        rewrittenQueryRes = parsed.rewrittenQuery || question;
+        intentRes = parsed.intent || "general_chat";
+        entitiesRes = parsed.entities || {};
+        isRepeatRes = !!parsed.isRepeat;
+        if (Array.isArray(parsed.subqueries) && parsed.subqueries.length > 0) {
+            subqueriesRes = parsed.subqueries.map(s => String(s).trim()).filter(Boolean);
+        }
     } catch (e) {
         console.error("Query analysis failed, falling back:", e.message);
-        return {
-            activeTopic: activeTopic || "",
-            rewrittenQuery: question,
-            intent: "general_chat",
-            entities: {},
-            isRepeat: false
-        };
     }
+
+    // Heuristic Subquery Decomposition Fallback if subqueries array is empty
+    if (subqueriesRes.length === 0) {
+        const lowerQ = rewrittenQueryRes.toLowerCase();
+        const detectedTopic = entitiesRes.course || activeTopicRes || (lowerQ.includes("bca") ? "BCA" : "");
+        const fallbackSubs = [];
+
+        if (lowerQ.includes("course") || lowerQ.includes("overview") || lowerQ.includes("eligibility") || lowerQ.includes("programme")) {
+            fallbackSubs.push(`${detectedTopic} course details overview eligibility`.trim());
+        }
+        if (lowerQ.includes("fee") || lowerQ.includes("cost") || lowerQ.includes("tuition") || lowerQ.includes("charge")) {
+            fallbackSubs.push(`${detectedTopic} fee structure tuition fees`.trim());
+        }
+        if (lowerQ.includes("faculty") || lowerQ.includes("faculties") || lowerQ.includes("teacher") || lowerQ.includes("professor") || lowerQ.includes("staff")) {
+            // Include Department of Computational Sciences mapping for BCA/Computer Application
+            const deptExt = (detectedTopic.toUpperCase().includes("BCA") || lowerQ.includes("bca")) 
+                ? "Department of Computational Sciences faculty" 
+                : "faculty members";
+            fallbackSubs.push(`${detectedTopic} ${deptExt}`.trim());
+        }
+
+        if (fallbackSubs.length > 1) {
+            subqueriesRes = fallbackSubs;
+        } else {
+            subqueriesRes = [rewrittenQueryRes];
+        }
+    }
+
+    return {
+        activeTopic: activeTopicRes,
+        rewrittenQuery: rewrittenQueryRes,
+        intent: intentRes,
+        entities: entitiesRes,
+        isRepeat: isRepeatRes,
+        subqueries: subqueriesRes
+    };
 };
 
 module.exports = {

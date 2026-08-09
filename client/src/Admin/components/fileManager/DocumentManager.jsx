@@ -42,12 +42,28 @@ function DocumentManager(props) {
     const [recentFilter, setRecentFilter] = useState("all");
     const [isJobsOpen, setIsJobsOpen] = useState(false);
     
+    // Custom Modal States (replacing native dialog prompts)
+    const [isCreateFolderModalOpen, setIsCreateFolderModalOpen] = useState(false);
+    const [createFolderParent, setCreateFolderParent] = useState(null); // null means root/active
+    const [createFolderName, setCreateFolderName] = useState("");
+
+    const [moveItemData, setMoveItemData] = useState(null); // file or folder data
+    const [targetParentFolder, setTargetParentFolder] = useState("");
+
+    const [deleteItemData, setDeleteItemData] = useState(null);
+
+    const [renameFileItem, setRenameFileItem] = useState(null);
+    const [newFileName, setNewFileName] = useState("");
+
     // Properties Modal State
     const [propertiesItem, setPropertiesItem] = useState(null);
 
     // Rename Folder Modal State
     const [renameFolderItem, setRenameFolderItem] = useState(null);
     const [newFolderName, setNewFolderName] = useState("");
+
+    // Failed Jobs Modal State
+    const [isFailedModalOpen, setIsFailedModalOpen] = useState(false);
 
     // Drag and Drop active indicator state
     const [isDraggingActive, setIsDraggingActive] = useState(false);
@@ -215,6 +231,97 @@ function DocumentManager(props) {
         setSelectionStart(null);
     }, [props.activeFolder]);
 
+    const handleOpenCreateFolderModal = useCallback((parentVal = null) => {
+        const parentString = typeof parentVal === "string" ? parentVal : null;
+        const targetParent = parentString !== null ? parentString : (props.activeFolder && props.activeFolder !== "root" ? props.activeFolder : null);
+        setCreateFolderParent(targetParent);
+        setCreateFolderName("");
+        setIsCreateFolderModalOpen(true);
+    }, [props.activeFolder]);
+
+    const handleOpenMoveModal = useCallback((item, isFolder = false) => {
+        if (isFolder) {
+            setMoveItemData({
+                type: "folder",
+                id: item.value,
+                name: item.label,
+                currentCategoryOrParent: item.parent || "root"
+            });
+            setTargetParentFolder(item.parent || "root");
+        } else {
+            setMoveItemData({
+                type: "file",
+                id: item._id,
+                name: item.title || item.originalName,
+                currentCategoryOrParent: item.category || "root"
+            });
+            setTargetParentFolder(item.category || "root");
+        }
+    }, []);
+
+    const handleOpenDeleteModal = useCallback((item = null, isFolder = false, isBulk = false) => {
+        if (isBulk) {
+            const fileIds = props.selectedIds.filter(id => !id.startsWith("folder:"));
+            const folderValues = props.selectedIds.filter(id => id.startsWith("folder:")).map(id => id.replace("folder:", ""));
+            
+            let filesCount = fileIds.length;
+            folderValues.forEach(fVal => {
+                const visited = new Set();
+                const getDescendantFoldersLocal = (val) => {
+                    if (visited.has(val)) return [];
+                    visited.add(val);
+                    let desc = [val];
+                    props.folders.filter(f => f.parent === val).forEach(child => {
+                        desc = [...desc, ...getDescendantFoldersLocal(child.value)];
+                    });
+                    return desc;
+                };
+                const descendants = getDescendantFoldersLocal(fVal);
+                filesCount += props.documents.filter(doc => descendants.includes(doc.category)).length;
+            });
+
+            setDeleteItemData({
+                type: "bulk",
+                fileIds,
+                folderValues,
+                name: `${props.selectedIds.length} selected item(s)`,
+                filesCount
+            });
+        } else if (isFolder) {
+            const visited = new Set();
+            const getDescendantFoldersLocal = (val) => {
+                if (visited.has(val)) return [];
+                visited.add(val);
+                let desc = [val];
+                props.folders.filter(f => f.parent === val).forEach(child => {
+                    desc = [...desc, ...getDescendantFoldersLocal(child.value)];
+                });
+                return desc;
+            };
+            const descendants = getDescendantFoldersLocal(item.value);
+            const filesCount = props.documents.filter(doc => descendants.includes(doc.category)).length;
+
+            setDeleteItemData({
+                type: "folder",
+                id: item.value,
+                name: item.label,
+                filesCount
+            });
+        } else {
+            setDeleteItemData({
+                type: "file",
+                id: item._id,
+                name: item.title || item.originalName,
+                filesCount: 1
+            });
+        }
+    }, [props.selectedIds, props.folders, props.documents]);
+
+    const handleOpenRenameFileModal = useCallback((id, currentName) => {
+        setRenameFileItem({ id, currentName });
+        setNewFileName(currentName);
+    }, []);
+
     const handleOpenRenameFolderModal = useCallback((folderValue) => {
         const folder = props.folders.find(f => f.value === folderValue);
         if (folder) {
@@ -237,10 +344,10 @@ function DocumentManager(props) {
         onPaste: props.onPaste,
         onUndo: props.onUndo,
         onRedo: props.onRedo,
-        onCreateFolder: props.onCreateFolder,
+        onCreateFolder: handleOpenCreateFolderModal,
         onRenameFolder: handleOpenRenameFolderModal,
-        onRename: props.onRename,
-        onBulkDelete: props.onBulkDelete,
+        onRename: handleOpenRenameFileModal,
+        onBulkDelete: () => handleOpenDeleteModal(null, false, true),
         onOpenDocument: props.onOpenDocument,
         onSelectFolder: handleSelectFolder
     };
@@ -514,60 +621,50 @@ function DocumentManager(props) {
 
                 {/* Background Jobs Widget */}
                 {props.jobs && (
-                    <div className="jobs-status-widget header-jobs-widget" style={{ padding: "4px 8px", margin: 0, position: "relative" }}>
-                        <div className="jobs-widget-header" onClick={() => setIsJobsOpen(!isJobsOpen)} style={{ padding: "4px 6px" }}>
-                            <span>Background Indexing</span>
-                            <span style={{ fontSize: "11px", color: "var(--admin-gold)", marginLeft: "8px" }}>
+                    <div className="jobs-status-widget header-jobs-widget" style={{ padding: "6px 12px", margin: 0, border: "1px solid var(--admin-line)", borderRadius: "8px", background: "rgba(255,255,255,0.02)", display: "flex", alignItems: "center" }}>
+                        <div style={{ display: "flex", gap: "14px", alignItems: "center", fontSize: "12px", flexWrap: "wrap" }}>
+                            <span style={{ fontWeight: "600", color: "#e2e8f0" }}>Indexing:</span>
+                            <span style={{ color: props.jobs.running?.length > 0 ? "var(--admin-gold)" : "var(--admin-muted)", display: "inline-flex", alignItems: "center", gap: "4px" }}>
                                 {props.jobs.running?.length > 0 ? "⏳ Running" : "💤 Idle"}
                             </span>
+                            <span style={{ height: "12px", width: "1px", background: "var(--admin-line)" }} />
+                            <span>Completed: <strong style={{ color: "#2ecc71" }}>{props.jobs.completedCount}</strong></span>
+                            <span>Pending: <strong style={{ color: "#3498db" }}>{(props.jobs.queue?.length || 0) + (props.jobs.running?.length || 0)}</strong></span>
+                            <span
+                                style={{
+                                    cursor: (props.jobs?.failed?.length || 0) > 0 ? "pointer" : "default"
+                                }}
+                                onClick={() => {
+                                    if ((props.jobs?.failed?.length || 0) > 0) {
+                                        setIsFailedModalOpen(true);
+                                    }
+                                }}
+                                title={(props.jobs?.failed?.length || 0) > 0 ? "Click to view failed files" : ""}
+                            >
+                                Failed: <strong style={{ color: (props.jobs?.failed?.length || 0) > 0 ? "#ff5252" : "var(--admin-muted)", textDecoration: (props.jobs?.failed?.length || 0) > 0 ? "underline" : "none" }}>{props.jobs?.failed?.length || 0}</strong>
+                            </span>
+                            <span>Total: <strong style={{ color: "#fff" }}>{props.jobs.totalCount}</strong></span>
+                            {(props.jobs.failed?.length || 0) > 0 && (
+                                <button
+                                    type="button"
+                                    onClick={props.onRetryFailedIndexing}
+                                    style={{
+                                        background: "rgba(255, 82, 82, 0.12)",
+                                        border: "1px solid rgba(255, 82, 82, 0.25)",
+                                        color: "#ff5252",
+                                        padding: "3px 8px",
+                                        borderRadius: "4px",
+                                        fontSize: "11px",
+                                        cursor: "pointer",
+                                        transition: "all 0.2s"
+                                    }}
+                                    onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255, 82, 82, 0.2)"}
+                                    onMouseLeave={(e) => e.currentTarget.style.background = "rgba(255, 82, 82, 0.12)"}
+                                >
+                                    Retry Failed
+                                </button>
+                            )}
                         </div>
-                        {isJobsOpen && (
-                            <div className="jobs-widget-body" style={{
-                                position: "absolute",
-                                background: "var(--admin-bg-dark, #0b131a)",
-                                border: "1px solid var(--admin-line)",
-                                borderRadius: "6px",
-                                padding: "8px 10px",
-                                zIndex: 100,
-                                minWidth: "180px",
-                                boxShadow: "0 4px 12px rgba(0,0,0,0.5)",
-                                right: 0,
-                                marginTop: "6px"
-                            }}>
-                                <div className="job-item">
-                                    <span>Completed:</span>
-                                    <strong>{props.jobs.completedCount} / {props.jobs.totalCount}</strong>
-                                </div>
-                                {props.jobs.queue?.length > 0 && (
-                                    <div className="job-item">
-                                        <span>In Queue:</span>
-                                        <strong>{props.jobs.queue.length} file(s)</strong>
-                                    </div>
-                                )}
-                                {props.jobs.running?.length > 0 && (
-                                    <div className="job-item">
-                                        <span>Processing:</span>
-                                        <strong>{props.jobs.running.length} file(s)</strong>
-                                    </div>
-                                )}
-                                {props.jobs.failed?.length > 0 && (
-                                    <div className="job-item failed">
-                                        <span>Failed Index:</span>
-                                        <strong>{props.jobs.failed.length} file(s)</strong>
-                                    </div>
-                                )}
-                                {props.jobs.failed?.length > 0 && (
-                                    <button
-                                        type="button"
-                                        className="jobs-retry-all-btn"
-                                        onClick={props.onRetryFailedIndexing}
-                                        style={{ width: "100%" }}
-                                    >
-                                        Retry All Failed
-                                    </button>
-                                )}
-                            </div>
-                        )}
                     </div>
                 )}
 
@@ -720,6 +817,8 @@ function DocumentManager(props) {
                         onSelectFolder={handleSelectFolder}
                         onSelectTreeDoc={handleSelectTreeDoc}
                         onRenameFolder={handleOpenRenameFolderModal}
+                        onMoveFolder={(folderValue) => handleOpenMoveModal(props.folders.find(f => f.value === folderValue), true)}
+                        onDeleteFolder={(folderValue) => handleOpenDeleteModal(props.folders.find(f => f.value === folderValue), true)}
                     />
 
 
@@ -900,6 +999,11 @@ function DocumentManager(props) {
                         onDuplicate={props.onDuplicate}
                         onReindexFolder={props.onReindexFolder}
                         onRenameFolder={handleOpenRenameFolderModal}
+                        onRename={(id, name) => handleOpenRenameFileModal(id, name)}
+                        onMove={(id, cat) => handleOpenMoveModal(props.documents.find(d => d._id === id), false)}
+                        onDelete={(id) => handleOpenDeleteModal(props.documents.find(d => d._id === id), false)}
+                        onDeleteFolder={(folderValue) => handleOpenDeleteModal(props.folders.find(f => f.value === folderValue), true)}
+                        onMoveFolder={(folderValue) => handleOpenMoveModal(props.folders.find(f => f.value === folderValue), true)}
                     />
 
                     {/* Footer */}
@@ -1007,24 +1111,80 @@ function DocumentManager(props) {
                 onClose={props.closeContextMenu}
                 onOpen={props.onOpenDocument}
                 onDownload={props.onDownload}
-                onRename={props.onRename}
-                onMove={props.onMove}
-                onDelete={props.onDelete}
-                onCreateFolder={props.onCreateFolder}
+                onRename={(id, name) => handleOpenRenameFileModal(id, name)}
+                onMove={(id, cat) => handleOpenMoveModal(props.documents.find(d => d._id === id), false)}
+                onDelete={(id) => handleOpenDeleteModal(props.documents.find(d => d._id === id), false)}
+                onBulkDelete={() => handleOpenDeleteModal(null, false, true)}
+                onCreateFolder={(parentVal) => handleOpenCreateFolderModal(parentVal)}
                 clipboard={props.clipboard}
                 onCopy={props.onCopy}
                 onCut={props.onCut}
                 onPaste={props.onPaste}
                 onSelectFolder={handleSelectFolder}
                 onRenameFolder={handleOpenRenameFolderModal}
-                onDeleteFolder={props.onDeleteFolder}
-                onMoveFolder={props.onMoveFolder}
+                onDeleteFolder={(folderValue) => handleOpenDeleteModal(props.folders.find(f => f.value === folderValue), true)}
+                onMoveFolder={(folderValue) => handleOpenMoveModal(props.folders.find(f => f.value === folderValue), true)}
                 onDuplicate={props.onDuplicate}
                 onReindex={props.onRebuild}
                 onReindexFolder={props.onReindexFolder}
                 onProperties={(item) => setPropertiesItem(item)}
                 selectedCount={props.selectedIds.length}
             />
+
+            {/* Create Folder Modal Dialog */}
+            {isCreateFolderModalOpen && (
+                <div className="rename-folder-modal-overlay" onClick={() => setIsCreateFolderModalOpen(false)}>
+                    <div className="rename-folder-modal-card" onClick={(e) => e.stopPropagation()}>
+                        <header className="rename-folder-modal-header">
+                            <h3>Create Folder</h3>
+                            <button className="rename-folder-modal-close-btn" onClick={() => setIsCreateFolderModalOpen(false)}>
+                                <X size={16} />
+                            </button>
+                        </header>
+                        <form onSubmit={(e) => {
+                            e.preventDefault();
+                            if (createFolderName.trim()) {
+                                props.onCreateFolder(createFolderParent, createFolderName.trim());
+                            }
+                            setIsCreateFolderModalOpen(false);
+                        }}>
+                            <div className="rename-folder-modal-body">
+                                <label style={{ color: "var(--admin-muted)", fontSize: "12px" }}>Folder Name</label>
+                                <input
+                                    type="text"
+                                    value={createFolderName}
+                                    onChange={(e) => setCreateFolderName(e.target.value)}
+                                    autoFocus
+                                    placeholder="Enter folder name"
+                                    required
+                                    style={{
+                                        width: "100%",
+                                        background: "#0e1823",
+                                        border: "1px solid var(--admin-line)",
+                                        color: "#fff",
+                                        borderRadius: "6px",
+                                        padding: "8px 10px",
+                                        marginTop: "6px"
+                                    }}
+                                />
+                                {createFolderParent && (
+                                    <div style={{ marginTop: "8px", fontSize: "12px", color: "var(--admin-muted)" }}>
+                                        Creating inside: <strong>{props.folders.find(f => f.value === createFolderParent)?.label || createFolderParent}</strong>
+                                    </div>
+                                )}
+                            </div>
+                            <footer className="rename-folder-modal-footer">
+                                <button type="button" className="cancel-btn" onClick={() => setIsCreateFolderModalOpen(false)}>
+                                    Cancel
+                                </button>
+                                <button type="submit" className="submit-btn">
+                                    Create
+                                </button>
+                            </footer>
+                        </form>
+                    </div>
+                </div>
+            )}
 
             {/* Rename Folder Modal Dialog */}
             {renameFolderItem && (
@@ -1044,7 +1204,7 @@ function DocumentManager(props) {
                             setRenameFolderItem(null);
                         }}>
                             <div className="rename-folder-modal-body">
-                                <label>Folder Name</label>
+                                <label style={{ color: "var(--admin-muted)", fontSize: "12px" }}>Folder Name</label>
                                 <input
                                     type="text"
                                     value={newFolderName}
@@ -1052,6 +1212,15 @@ function DocumentManager(props) {
                                     autoFocus
                                     placeholder="Enter new folder name"
                                     required
+                                    style={{
+                                        width: "100%",
+                                        background: "#0e1823",
+                                        border: "1px solid var(--admin-line)",
+                                        color: "#fff",
+                                        borderRadius: "6px",
+                                        padding: "8px 10px",
+                                        marginTop: "6px"
+                                    }}
                                 />
                             </div>
                             <footer className="rename-folder-modal-footer">
@@ -1063,6 +1232,282 @@ function DocumentManager(props) {
                                 </button>
                             </footer>
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Rename File Modal Dialog */}
+            {renameFileItem && (
+                <div className="rename-folder-modal-overlay" onClick={() => setRenameFileItem(null)}>
+                    <div className="rename-folder-modal-card" onClick={(e) => e.stopPropagation()}>
+                        <header className="rename-folder-modal-header">
+                            <h3>Rename File</h3>
+                            <button className="rename-folder-modal-close-btn" onClick={() => setRenameFileItem(null)}>
+                                <X size={16} />
+                            </button>
+                        </header>
+                        <form onSubmit={(e) => {
+                            e.preventDefault();
+                            if (newFileName.trim() && newFileName.trim() !== renameFileItem.currentName) {
+                                props.onRename(renameFileItem.id, renameFileItem.currentName, newFileName.trim());
+                            }
+                            setRenameFileItem(null);
+                        }}>
+                            <div className="rename-folder-modal-body">
+                                <label style={{ color: "var(--admin-muted)", fontSize: "12px" }}>File Name</label>
+                                <input
+                                    type="text"
+                                    value={newFileName}
+                                    onChange={(e) => setNewFileName(e.target.value)}
+                                    autoFocus
+                                    placeholder="Enter new file name"
+                                    required
+                                    style={{
+                                        width: "100%",
+                                        background: "#0e1823",
+                                        border: "1px solid var(--admin-line)",
+                                        color: "#fff",
+                                        borderRadius: "6px",
+                                        padding: "8px 10px",
+                                        marginTop: "6px"
+                                    }}
+                                />
+                            </div>
+                            <footer className="rename-folder-modal-footer">
+                                <button type="button" className="cancel-btn" onClick={() => setRenameFileItem(null)}>
+                                    Cancel
+                                </button>
+                                <button type="submit" className="submit-btn">
+                                    Rename
+                                </button>
+                            </footer>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Move Item (File or Folder) Modal Dialog */}
+            {moveItemData && (
+                <div className="rename-folder-modal-overlay" onClick={() => setMoveItemData(null)}>
+                    <div className="rename-folder-modal-card" onClick={(e) => e.stopPropagation()}>
+                        <header className="rename-folder-modal-header">
+                            <h3>Move {moveItemData.type === "folder" ? "Folder" : "File"}</h3>
+                            <button className="rename-folder-modal-close-btn" onClick={() => setMoveItemData(null)}>
+                                <X size={16} />
+                            </button>
+                        </header>
+                        <form onSubmit={async (e) => {
+                            e.preventDefault();
+                            if (moveItemData.type === "folder") {
+                                const targetVal = targetParentFolder === "root" ? null : targetParentFolder;
+                                await props.onMoveFolder(moveItemData.id, targetVal);
+                            } else {
+                                await props.onMove(moveItemData.id, moveItemData.currentCategoryOrParent, targetParentFolder === "root" ? "" : targetParentFolder);
+                            }
+                            setMoveItemData(null);
+                        }}>
+                            <div className="rename-folder-modal-body">
+                                <p style={{ margin: "0 0 16px 0", fontSize: "14px", color: "#fff" }}>
+                                    Move <strong>{moveItemData.name}</strong> to:
+                                </p>
+                                <label style={{ color: "var(--admin-muted)", fontSize: "12px" }}>Destination Folder</label>
+                                <select
+                                    value={targetParentFolder}
+                                    onChange={(e) => setTargetParentFolder(e.target.value)}
+                                    style={{
+                                        width: "100%",
+                                        background: "#0e1823",
+                                        border: "1px solid var(--admin-line)",
+                                        color: "#fff",
+                                        borderRadius: "6px",
+                                        padding: "8px 10px",
+                                        marginTop: "6px"
+                                    }}
+                                >
+                                    <option value="root">Root</option>
+                                    {(() => {
+                                        if (moveItemData.type === "folder") {
+                                            const visited = new Set();
+                                            const getDescendantsLocal = (val) => {
+                                                if (visited.has(val)) return [];
+                                                visited.add(val);
+                                                let desc = [val];
+                                                props.folders.filter(f => f.parent === val).forEach(child => {
+                                                    desc = [...desc, ...getDescendantsLocal(child.value)];
+                                                });
+                                                return desc;
+                                            };
+                                            const descendants = getDescendantsLocal(moveItemData.id);
+                                            return props.folders.filter(f => !descendants.includes(f.value));
+                                        }
+                                        return props.folders;
+                                    })().map(f => (
+                                        <option key={f.value} value={f.value}>{f.label}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <footer className="rename-folder-modal-footer">
+                                <button type="button" className="cancel-btn" onClick={() => setMoveItemData(null)}>
+                                    Cancel
+                                </button>
+                                <button type="submit" className="submit-btn">
+                                    Move
+                                </button>
+                            </footer>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Delete Confirmation Modal Dialog */}
+            {deleteItemData && (
+                <div className="rename-folder-modal-overlay" onClick={() => setDeleteItemData(null)}>
+                    <div className="rename-folder-modal-card" onClick={(e) => e.stopPropagation()}>
+                        <header className="rename-folder-modal-header" style={{ borderBottom: "1px solid rgba(255,82,82,0.2)" }}>
+                            <h3 style={{ color: "#ff5252" }}>Delete Confirmation</h3>
+                            <button className="rename-folder-modal-close-btn" onClick={() => setDeleteItemData(null)}>
+                                <X size={16} />
+                            </button>
+                        </header>
+                        <form onSubmit={async (e) => {
+                            e.preventDefault();
+                            if (deleteItemData.type === "bulk") {
+                                await props.onBulkDelete(true);
+                            } else if (deleteItemData.type === "folder") {
+                                await props.onDeleteFolder(deleteItemData.id, true);
+                            } else {
+                                await props.onDelete(deleteItemData.id, true);
+                            }
+                            setDeleteItemData(null);
+                        }}>
+                            <div className="rename-folder-modal-body">
+                                <p style={{ margin: "0 0 12px 0", fontSize: "14px", color: "#fff", lineHeight: "1.5" }}>
+                                    Are you sure you want to delete <strong>{deleteItemData.name}</strong>?
+                                </p>
+                                {deleteItemData.filesCount > 0 && deleteItemData.type === "folder" && (
+                                    <div style={{
+                                        background: "rgba(242, 163, 11, 0.1)",
+                                        border: "1px solid rgba(242, 163, 11, 0.2)",
+                                        borderRadius: "6px",
+                                        padding: "10px",
+                                        fontSize: "12px",
+                                        color: "var(--admin-gold)",
+                                        lineHeight: "1.4"
+                                    }}>
+                                        ⚠️ This folder is not empty. All <strong>{deleteItemData.filesCount} file(s)</strong> inside it and its subfolders will be moved to Admissions.
+                                    </div>
+                                )}
+                            </div>
+                            <footer className="rename-folder-modal-footer">
+                                <button type="button" className="cancel-btn" onClick={() => setDeleteItemData(null)}>
+                                    Cancel
+                                </button>
+                                <button type="submit" className="submit-btn" style={{ background: "#ff5252", color: "#fff" }}>
+                                    Delete
+                                </button>
+                            </footer>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Failed Indexing Jobs Modal Overlay */}
+            {isFailedModalOpen && props.jobs?.failed && (
+                <div className="rename-folder-modal-overlay" onClick={() => setIsFailedModalOpen(false)}>
+                    <div className="rename-folder-modal-card" style={{ maxWidth: "620px", width: "92%" }} onClick={(e) => e.stopPropagation()}>
+                        <header className="rename-folder-modal-header">
+                            <h3 style={{ display: "flex", alignItems: "center", gap: "8px", color: "#ff5252" }}>
+                                <span>⚠️ Failed Indexing Files ({props.jobs.failed.length})</span>
+                            </h3>
+                            <button className="rename-folder-modal-close-btn" onClick={() => setIsFailedModalOpen(false)}>
+                                <X size={16} />
+                            </button>
+                        </header>
+                        <div className="rename-folder-modal-body" style={{ maxHeight: "420px", overflowY: "auto", padding: "12px 16px" }}>
+                            {props.jobs.failed.length === 0 ? (
+                                <p style={{ color: "var(--admin-muted)", textAlign: "center", padding: "20px" }}>No failed documents.</p>
+                            ) : (
+                                props.jobs.failed.map((doc) => (
+                                    <div key={doc._id} style={{
+                                        background: "rgba(255, 82, 82, 0.05)",
+                                        border: "1px solid rgba(255, 82, 82, 0.2)",
+                                        borderRadius: "8px",
+                                        padding: "14px",
+                                        marginBottom: "12px"
+                                    }}>
+                                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "8px", gap: "10px" }}>
+                                            <div>
+                                                <strong style={{ color: "#fff", fontSize: "14px", display: "block" }}>{doc.originalName || "Untitled Document"}</strong>
+                                                <span style={{ fontSize: "12px", color: "var(--admin-muted)" }}>
+                                                    Folder: <strong style={{ color: "var(--admin-gold)" }}>{doc.category || "Root"}</strong>
+                                                </span>
+                                            </div>
+                                            <span style={{ fontSize: "11px", color: "#ff5252", background: "rgba(255, 82, 82, 0.1)", padding: "2px 8px", borderRadius: "12px" }}>
+                                                Indexing Failed
+                                            </span>
+                                        </div>
+
+                                        <div style={{
+                                            fontSize: "12px",
+                                            color: "#ff9999",
+                                            background: "rgba(0, 0, 0, 0.3)",
+                                            borderLeft: "3px solid #ff5252",
+                                            padding: "8px 10px",
+                                            borderRadius: "4px",
+                                            marginBottom: "12px",
+                                            wordBreak: "break-word",
+                                            fontFamily: "monospace"
+                                        }}>
+                                            {doc.metadata?.error || "Image-only or scanned PDF (0 text characters extracted)."}
+                                        </div>
+
+                                        <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+                                            <button
+                                                type="button"
+                                                onClick={async () => {
+                                                    await props.onRebuild?.(doc._id);
+                                                    props.onRefresh?.();
+                                                }}
+                                                style={{
+                                                    background: "var(--admin-surface-light, #1a2634)",
+                                                    border: "1px solid var(--admin-line)",
+                                                    color: "#fff",
+                                                    padding: "6px 12px",
+                                                    borderRadius: "6px",
+                                                    fontSize: "12px",
+                                                    cursor: "pointer"
+                                                }}
+                                            >
+                                                Retry Re-index
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={async () => {
+                                                    await props.onDelete?.(doc._id);
+                                                    props.onRefresh?.();
+                                                }}
+                                                style={{
+                                                    background: "rgba(255, 82, 82, 0.15)",
+                                                    border: "1px solid rgba(255, 82, 82, 0.3)",
+                                                    color: "#ff5252",
+                                                    padding: "6px 12px",
+                                                    borderRadius: "6px",
+                                                    fontSize: "12px",
+                                                    cursor: "pointer"
+                                                }}
+                                            >
+                                                Delete File
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                        <footer className="rename-folder-modal-footer">
+                            <button type="button" className="cancel-btn" onClick={() => setIsFailedModalOpen(false)}>
+                                Close
+                            </button>
+                        </footer>
                     </div>
                 </div>
             )}
