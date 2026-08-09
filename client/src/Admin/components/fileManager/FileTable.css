@@ -307,7 +307,7 @@
     color: #fff;
 }
 
-.pagination-controls {
+.file-pagination-controls {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -325,6 +325,8 @@
     cursor: pointer;
     font-size: 12px;
     transition: all 0.2s;
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .pagination-btn:hover:not(:disabled) {
@@ -340,6 +342,7 @@
 .pagination-pages {
     display: flex;
     gap: 4px;
+    flex-shrink: 0;
 }
 
 .pagination-page-num {
@@ -356,6 +359,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    flex-shrink: 0;
 }
 
 .pagination-page-num:hover:not(.active) {
@@ -379,6 +383,8 @@
     font-size: 12px;
     outline: none;
     cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .file-row.focused {

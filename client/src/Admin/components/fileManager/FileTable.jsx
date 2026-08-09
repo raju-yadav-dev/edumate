@@ -481,7 +481,7 @@ function FileTable(props) {
                     <div className="pagination-info">
                         Showing <strong>{Math.min(totalItems, (currentPage - 1) * pageSize + 1)}</strong> to <strong>{Math.min(totalItems, currentPage * pageSize)}</strong> of <strong>{totalItems}</strong> files
                     </div>
-                    <div className="pagination-controls">
+                    <div className="file-pagination-controls">
                         <button
                             type="button"
                             className="pagination-btn"

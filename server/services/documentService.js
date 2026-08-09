@@ -604,18 +604,18 @@ const bulkReindex = async ({ category, ids, user }) => {
 
 const getJobsStatus = async () => {
     const activeFilter = { status: { $ne: "deleted" } };
-    const [pending, processing, failed, indexedCount, totalCount] = await Promise.all([
+    const [pending, processing, failed, completedCount, totalCount] = await Promise.all([
         Document.find({ ...activeFilter, embeddingStatus: "pending" }).select("originalName category updatedAt fileSize"),
         Document.find({ ...activeFilter, embeddingStatus: "processing" }).select("originalName category updatedAt fileSize"),
         Document.find({ ...activeFilter, embeddingStatus: "failed" }).select("originalName category updatedAt fileSize metadata.error"),
-        Document.countDocuments({ ...activeFilter, embeddingStatus: "indexed" }),
+        Document.countDocuments({ ...activeFilter, embeddingStatus: { $in: ["indexed", "not_required"] } }),
         Document.countDocuments(activeFilter)
     ]);
     return {
         queue: pending,
         running: processing,
         failed: failed,
-        completedCount: indexedCount,
+        completedCount,
         totalCount
     };
 };

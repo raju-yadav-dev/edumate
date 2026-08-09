@@ -11,12 +11,33 @@ const fetch = (() => {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const isPermanentNetworkError = (error) => {
+    const msg = error.message || "";
+    const code = error.code || (error.cause && error.cause.code) || "";
+    return msg.includes("ENOTFOUND") || 
+           msg.includes("ECONNREFUSED") || 
+           msg.includes("EAI_AGAIN") ||
+           msg.includes("ENETUNREACH") ||
+           code === "ENOTFOUND" || 
+           code === "ECONNREFUSED" || 
+           code === "EAI_AGAIN" ||
+           code === "ENETUNREACH";
+};
+
 const fetchWithRetry = async (url, options, maxAttempts = 6) => {
     let attempt = 0;
+    const timeoutMs = options.timeout || 15000; // 15s timeout
     while (attempt < maxAttempts) {
         attempt++;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
         try {
-            const response = await fetch(url, options);
+            const { timeout, ...fetchOptions } = options;
+            const response = await fetch(url, {
+                ...fetchOptions,
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
             const clone = response.clone();
             let isRateLimit = response.status === 429;
             let errorMessage = "";
@@ -50,7 +71,8 @@ const fetchWithRetry = async (url, options, maxAttempts = 6) => {
 
             return clone;
         } catch (error) {
-            if (attempt >= maxAttempts) {
+            clearTimeout(timeoutId);
+            if (attempt >= maxAttempts || isPermanentNetworkError(error)) {
                 throw error;
             }
             const backoffDelay = Math.pow(2, attempt) * 2000 + Math.random() * 1000;
@@ -141,21 +163,27 @@ const embedText = async (text) => {
     } else {
         // Gemini
         const apiKey = getGeminiApiKey();
-        if (!apiKey) {
-            console.warn("[Embedding API] GEMINI_API_KEY is not set. Using mock fallback embedding.");
+        if (!apiKey || !apiKey.startsWith("AIzaSy")) {
+            console.warn("[Embedding API] GEMINI_API_KEY is not set or invalid (must start with 'AIzaSy'). Using mock fallback embedding.");
             return getMockEmbedding(text);
         }
         const modelName = process.env.EMBEDDING_MODEL || process.env.GEMINI_EMBEDDING_MODEL || AI_CONSTANTS.EMBEDDING_MODEL || "gemini-embedding-001";
 
         try {
+            const requestBody = {
+                model: `models/${modelName}`,
+                content: { parts: [{ text }] }
+            };
+            
+            // gemini-embedding-001 does not support outputDimensionality parameter
+            if (modelName !== "gemini-embedding-001") {
+                requestBody.outputDimensionality = 768;
+            }
+
             const response = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:embedContent?key=${apiKey}`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    model: `models/${modelName}`,
-                    content: { parts: [{ text }] },
-                    outputDimensionality: 768
-                })
+                body: JSON.stringify(requestBody)
             });
 
             const payload = await response.json();
@@ -226,8 +254,8 @@ const embedTexts = async (texts) => {
     } else {
         // Gemini batch embedding
         const apiKey = getGeminiApiKey();
-        if (!apiKey) {
-            console.warn("[Embedding API] GEMINI_API_KEY is not set. Returning mock batch embeddings.");
+        if (!apiKey || !apiKey.startsWith("AIzaSy")) {
+            console.warn("[Embedding API] GEMINI_API_KEY is not set or invalid (must start with 'AIzaSy'). Returning mock batch embeddings.");
             return sanitized.map((t) => getMockEmbedding(t));
         }
         const modelName = process.env.EMBEDDING_MODEL || process.env.GEMINI_EMBEDDING_MODEL || AI_CONSTANTS.EMBEDDING_MODEL || "gemini-embedding-001";
@@ -241,11 +269,18 @@ const embedTexts = async (texts) => {
                 await sleep(500);
             }
             const subBatch = sanitized.slice(i, i + batchSize);
-            const requests = subBatch.map((text) => ({
-                model: `models/${modelName}`,
-                content: { parts: [{ text }] },
-                outputDimensionality: 768
-            }));
+            const requests = subBatch.map((text) => {
+                const req = {
+                    model: `models/${modelName}`,
+                    content: { parts: [{ text }] }
+                };
+                
+                // gemini-embedding-001 does not support outputDimensionality parameter
+                if (modelName !== "gemini-embedding-001") {
+                    req.outputDimensionality = 768;
+                }
+                return req;
+            });
 
             try {
                 const response = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:batchEmbedContents?key=${apiKey}`, {
@@ -265,17 +300,32 @@ const embedTexts = async (texts) => {
                 }
                 results.push(...embeddings.map((emb) => emb.values));
             } catch (batchError) {
-                console.warn(`[Embedding API] Gemini batch request failed. Falling back to individual requests. Error: ${batchError.message}`);
-                // Fallback to sequential individual embeds for this subBatch
-                for (const text of subBatch) {
-                    try {
-                        const emb = await embedText(text);
-                        results.push(emb);
-                    } catch (singleError) {
-                        console.error(`[Embedding API] Individual embedding failed. Using mock fallback vector.`);
-                        results.push(getMockEmbedding(text));
+                // If it is a network error or authentication/bad-request error, sequential requests will also fail.
+                // Fallback immediately to mock embeddings to prevent timing out.
+                const isNetworkOrAuthError = isPermanentNetworkError(batchError) ||
+                                            batchError.message.includes("API key") ||
+                                            batchError.message.includes("Forbidden") ||
+                                            batchError.message.includes("API_KEY") ||
+                                            batchError.message.includes("Bad Request") ||
+                                            batchError.message.includes("status 400") ||
+                                            batchError.message.includes("status 403");
+
+                if (isNetworkOrAuthError) {
+                    console.warn(`[Embedding API] Gemini batch request failed due to network/auth issue. Falling back to mock embeddings immediately. Error: ${batchError.message}`);
+                    results.push(...subBatch.map((text) => getMockEmbedding(text)));
+                } else {
+                    console.warn(`[Embedding API] Gemini batch request failed. Falling back to individual requests. Error: ${batchError.message}`);
+                    // Fallback to sequential individual embeds for this subBatch
+                    for (const text of subBatch) {
+                        try {
+                            const emb = await embedText(text);
+                            results.push(emb);
+                        } catch (singleError) {
+                            console.error(`[Embedding API] Individual embedding failed. Using mock fallback vector.`);
+                            results.push(getMockEmbedding(text));
+                        }
+                        await sleep(100);
                     }
-                    await sleep(100);
                 }
             }
         }

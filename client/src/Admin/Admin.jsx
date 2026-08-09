@@ -983,11 +983,11 @@ function Admin({ mode = "auto" }) {
         }
     }
 
-    async function deleteBatch(fileIds, folderValues) {
+    async function deleteBatch(fileIds, folderValues, skipConfirm = false) {
         if (fileIds.length === 0 && folderValues.length === 0) return;
 
         const totalItemsCount = fileIds.length + folderValues.length;
-        if (!window.confirm(`Are you sure you want to delete ${totalItemsCount} selected item(s)?`)) {
+        if (!skipConfirm && !window.confirm(`Are you sure you want to delete ${totalItemsCount} selected item(s)?`)) {
             return;
         }
 
@@ -1324,15 +1324,19 @@ function Admin({ mode = "auto" }) {
         }
     }
 
-    function handleCreateFolder(parentVal = null) {
+    function handleCreateFolder(parentVal = null, folderNameInput = null) {
         const parentString = typeof parentVal === "string" ? parentVal : null;
         const targetParent = parentString !== null ? parentString : (activeFolder && activeFolder !== "root" ? activeFolder : null);
         const parentFolder = folders.find(f => f.value === targetParent);
-        const folderName = window.prompt(
-            parentFolder
-                ? `New subfolder name inside "${parentFolder.label}"`
-                : "New root folder name"
-        );
+        
+        let folderName = folderNameInput;
+        if (folderName === null) {
+            folderName = window.prompt(
+                parentFolder
+                    ? `New subfolder name inside "${parentFolder.label}"`
+                    : "New root folder name"
+            );
+        }
 
         if (!folderName) {
             return;
@@ -1363,24 +1367,27 @@ function Admin({ mode = "auto" }) {
         setNotice(`Folder ${folderName.trim()} created.`);
     }
 
-    async function handleRenameFolder(folderValue) {
+    async function handleRenameFolder(folderValue, newName) {
         const folder = folders.find((f) => f.value === folderValue);
         if (!folder) return;
 
-        const newName = window.prompt("Rename folder to:", folder.label);
-        if (!newName || newName.trim() === "" || newName.trim() === folder.label) return;
+        let name = newName;
+        if (!name) {
+            name = window.prompt("Rename folder to:", folder.label);
+        }
+        if (!name || name.trim() === "" || name.trim() === folder.label) return;
 
         const nextFolders = sanitizeFolders(folders.map((f) => {
             if (f.value === folderValue) {
-                return { ...f, label: newName.trim() };
+                return { ...f, label: name.trim() };
             }
             return f;
         }));
 
         setFolders(nextFolders);
         window.localStorage.setItem("edumate-admin-folders", JSON.stringify(nextFolders));
-        pushToUndo({ type: "renameFolder", folderValue, oldLabel: folder.label, newLabel: newName.trim(), label: `Rename folder to "${newName.trim()}"` });
-        setNotice(`Folder renamed to ${newName.trim()}.`);
+        pushToUndo({ type: "renameFolder", folderValue, oldLabel: folder.label, newLabel: name.trim(), label: `Rename folder to "${name.trim()}"` });
+        setNotice(`Folder renamed to ${name.trim()}.`);
     }
 
     async function handleDeleteFolder(folderValue) {

@@ -667,3 +667,285 @@
     background: rgba(242, 163, 11, 0.25) !important;
 }
 
+/* Custom Rename Folder Modal */
+.rename-folder-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(4, 7, 12, 0.8);
+    backdrop-filter: blur(8px);
+    z-index: 10000;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    animation: fadeIn 0.2s ease-out;
+}
+
+.rename-folder-modal-card {
+    width: 400px;
+    max-width: 90%;
+    background: #0d1520;
+    border: 1px solid var(--admin-line);
+    border-radius: 14px;
+    box-shadow: 0 24px 38px 3px rgba(0, 0, 0, 0.6);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    animation: scaleUp 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.rename-folder-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--admin-line);
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.rename-folder-modal-header h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--admin-gold);
+}
+
+.rename-folder-modal-close-btn {
+    background: transparent;
+    border: none;
+    color: var(--admin-muted);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 6px;
+    transition: all 0.2s;
+}
+
+.rename-folder-modal-close-btn:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: #fff;
+}
+
+.rename-folder-modal-body {
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.rename-folder-modal-body label {
+    font-size: 12px;
+    color: var(--admin-muted);
+}
+
+.rename-folder-modal-body input {
+    background: #060a0f;
+    border: 1px solid var(--admin-line);
+    color: #fff;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.rename-folder-modal-body input:focus {
+    border-color: var(--admin-gold);
+}
+
+.rename-folder-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 14px 20px;
+    border-top: 1px solid var(--admin-line);
+    background: rgba(255, 255, 255, 0.01);
+}
+
+.rename-folder-modal-footer button {
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 500;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.rename-folder-modal-footer .cancel-btn {
+    background: transparent;
+    border: 1px solid var(--admin-line);
+    color: var(--admin-text);
+}
+
+.rename-folder-modal-footer .cancel-btn:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: var(--admin-text);
+}
+
+.rename-folder-modal-footer .submit-btn {
+    background: var(--admin-gold);
+    color: #000;
+    border: 1px solid var(--admin-gold);
+    font-weight: 600;
+}
+
+.rename-folder-modal-footer .submit-btn:hover {
+    background: #ffc107;
+    border-color: #ffc107;
+}
+
+/* Fullscreen Drag Drop Overlay */
+.fullscreen-drag-drop-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(4, 7, 12, 0.85);
+    backdrop-filter: blur(10px);
+    z-index: 10000;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+}
+
+.fullscreen-drag-drop-overlay.active {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.drag-drop-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    border: 3px dashed var(--admin-gold);
+    border-radius: 20px;
+    padding: 40px 60px;
+    background: rgba(242, 163, 11, 0.04);
+    color: #fff;
+    text-align: center;
+    box-shadow: 0 0 30px rgba(242, 163, 11, 0.15);
+    animation: pulseGlow 2s infinite ease-in-out;
+}
+
+.drag-drop-container h2 {
+    margin: 0;
+    color: var(--admin-gold);
+    font-size: 24px;
+    font-weight: 600;
+}
+
+.drag-drop-container p {
+    margin: 0;
+    color: var(--admin-muted);
+    font-size: 14px;
+}
+
+.pulse-icon {
+    color: var(--admin-gold);
+    animation: iconBounce 1s infinite alternate ease-in-out;
+}
+
+/* Scrollable Selected Files list in Upload Dialog */
+.selected-files-header {
+    font-size: 12px;
+    color: var(--admin-gold);
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.selected-files-list {
+    max-height: 140px;
+    overflow-y: auto;
+    border: 1px solid var(--admin-line);
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.2);
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.selected-file-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 10px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.selected-file-item .file-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    flex: 1;
+}
+
+.selected-file-item .file-icon {
+    color: var(--admin-gold);
+    flex-shrink: 0;
+}
+
+.selected-file-item .file-name {
+    font-size: 12px;
+    color: var(--admin-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.selected-file-item .file-size {
+    font-size: 10px;
+    color: var(--admin-muted);
+    margin-left: 8px;
+    flex-shrink: 0;
+}
+
+.selected-file-item .remove-file-btn {
+    background: transparent;
+    border: none;
+    color: var(--admin-muted);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    margin-left: 8px;
+}
+
+.selected-file-item .remove-file-btn:hover {
+    background: rgba(255, 82, 82, 0.15);
+    color: #ff5252;
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes scaleUp {
+    from { transform: scale(0.95); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+}
+
+@keyframes pulseGlow {
+    0%, 100% { box-shadow: 0 0 30px rgba(242, 163, 11, 0.15); }
+    50% { box-shadow: 0 0 45px rgba(242, 163, 11, 0.3); }
+}
+
+@keyframes iconBounce {
+    from { transform: translateY(0); }
+    to { transform: translateY(-8px); }
+}
+

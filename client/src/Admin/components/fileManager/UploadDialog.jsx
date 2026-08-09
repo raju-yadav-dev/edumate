@@ -1,5 +1,14 @@
 import React, { useRef } from "react";
-import { UploadCloud, File, Folder } from "lucide-react";
+import { UploadCloud, File, Folder, X, Trash2 } from "lucide-react";
+
+const formatBytes = (bytes, decimals = 2) => {
+    if (!bytes) return "0 Bytes";
+    const k = 1024;
+    const dm = decimals < 0 ? 0 : decimals;
+    const sizes = ["Bytes", "KB", "MB", "GB", "TB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + " " + sizes[i];
+};
 
 function UploadDialog({
     upload,
@@ -29,24 +38,60 @@ function UploadDialog({
         });
     };
 
-    return (
-        <form className="upload-area" onSubmit={onSubmit}>
-            <div
-                className={isDropActive ? "upload-dropzone active" : "upload-dropzone"}
+    const handleRemoveFile = (indexToRemove) => {
+        setUpload(curr => {
+            const files = (curr.files || []).filter((_, idx) => idx !== indexToRemove);
+            return {
+                ...curr,
+                files,
+                file: files[0] || null
+            };
+        });
+    };
+
+    const filesList = upload.files && upload.files.length > 0 ? upload.files : (upload.file ? [upload.file] : []);
+
+    // 1. Fullscreen Drag-Drop Overlay
+    if (isDropActive) {
+        return (
+            <div 
+                className="fullscreen-drag-drop-overlay active"
                 onDragOver={onDragOver}
                 onDragLeave={onDragLeave}
                 onDrop={onDrop}
-                onClick={() => fileInputRef.current?.click()}
-                style={{ cursor: "pointer" }}
             >
-                <UploadCloud size={40} style={{ marginBottom: "10px" }} />
-                <span>
-                    <strong>Drag files or folders here</strong>
-                    <small>
-                        {upload.files && upload.files.length > 0 
-                            ? `${upload.files.length} item(s) selected` 
-                            : "Supports PDF, Word, Excel, PowerPoint, ZIP, Images, and entire Folders"
-                        }
+                <div className="drag-drop-container">
+                    <UploadCloud size={64} className="pulse-icon" />
+                    <h2>Drop Files & Folders Here</h2>
+                    <p>Release to select items for upload</p>
+                </div>
+            </div>
+        );
+    }
+
+    // 2. Normal Metadata / selected files form
+    return (
+        <form className="upload-area" onSubmit={onSubmit} onClick={(e) => e.stopPropagation()}>
+            <div className="rename-folder-modal-header" style={{ padding: "0 0 12px 0", borderBottom: "1px solid var(--admin-line)", marginBottom: "8px" }}>
+                <h3 style={{ margin: 0, display: "flex", alignItems: "center", gap: "8px", color: "var(--admin-gold)" }}>
+                    <UploadCloud size={18} />
+                    Upload Documents
+                </h3>
+                <button type="button" className="rename-folder-modal-close-btn" onClick={handleCancel} disabled={busy}>
+                    <X size={16} />
+                </button>
+            </div>
+
+            <div
+                className="upload-dropzone"
+                onClick={() => fileInputRef.current?.click()}
+                style={{ cursor: "pointer", minHeight: "100px", flexDirection: "column", justifyContent: "center", borderStyle: "dashed" }}
+            >
+                <UploadCloud size={32} style={{ marginBottom: "6px" }} />
+                <span style={{ textAlign: "center" }}>
+                    <strong>Click to browse or drag new files here</strong>
+                    <small style={{ display: "block", marginTop: "4px" }}>
+                        Supports PDF, DOCX, XLSX, PPTX, TXT, MD, ZIP, and entire folders
                     </small>
                 </span>
                 
@@ -72,9 +117,7 @@ function UploadDialog({
                     directory=""
                     multiple
                     onChange={(event) => {
-                        // In webkitdirectory, the files retain relative path in file.webkitRelativePath
                         const fileList = Array.from(event.target.files || []).map(file => {
-                            // Ensure relativePath is attached
                             file.relativePath = file.webkitRelativePath || file.name;
                             return file;
                         });
@@ -92,7 +135,7 @@ function UploadDialog({
                         fileInputRef.current?.click();
                     }}
                     style={{
-                        background: "rgba(255,255,255,0.04)",
+                        background: "rgba(255,255,255,0.03)",
                         border: "1px solid var(--admin-line)",
                         color: "#fff",
                         padding: "6px 12px",
@@ -105,7 +148,7 @@ function UploadDialog({
                     }}
                 >
                     <File size={14} />
-                    Choose Files
+                    Add Files
                 </button>
                 <button
                     type="button"
@@ -115,7 +158,7 @@ function UploadDialog({
                         folderInputRef.current?.click();
                     }}
                     style={{
-                        background: "rgba(255,255,255,0.04)",
+                        background: "rgba(255,255,255,0.03)",
                         border: "1px solid var(--admin-line)",
                         color: "#fff",
                         padding: "6px 12px",
@@ -128,36 +171,84 @@ function UploadDialog({
                     }}
                 >
                     <Folder size={14} />
-                    Choose Folder
+                    Add Folder
                 </button>
             </div>
 
-            <div className="upload-meta-grid">
-                <input 
-                    type="text" 
-                    placeholder="Institution (Optional)" 
-                    value={upload.institution || ""} 
-                    onChange={(event) => setUpload((current) => ({ ...current, institution: event.target.value }))} 
-                />
-                <input 
-                    type="text" 
-                    placeholder="Department (Optional)" 
-                    value={upload.department || ""} 
-                    onChange={(event) => setUpload((current) => ({ ...current, department: event.target.value }))} 
-                />
-                <input 
-                    type="number" 
-                    min="1" 
-                    placeholder="Version" 
-                    value={upload.version || "1"} 
-                    onChange={(event) => setUpload((current) => ({ ...current, version: event.target.value }))} 
-                />
-                <input 
-                    type="text" 
-                    placeholder="Tags / Notes (Optional)" 
-                    value={upload.notes || ""} 
-                    onChange={(event) => setUpload((current) => ({ ...current, notes: event.target.value }))} 
-                />
+            {/* Selected files preview list */}
+            {filesList.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                    <div className="selected-files-header">Selected Files ({filesList.length})</div>
+                    <div className="selected-files-list">
+                        {filesList.map((file, idx) => (
+                            <div key={idx} className="selected-file-item">
+                                <div className="file-info">
+                                    <File size={14} className="file-icon" />
+                                    <span className="file-name" title={file.relativePath || file.name}>
+                                        {file.relativePath || file.name}
+                                    </span>
+                                    <span className="file-size">{formatBytes(file.size)}</span>
+                                </div>
+                                <button 
+                                    type="button" 
+                                    className="remove-file-btn"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleRemoveFile(idx);
+                                    }}
+                                    title="Remove file"
+                                    disabled={busy}
+                                >
+                                    <Trash2 size={13} />
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            <div className="upload-meta-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                    <label style={{ fontSize: "11px", color: "var(--admin-muted)" }}>Institution (Optional)</label>
+                    <input 
+                        type="text" 
+                        placeholder="Institution" 
+                        value={upload.institution || ""} 
+                        onChange={(event) => setUpload((current) => ({ ...current, institution: event.target.value }))} 
+                        style={{ background: "#060a0f", border: "1px solid var(--admin-line)", color: "#fff" }}
+                    />
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                    <label style={{ fontSize: "11px", color: "var(--admin-muted)" }}>Department (Optional)</label>
+                    <input 
+                        type="text" 
+                        placeholder="Department" 
+                        value={upload.department || ""} 
+                        onChange={(event) => setUpload((current) => ({ ...current, department: event.target.value }))} 
+                        style={{ background: "#060a0f", border: "1px solid var(--admin-line)", color: "#fff" }}
+                    />
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                    <label style={{ fontSize: "11px", color: "var(--admin-muted)" }}>Version</label>
+                    <input 
+                        type="number" 
+                        min="1" 
+                        placeholder="Version" 
+                        value={upload.version || "1"} 
+                        onChange={(event) => setUpload((current) => ({ ...current, version: event.target.value }))} 
+                        style={{ background: "#060a0f", border: "1px solid var(--admin-line)", color: "#fff" }}
+                    />
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                    <label style={{ fontSize: "11px", color: "var(--admin-muted)" }}>Notes (Optional)</label>
+                    <input 
+                        type="text" 
+                        placeholder="Tags / Notes" 
+                        value={upload.notes || ""} 
+                        onChange={(event) => setUpload((current) => ({ ...current, notes: event.target.value }))} 
+                        style={{ background: "#060a0f", border: "1px solid var(--admin-line)", color: "#fff" }}
+                    />
+                </div>
             </div>
             
             {uploadProgress !== null && (
@@ -167,11 +258,24 @@ function UploadDialog({
                 </div>
             )}
 
-            <div className="upload-actions">
+            <div className="upload-actions" style={{ borderTop: "1px solid var(--admin-line)", paddingTop: "12px" }}>
                 <button type="button" className="upload-cancel" onClick={handleCancel} disabled={busy}>
                     Cancel
                 </button>
-                <button type="submit" className="upload-submit" disabled={busy || (!upload.file && (!upload.files || upload.files.length === 0))}>
+                <button 
+                    type="submit" 
+                    className="upload-submit" 
+                    disabled={busy || filesList.length === 0}
+                    style={{
+                        background: "var(--admin-gold)",
+                        color: "#000",
+                        fontWeight: "600",
+                        padding: "8px 16px",
+                        borderRadius: "8px",
+                        border: "none",
+                        cursor: "pointer"
+                    }}
+                >
                     {busy ? "Queueing..." : "Upload to Explorer"}
                 </button>
             </div>

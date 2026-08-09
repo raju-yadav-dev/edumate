@@ -19,7 +19,8 @@ import {
     backupAdminDatabase,
     restoreAdminBackup,
     cleanupUnusedChunks,
-    rebuildAllEmbeddings
+    rebuildAllEmbeddings,
+    bulkReindexAdminDocuments
 } from "../../../services/adminService";
 import { recrawlAllCrawlerJobs } from "../../../crawler/crawlerService";
 
@@ -228,9 +229,20 @@ export default function ToolActions({ onOperationComplete, documents = [], onRef
             }
         } else if (tool.id === "generate-embeddings" && documents.length > 0) {
             try {
-                const firstDocId = documents[0]._id || documents[0].id;
-                if (firstDocId && !firstDocId.startsWith("demo-")) {
-                    await rebuildAdminDocumentEmbeddings(firstDocId);
+                // Find all documents that are not indexed (pending or failed)
+                const unindexedDocs = documents.filter(
+                    (d) => d.embeddingStatus !== "indexed"
+                );
+                
+                // If there are unindexed documents, reindex them. Otherwise, fallback to reindexing all documents.
+                const docsToReindex = unindexedDocs.length > 0 ? unindexedDocs : documents;
+                
+                const ids = docsToReindex
+                    .map((d) => d._id || d.id)
+                    .filter((id) => id && !id.startsWith("demo-"));
+                
+                if (ids.length > 0) {
+                    await bulkReindexAdminDocuments({ ids });
                 }
             } catch (err) {
                 console.log("Embeddings API status:", err.message);

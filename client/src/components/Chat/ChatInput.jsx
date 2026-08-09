@@ -1,8 +1,29 @@
 import { useEffect, useRef, useState } from "react";
 
-import { FiArrowRight, FiPaperclip, FiSmile, FiUpload, FiX, FiSquare, FiMic, FiVolume2 } from "react-icons/fi";
+import { FiArrowRight, FiPaperclip, FiX, FiSquare, FiMic } from "react-icons/fi";
 
 import FilePreview from "./FilePreview";
+
+function WaveformIcon(props) {
+    return (
+        <svg 
+            stroke="currentColor" 
+            fill="currentColor" 
+            strokeWidth="0" 
+            viewBox="0 0 24 24" 
+            height="1em" 
+            width="1em" 
+            xmlns="http://www.w3.org/2000/svg"
+            {...props}
+        >
+            <rect x="2" y="6" width="2.5" height="12" rx="1.25" />
+            <rect x="6.5" y="2" width="2.5" height="20" rx="1.25" />
+            <rect x="11" y="8" width="2.5" height="8" rx="1.25" />
+            <rect x="15.5" y="2" width="2.5" height="20" rx="1.25" />
+            <rect x="20" y="6" width="2.5" height="12" rx="1.25" />
+        </svg>
+    );
+}
 
 function formatSize(size) {
     if (!size) {
@@ -38,7 +59,6 @@ function ChatInput({
     const [text, setText] = useState(value || "");
     const textareaRef = useRef(null);
     const attachRef = useRef(null);
-    const imageRef = useRef(null);
 
     const [prevValue, setPrevValue] = useState(value);
 
@@ -82,21 +102,7 @@ function ChatInput({
         }
     };
 
-    const handleAddEmoji = () => {
-        setText((prev) => `${prev}${prev ? " " : ""}😊`);
-    };
-
     const handleAttachmentChange = (event) => {
-        const files = Array.from(event.target.files || []);
-
-        if (files.length) {
-            onAttachFiles(files);
-        }
-
-        event.target.value = "";
-    };
-
-    const handleImageChange = (event) => {
         const files = Array.from(event.target.files || []);
 
         if (files.length) {
@@ -130,14 +136,6 @@ function ChatInput({
                     <div className="edu-chat-composer-toolbar">
                         <button type="button" className="edu-chat-icon-button" onClick={() => attachRef.current?.click()} aria-label="Attach file">
                             <FiPaperclip />
-                        </button>
-
-                        <button type="button" className="edu-chat-icon-button" onClick={() => imageRef.current?.click()} aria-label="Upload image">
-                            <FiUpload />
-                        </button>
-
-                        <button type="button" className="edu-chat-icon-button" onClick={handleAddEmoji} aria-label="Insert emoji">
-                            <FiSmile />
                         </button>
 
                         {text && (
@@ -185,7 +183,7 @@ function ChatInput({
                                 ...((typeof window !== "undefined" && !(window.SpeechRecognition || window.webkitSpeechRecognition)) ? { opacity: 0.4, cursor: "not-allowed" } : {})
                             }}
                         >
-                            <FiVolume2 />
+                            <WaveformIcon />
                         </button>
                     </div>
 
@@ -219,7 +217,6 @@ function ChatInput({
             </div>
 
             <input ref={attachRef} type="file" hidden multiple onChange={handleAttachmentChange} accept=".pdf,.docx,.doc,.txt,.md,.markdown" />
-            <input ref={imageRef} type="file" hidden multiple onChange={handleImageChange} accept="image/*" />
         </form>
     );
 }

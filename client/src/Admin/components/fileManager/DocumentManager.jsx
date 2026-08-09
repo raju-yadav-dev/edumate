@@ -18,7 +18,8 @@ import {
     Pause,
     Trash,
     Loader2,
-    FolderMinus
+    FolderMinus,
+    X
 } from "lucide-react";
 import { useMemo, useState, useEffect, useCallback, useRef } from "react";
 
@@ -43,6 +44,10 @@ function DocumentManager(props) {
     
     // Properties Modal State
     const [propertiesItem, setPropertiesItem] = useState(null);
+
+    // Rename Folder Modal State
+    const [renameFolderItem, setRenameFolderItem] = useState(null);
+    const [newFolderName, setNewFolderName] = useState("");
 
     // Drag and Drop active indicator state
     const [isDraggingActive, setIsDraggingActive] = useState(false);
@@ -210,6 +215,14 @@ function DocumentManager(props) {
         setSelectionStart(null);
     }, [props.activeFolder]);
 
+    const handleOpenRenameFolderModal = useCallback((folderValue) => {
+        const folder = props.folders.find(f => f.value === folderValue);
+        if (folder) {
+            setRenameFolderItem(folder);
+            setNewFolderName(folder.label);
+        }
+    }, [props.folders]);
+
     const latestStateRef = useRef();
     latestStateRef.current = {
         listItems,
@@ -225,7 +238,7 @@ function DocumentManager(props) {
         onUndo: props.onUndo,
         onRedo: props.onRedo,
         onCreateFolder: props.onCreateFolder,
-        onRenameFolder: props.onRenameFolder,
+        onRenameFolder: handleOpenRenameFolderModal,
         onRename: props.onRename,
         onBulkDelete: props.onBulkDelete,
         onOpenDocument: props.onOpenDocument,
@@ -448,6 +461,8 @@ function DocumentManager(props) {
         return () => window.removeEventListener("keydown", handleKeyDown);
     }, []);
 
+
+
     function handleSelectFolder(value) {
         setSingleDocumentFilterId(null);
         setFocusedIndex(null);
@@ -496,6 +511,65 @@ function DocumentManager(props) {
                     <h2>Document Management</h2>
                     <p>Upload, organize and manage your files</p>
                 </div>
+
+                {/* Background Jobs Widget */}
+                {props.jobs && (
+                    <div className="jobs-status-widget header-jobs-widget" style={{ padding: "4px 8px", margin: 0, position: "relative" }}>
+                        <div className="jobs-widget-header" onClick={() => setIsJobsOpen(!isJobsOpen)} style={{ padding: "4px 6px" }}>
+                            <span>Background Indexing</span>
+                            <span style={{ fontSize: "11px", color: "var(--admin-gold)", marginLeft: "8px" }}>
+                                {props.jobs.running?.length > 0 ? "⏳ Running" : "💤 Idle"}
+                            </span>
+                        </div>
+                        {isJobsOpen && (
+                            <div className="jobs-widget-body" style={{
+                                position: "absolute",
+                                background: "var(--admin-bg-dark, #0b131a)",
+                                border: "1px solid var(--admin-line)",
+                                borderRadius: "6px",
+                                padding: "8px 10px",
+                                zIndex: 100,
+                                minWidth: "180px",
+                                boxShadow: "0 4px 12px rgba(0,0,0,0.5)",
+                                right: 0,
+                                marginTop: "6px"
+                            }}>
+                                <div className="job-item">
+                                    <span>Completed:</span>
+                                    <strong>{props.jobs.completedCount} / {props.jobs.totalCount}</strong>
+                                </div>
+                                {props.jobs.queue?.length > 0 && (
+                                    <div className="job-item">
+                                        <span>In Queue:</span>
+                                        <strong>{props.jobs.queue.length} file(s)</strong>
+                                    </div>
+                                )}
+                                {props.jobs.running?.length > 0 && (
+                                    <div className="job-item">
+                                        <span>Processing:</span>
+                                        <strong>{props.jobs.running.length} file(s)</strong>
+                                    </div>
+                                )}
+                                {props.jobs.failed?.length > 0 && (
+                                    <div className="job-item failed">
+                                        <span>Failed Index:</span>
+                                        <strong>{props.jobs.failed.length} file(s)</strong>
+                                    </div>
+                                )}
+                                {props.jobs.failed?.length > 0 && (
+                                    <button
+                                        type="button"
+                                        className="jobs-retry-all-btn"
+                                        onClick={props.onRetryFailedIndexing}
+                                        style={{ width: "100%" }}
+                                    >
+                                        Retry All Failed
+                                    </button>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 <div className="toolbar-actions">
 
@@ -645,54 +719,10 @@ function DocumentManager(props) {
                         {...props}
                         onSelectFolder={handleSelectFolder}
                         onSelectTreeDoc={handleSelectTreeDoc}
+                        onRenameFolder={handleOpenRenameFolderModal}
                     />
 
-                    {/* Background Jobs Widget */}
-                    {props.jobs && (
-                        <div className="jobs-status-widget" style={{ padding: "8px", margin: "10px" }}>
-                            <div className="jobs-widget-header" onClick={() => setIsJobsOpen(!isJobsOpen)}>
-                                <span>Background Indexing</span>
-                                <span style={{ fontSize: "11px", color: "var(--admin-gold)" }}>
-                                    {props.jobs.running?.length > 0 ? "⏳ Running" : "💤 Idle"}
-                                </span>
-                            </div>
-                            {isJobsOpen && (
-                                <div className="jobs-widget-body">
-                                    <div className="job-item">
-                                        <span>Completed:</span>
-                                        <strong>{props.jobs.completedCount} / {props.jobs.totalCount}</strong>
-                                    </div>
-                                    {props.jobs.queue?.length > 0 && (
-                                        <div className="job-item">
-                                            <span>In Queue:</span>
-                                            <strong>{props.jobs.queue.length} file(s)</strong>
-                                        </div>
-                                    )}
-                                    {props.jobs.running?.length > 0 && (
-                                        <div className="job-item">
-                                            <span>Processing:</span>
-                                            <strong>{props.jobs.running.length} file(s)</strong>
-                                        </div>
-                                    )}
-                                    {props.jobs.failed?.length > 0 && (
-                                        <div className="job-item failed">
-                                            <span>Failed Index:</span>
-                                            <strong>{props.jobs.failed.length} file(s)</strong>
-                                        </div>
-                                    )}
-                                    {props.jobs.failed?.length > 0 && (
-                                        <button
-                                            type="button"
-                                            className="jobs-retry-all-btn"
-                                            onClick={props.onRetryFailedIndexing}
-                                        >
-                                            Retry All Failed
-                                        </button>
-                                    )}
-                                </div>
-                            )}
-                        </div>
-                    )}
+
 
                 </aside>
 
@@ -869,6 +899,7 @@ function DocumentManager(props) {
                         onProperties={(item) => setPropertiesItem(item)}
                         onDuplicate={props.onDuplicate}
                         onReindexFolder={props.onReindexFolder}
+                        onRenameFolder={handleOpenRenameFolderModal}
                     />
 
                     {/* Footer */}
@@ -985,7 +1016,7 @@ function DocumentManager(props) {
                 onCut={props.onCut}
                 onPaste={props.onPaste}
                 onSelectFolder={handleSelectFolder}
-                onRenameFolder={props.onRenameFolder}
+                onRenameFolder={handleOpenRenameFolderModal}
                 onDeleteFolder={props.onDeleteFolder}
                 onMoveFolder={props.onMoveFolder}
                 onDuplicate={props.onDuplicate}
@@ -994,6 +1025,47 @@ function DocumentManager(props) {
                 onProperties={(item) => setPropertiesItem(item)}
                 selectedCount={props.selectedIds.length}
             />
+
+            {/* Rename Folder Modal Dialog */}
+            {renameFolderItem && (
+                <div className="rename-folder-modal-overlay" onClick={() => setRenameFolderItem(null)}>
+                    <div className="rename-folder-modal-card" onClick={(e) => e.stopPropagation()}>
+                        <header className="rename-folder-modal-header">
+                            <h3>Rename Folder</h3>
+                            <button className="rename-folder-modal-close-btn" onClick={() => setRenameFolderItem(null)}>
+                                <X size={16} />
+                            </button>
+                        </header>
+                        <form onSubmit={(e) => {
+                            e.preventDefault();
+                            if (newFolderName.trim() && newFolderName.trim() !== renameFolderItem.label) {
+                                props.onRenameFolder(renameFolderItem.value, newFolderName.trim());
+                            }
+                            setRenameFolderItem(null);
+                        }}>
+                            <div className="rename-folder-modal-body">
+                                <label>Folder Name</label>
+                                <input
+                                    type="text"
+                                    value={newFolderName}
+                                    onChange={(e) => setNewFolderName(e.target.value)}
+                                    autoFocus
+                                    placeholder="Enter new folder name"
+                                    required
+                                />
+                            </div>
+                            <footer className="rename-folder-modal-footer">
+                                <button type="button" className="cancel-btn" onClick={() => setRenameFolderItem(null)}>
+                                    Cancel
+                                </button>
+                                <button type="submit" className="submit-btn">
+                                    Rename
+                                </button>
+                            </footer>
+                        </form>
+                    </div>
+                </div>
+            )}
 
         </section>
     );

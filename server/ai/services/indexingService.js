@@ -120,7 +120,7 @@ const indexDocumentBackground = async (documentId, fileBuffer = null) => {
     document.metadata = {
         ...(document.metadata || {}),
         lastIndexAttemptAt: null,
-        indexAttempts: (document.metadata?.indexAttempts || 0)
+        indexAttempts: 0
     };
     await document.save();
 
@@ -167,152 +167,163 @@ const runIndexingJob = async (documentId) => {
     const fileBuffer = bufferCache.get(cacheKey);
     bufferCache.delete(cacheKey);
 
-    let attempts = Number(document.metadata?.indexAttempts || 0);
-    const maxAttempts = 3;
+    try {
+        document.embeddingStatus = "processing";
+        document.metadata = {
+            ...(document.metadata || {}),
+            indexAttempts: (document.metadata?.indexAttempts || 0) + 1,
+            lastIndexAttemptAt: new Date().toISOString()
+        };
+        await document.save();
 
-    for (; attempts < maxAttempts; attempts += 1) {
-        try {
-            document.embeddingStatus = "processing";
-            document.metadata = {
-                ...(document.metadata || {}),
-                indexAttempts: attempts,
-                lastIndexAttemptAt: new Date().toISOString()
-            };
-            await document.save();
-
-            let buffer = fileBuffer;
-            if (!buffer) {
-                buffer = await withTimeout(downloadFromSupabase(document.storagePath), 35000, "Supabase file download timed out (35s)");
-            }
-
-            const ext = path.extname(document.originalName || "").toLowerCase();
-            const isPdf = document.mimeType === "application/pdf" || ext === ".pdf";
-            if (!isPdf && document.mimeType !== "application/pdf") {
-                const extracted = await withTimeout(UniversalExtractor.extract(buffer, document.originalName), 45000, "Document extraction timed out (45s)");
-                const splitter = new RecursiveCharacterTextSplitter();
-                const chunks = splitter.splitText(extracted.text || "");
-                await deleteDocumentIndex(documentId);
-                if (chunks.length > 0) {
-                    const embeddings = await withTimeout(embeddingService.getChunksEmbeddings(chunks), 50000, "Embedding generation timed out (50s)");
-                    const points = [];
-                    const timestamp = new Date().toISOString();
-                    chunks.forEach((chunk, index) => {
-                        const pointId = crypto.createHash("sha256").update(`${documentId}:${index}:${chunk}`).digest("hex");
-                        const meta = metadataBuilder.buildMetadata({
-                            documentId: String(documentId),
-                            originalName: document.originalName,
-                            pageNumber: 1,
-                            category: document.category,
-                            department: document.department,
-                            institution: document.institution,
-                            uploadedBy: String(document.createdBy || "")
-                        });
-                        points.push({
-                            id: pointId,
-                            vector: embeddings[index],
-                            payload: {
-                                id: pointId,
-                                documentId: meta.documentId,
-                                content: chunk,
-                                originalName: meta.originalName,
-                                pageNumber: meta.pageNumber,
-                                category: meta.category,
-                                department: meta.department,
-                                institution: meta.institution,
-                                uploadedBy: meta.uploadedBy,
-                                chunkIndex: index,
-                                createdAt: timestamp,
-                                contentHash: document.contentHash || document.checksum
-                            }
-                        });
-                    });
-                    await withTimeout(client.upsert(collectionName, { wait: true, points }), 30000, "Qdrant vector database upload timed out (30s)");
-                }
-                document.embeddingStatus = "indexed";
-                document.chunkCount = chunks.length;
-                document.metadata = {
-                    ...(document.metadata || {}),
-                    pages: 1,
-                    indexedAt: new Date().toISOString()
-                };
-                await document.save();
-                return;
-            }
-
-            const splitter = new RecursiveCharacterTextSplitter();
-            const { chunks, pageCount, requiresOcr } = await buildChunks(buffer, document.originalName, document.mimeType, splitter);
-            if (requiresOcr) {
-                document.embeddingStatus = "not_required";
-                document.metadata = {
-                    ...(document.metadata || {}),
-                    requiresOcr: true,
-                    notes: (document.metadata?.notes || "") + "\n[Image-only PDF. Indexing skipped.]"
-                };
-                await document.save();
-                return;
-            }
-
-            await deleteDocumentIndex(documentId);
-            if (chunks.length > 0) {
-                const embeddings = await withTimeout(embeddingService.getChunksEmbeddings(chunks.map((chunk) => chunk.content)), 50000, "Embedding generation timed out (50s)");
-                const points = [];
-                const timestamp = new Date().toISOString();
-                chunks.forEach((chunk, index) => {
-                    const pointId = crypto.createHash("sha256").update(`${documentId}:${index}:${chunk.content}`).digest("hex");
-                    const meta = metadataBuilder.buildMetadata({
-                        documentId: String(documentId),
-                        originalName: document.originalName,
-                        pageNumber: chunk.pageNumber,
-                        category: document.category,
-                        department: document.department,
-                        institution: document.institution,
-                        uploadedBy: String(document.createdBy || "")
-                    });
-                    points.push({
-                        id: pointId,
-                        vector: embeddings[index],
-                        payload: {
-                            id: pointId,
-                            documentId: meta.documentId,
-                            content: chunk.content,
-                            originalName: meta.originalName,
-                            pageNumber: meta.pageNumber,
-                            category: meta.category,
-                            department: meta.department,
-                            institution: meta.institution,
-                            uploadedBy: meta.uploadedBy,
-                            chunkIndex: index,
-                            createdAt: timestamp,
-                            contentHash: document.contentHash || document.checksum
-                        }
-                    });
-                });
-                await withTimeout(client.upsert(collectionName, { wait: true, points }), 30000, "Qdrant vector database upload timed out (30s)");
-            }
-
-            document.embeddingStatus = "indexed";
-            document.chunkCount = chunks.length;
-            document.metadata = {
-                ...(document.metadata || {}),
-                pages: pageCount,
-                indexedAt: new Date().toISOString()
-            };
-            await document.save();
-            return;
-        } catch (err) {
-            console.error(`indexingService Background Indexing failed for ${documentId} (attempt ${attempts + 1}/${maxAttempts}):`, err);
-            if (attempts + 1 >= maxAttempts) {
-                document.embeddingStatus = "failed";
-                document.metadata = {
-                    ...(document.metadata || {}),
-                    error: err.message,
-                    lastErrorAt: new Date().toISOString(),
-                    notes: (document.metadata?.notes || "") + `\n[Index Error: ${err.message}]`
-                };
-                await document.save();
-                return;
-            }
+        let buffer = fileBuffer;
+        if (!buffer) {
+            buffer = await withTimeout(downloadFromSupabase(document.storagePath), 35000, "Supabase file download timed out (35s)");
         }
+
+        console.log(`[INDEX] Starting document: ${document.originalName} (${documentId})`);
+
+        // 1. Extraction Stage
+        console.log(`[EXTRACT] Started`);
+        const ext = path.extname(document.originalName || "").toLowerCase();
+        const isPdf = document.mimeType === "application/pdf" || ext === ".pdf";
+        
+        let text = "";
+        let pageCount = 1;
+        let rawChunks = [];
+        let ocrFlag = false;
+
+        const splitter = new RecursiveCharacterTextSplitter();
+
+        if (isPdf) {
+            const parsed = await withTimeout(pdfExtractor.extractText(buffer), 45000, "PDF text extraction timed out (45s)");
+            ocrFlag = parsed.requiresOcr;
+            pageCount = parsed.numPages || 1;
+            
+            // Collect full text to measure char count
+            const fullText = (parsed.pages || []).map(p => p.text || "").join("\n");
+            text = fullText;
+
+            if (ocrFlag || text.trim().length === 0) {
+                throw new Error("Extraction returned empty text (Image-only or corrupt PDF).");
+            }
+
+            // 2. Chunking Stage
+            console.log(`[CHUNK] Started`);
+            for (const page of parsed.pages || []) {
+                const pageChunks = splitter.splitText(page.text || "");
+                pageChunks.forEach((chunk) => {
+                    rawChunks.push({ content: chunk, pageNumber: page.pageNumber });
+                });
+            }
+        } else {
+            const extracted = await withTimeout(UniversalExtractor.extract(buffer, document.originalName), 45000, "Document extraction timed out (45s)");
+            text = extracted.text || "";
+            
+            if (text.trim().length === 0) {
+                throw new Error("Extraction returned empty text.");
+            }
+
+            // 2. Chunking Stage
+            console.log(`[CHUNK] Started`);
+            const splits = splitter.splitText(text);
+            splits.forEach((chunk) => {
+                rawChunks.push({ content: chunk, pageNumber: 1 });
+            });
+        }
+
+        const charCount = text.length;
+        console.log(`[EXTRACT] Completed - characters: ${charCount}`);
+        console.log(`[CHUNK] Completed - chunks: ${rawChunks.length}`);
+
+        if (rawChunks.length === 0) {
+            throw new Error("Chunking returned 0 chunks.");
+        }
+
+        // 3. Embedding Stage
+        console.log(`[EMBEDDING] Started`);
+        console.log(`[EMBEDDING] Chunk count before embedding: ${rawChunks.length}`);
+        const embeddings = await withTimeout(
+            embeddingService.getChunksEmbeddings(rawChunks.map((chunk) => chunk.content)),
+            50000,
+            "Embedding generation timed out (50s)"
+        );
+        console.log(`[EMBEDDING] Completed - vectors: ${embeddings.length}`);
+
+        if (!embeddings || embeddings.length !== rawChunks.length) {
+            throw new Error(`Embedding count (${embeddings ? embeddings.length : 0}) does not match chunk count (${rawChunks.length})`);
+        }
+
+        // 4. Qdrant Upsert Stage
+        console.log(`[QDRANT] Upsert started`);
+        const { ensureCollection } = require("../config/qdrant");
+        await ensureCollection();
+
+        await deleteDocumentIndex(documentId);
+
+        const points = [];
+        const timestamp = new Date().toISOString();
+        rawChunks.forEach((chunk, index) => {
+            const sha = crypto.createHash("sha256").update(`${documentId}:${index}:${chunk.content}`).digest("hex");
+            const pointId = `${sha.slice(0, 8)}-${sha.slice(8, 12)}-4${sha.slice(13, 16)}-a${sha.slice(17, 20)}-${sha.slice(20, 32)}`;
+            const meta = metadataBuilder.buildMetadata({
+                documentId: String(documentId),
+                originalName: document.originalName,
+                pageNumber: chunk.pageNumber,
+                category: document.category,
+                department: document.department,
+                institution: document.institution,
+                uploadedBy: String(document.createdBy || "")
+            });
+            points.push({
+                id: pointId,
+                vector: embeddings[index],
+                payload: {
+                    id: pointId,
+                    documentId: meta.documentId,
+                    content: chunk.content,
+                    originalName: meta.originalName,
+                    pageNumber: meta.pageNumber,
+                    category: meta.category,
+                    department: meta.department,
+                    institution: meta.institution,
+                    uploadedBy: meta.uploadedBy,
+                    chunkIndex: index,
+                    createdAt: timestamp,
+                    contentHash: document.contentHash || document.checksum
+                }
+            });
+        });
+
+        console.log(`[QDRANT] Vector count before upsert: ${points.length}`);
+        await withTimeout(client.upsert(collectionName, { wait: true, points }), 30000, "Qdrant vector database upload timed out (30s)");
+        console.log(`[QDRANT] Upsert completed`);
+
+        // Verify vectors are inserted in Qdrant
+        const collectionInfo = await client.getCollection(collectionName);
+        console.log(`[QDRANT] Verified collection point count: ${collectionInfo.points_count}`);
+
+        // 5. MongoDB Update & Completion
+        document.embeddingStatus = "indexed";
+        document.chunkCount = rawChunks.length;
+        document.metadata = {
+            ...(document.metadata || {}),
+            pages: pageCount,
+            indexedAt: new Date().toISOString()
+        };
+        await document.save();
+        console.log(`[INDEX] Document completed`);
+    } catch (err) {
+        console.error(`[INDEX] Background Indexing failed for ${documentId}:`, err);
+        document.embeddingStatus = "failed";
+        document.metadata = {
+            ...(document.metadata || {}),
+            error: err.message,
+            lastErrorAt: new Date().toISOString(),
+            notes: (document.metadata?.notes || "") + `\n[Index Error: ${err.message}]`
+        };
+        await document.save();
+        throw err; // Do not hide exceptions
     }
 };
 
@@ -320,10 +331,15 @@ setTimeout(async () => {
     try {
         const stuckDocs = await Document.updateMany(
             { status: { $ne: "deleted" }, embeddingStatus: "processing" },
-            { $set: { embeddingStatus: "pending" } }
+            { 
+                $set: { 
+                    embeddingStatus: "pending",
+                    "metadata.indexAttempts": 0
+                } 
+            }
         );
         if (stuckDocs.modifiedCount > 0) {
-            console.log(`[IndexingService] Reset ${stuckDocs.modifiedCount} stuck "processing" documents back to "pending".`);
+            console.log(`[IndexingService] Reset ${stuckDocs.modifiedCount} stuck "processing" documents back to "pending" and cleared attempts.`);
         }
     } catch (err) {
         console.error("Failed to reset stuck processing documents on start:", err);
@@ -334,18 +350,22 @@ setTimeout(async () => {
 
 const deleteDocumentIndex = async (documentId) => {
     try {
-        await client.delete(collectionName, {
-            filter: {
-                must: [
-                    {
-                        key: "documentId",
-                        match: {
-                            value: String(documentId)
+        await withTimeout(
+            client.delete(collectionName, {
+                filter: {
+                    must: [
+                        {
+                            key: "documentId",
+                            match: {
+                                value: String(documentId)
+                            }
                         }
-                    }
-                ]
-            }
-        });
+                    ]
+                }
+            }),
+            15000,
+            "Qdrant delete index timed out (15s)"
+        );
     } catch (e) {
         console.error(`indexingService Delete Index failed for ${documentId}:`, e.message);
     }
