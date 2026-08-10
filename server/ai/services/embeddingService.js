@@ -9,7 +9,7 @@ const getQueryEmbedding = async (question) => {
     if (!question || typeof question !== "string") {
         throw new Error("Query text is required to generate embedding.");
     }
-    return embeddings.embedText(question);
+    return embeddings.embedText(question, { task: "retrieval.query" });
 };
 
 /**
@@ -21,7 +21,7 @@ const getChunksEmbeddings = async (chunks) => {
     if (!Array.isArray(chunks) || chunks.length === 0) {
         return [];
     }
-    return embeddings.embedTexts(chunks);
+    return embeddings.embedTexts(chunks, { task: "retrieval.passage" });
 };
 
 module.exports = {

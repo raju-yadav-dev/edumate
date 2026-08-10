@@ -183,6 +183,9 @@ export function uploadAdminDocument({ file, title, category, institution, depart
                 const validationDetails = Array.isArray(payload.errors) ? ` ${payload.errors.join(" ")}` : "";
                 const error = new Error(`${payload.message || "Unable to upload document."}${validationDetails}`);
                 error.status = xhr.status;
+                if (payload.errors && payload.errors.duplicateDocument) {
+                    error.duplicateDocument = payload.errors.duplicateDocument;
+                }
                 reject(error);
             }
         };
@@ -301,10 +304,10 @@ export async function deleteAdminUser(userId) {
     return parseResponse(response, "Unable to delete user.");
 }
 
-export async function getAdminStorageStats() {
+export async function getAdminStorageStats(force = false) {
     const token = getAdminAccessToken();
 
-    const response = await fetch(`${ADMIN_API_BASE_URL}/storage-stats`, {
+    const response = await fetch(`${ADMIN_API_BASE_URL}/storage-stats${force ? "?force=true" : ""}`, {
         headers: token ? {
             Authorization: `Bearer ${token}`
         } : {}

@@ -16,7 +16,8 @@ const errorHandler = (error, req, res, next) => {
 
     return sendError(res, statusCode, message, {
         stack: error.stack,
-        details: error.errors || null
+        details: error.errors || null,
+        duplicateDocument: error.duplicateDocument || null
     });
 };
 

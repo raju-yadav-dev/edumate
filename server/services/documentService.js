@@ -1,5 +1,6 @@
 const crypto = require("crypto");
 const path = require("path");
+const AdmZip = require("adm-zip");
 const Document = require("../models/Document");
 const supabase = require("../config/supabase");
 const indexingService = require("../ai/services/indexingService");
@@ -116,6 +117,13 @@ const uploadDocument = async ({ file, body, user }) => {
     if (duplicate) {
         const error = new Error("This document already exists in the knowledge base.");
         error.statusCode = 409;
+        error.duplicateDocument = {
+            id: duplicate._id,
+            originalName: duplicate.originalName,
+            category: duplicate.category,
+            institution: duplicate.institution,
+            department: duplicate.department
+        };
         throw error;
     }
 
@@ -506,9 +514,27 @@ const moveDocument = async ({ documentId, category, user }) => {
     document.updatedBy = user._id;
     await document.save();
 
-    // Rebuild index in Qdrant to update category metadata
-    await indexingService.deleteDocumentIndex(document._id);
-    indexingService.indexDocumentBackground(document._id).catch(() => {});
+    // Update metadata in Qdrant payloads without rebuilding index or generating new embeddings
+    try {
+        const { client: qdrantClient, collectionName: qdrantCollection } = require("../ai/config/qdrant");
+        await qdrantClient.setPayload(qdrantCollection, {
+            payload: {
+                category: targetCategory,
+                department: document.department,
+                institution: document.institution
+            },
+            filter: {
+                must: [
+                    {
+                        key: "documentId",
+                        match: { value: String(document._id) }
+                    }
+                ]
+            }
+        });
+    } catch (qdrantErr) {
+        console.error("Failed to update Qdrant payload on move:", qdrantErr.message);
+    }
 
     const signedUrl = await getSignedUrlForDoc(newStoragePath);
     return {
@@ -788,6 +814,104 @@ const bulkDelete = async ({ ids, user }) => {
     return results;
 };
 
+const getDocumentBuffer = async (doc) => {
+    const isCrawler = doc.metadata?.isCrawler || doc.category === "crawled" || doc.category === "crawle";
+    const { crawlerSupabase } = require("../config/supabase");
+    const client = isCrawler && crawlerSupabase ? crawlerSupabase : supabase;
+    const bucketName = isCrawler
+        ? (process.env.CRAWLER_SUPABASE_STORAGE_BUCKET || "edumate-crawler")
+        : (process.env.SUPABASE_STORAGE_BUCKET || process.env.SUPABASE_BUCKET || "edumate-docs");
+
+    const { data, error } = await client.storage.from(bucketName).download(doc.storagePath);
+    if (error || !data) {
+        throw new Error(`Failed to download ${doc.originalName} (${doc.storagePath}) from storage: ${error?.message || "Data not found"}`);
+    }
+
+    const arrayBuffer = await data.arrayBuffer();
+    return Buffer.from(arrayBuffer);
+};
+
+const downloadZip = async ({ category, ids }) => {
+    const query = { status: "active" };
+
+    if (Array.isArray(ids) && ids.length > 0) {
+        query._id = { $in: ids };
+    } else if (category && typeof category === "string") {
+        const trimmed = category.trim().toLowerCase();
+        if (trimmed && trimmed !== "all" && trimmed !== "root") {
+            const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            query.category = { $regex: new RegExp(`^${escaped}(/.*)?$`, "i") };
+        }
+    }
+
+    const documents = await Document.find(query).lean();
+
+    if (!documents || documents.length === 0) {
+        const error = new Error("No active documents found to download.");
+        error.statusCode = 404;
+        throw error;
+    }
+
+    const zip = new AdmZip();
+    const isRootDownload = !category || category === "all" || category === "root" || category.trim() === "";
+    const baseCategory = (!isRootDownload && category) ? category.trim().toLowerCase() : "";
+
+    const filePathsCount = {};
+
+    for (const doc of documents) {
+        try {
+            const buffer = await getDocumentBuffer(doc);
+            const docCategory = (doc.category || "others").trim().toLowerCase();
+            const originalFileName = doc.originalName || doc.storedName || "document.bin";
+
+            let relativeFolderPath = "";
+
+            if (isRootDownload) {
+                relativeFolderPath = docCategory;
+            } else if (baseCategory) {
+                if (docCategory === baseCategory) {
+                    relativeFolderPath = "";
+                } else if (docCategory.startsWith(`${baseCategory}/`)) {
+                    relativeFolderPath = docCategory.slice(baseCategory.length + 1);
+                } else {
+                    relativeFolderPath = docCategory;
+                }
+            }
+
+            const folderPrefix = relativeFolderPath ? `${relativeFolderPath}/` : "";
+            const rawZipPath = `${folderPrefix}${originalFileName}`;
+
+            let finalFileName = originalFileName;
+            if (filePathsCount[rawZipPath]) {
+                filePathsCount[rawZipPath] += 1;
+                const ext = path.extname(originalFileName);
+                const nameWithoutExt = path.basename(originalFileName, ext);
+                finalFileName = `${nameWithoutExt} (${filePathsCount[rawZipPath]})${ext}`;
+            } else {
+                filePathsCount[rawZipPath] = 1;
+            }
+
+            const targetZipPath = relativeFolderPath ? `${relativeFolderPath}/${finalFileName}` : finalFileName;
+            zip.addFile(targetZipPath, buffer);
+        } catch (err) {
+            console.error(`[downloadZip] Skipping document ${doc._id} (${doc.originalName}):`, err.message);
+        }
+    }
+
+    const zipBuffer = zip.toBuffer();
+
+    let exportName = "edumate-documents";
+    if (isRootDownload) {
+        exportName = "edumate-root-export";
+    } else if (baseCategory) {
+        exportName = baseCategory.replace(/[^a-z0-9_-]/gi, "_");
+    }
+
+    const filename = `${exportName}.zip`;
+
+    return { zipBuffer, filename };
+};
+
 module.exports = {
     uploadDocument,
     listDocuments,
@@ -809,5 +933,6 @@ module.exports = {
     bulkMove,
     bulkCopy,
     bulkDelete,
+    downloadZip,
     DOCUMENT_CATEGORIES
 };

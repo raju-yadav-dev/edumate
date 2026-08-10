@@ -14,7 +14,7 @@ export default function StorageOverview({ stats = {}, onRefresh, documents = [] 
         if (typeof onRefresh === "function" && !refreshing) {
             setRefreshing(true);
             try {
-                await onRefresh();
+                await onRefresh(true);
             } finally {
                 setTimeout(() => setRefreshing(false), 500);
             }

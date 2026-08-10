@@ -179,10 +179,19 @@ const runCrawlBackground = async (jobId) => {
 
                 if (splitTexts.length > 0) {
                     const embeddings = await embeddingService.getChunksEmbeddings(splitTexts);
+                    
+                    const { getTestEmbeddingDimension } = require("../../ai/config/embeddings");
+                    const expectedDimension = await getTestEmbeddingDimension();
+
                     const points = [];
                     const timestamp = new Date().toISOString();
 
                     for (let i = 0; i < splitTexts.length; i++) {
+                        const vector = embeddings[i];
+                        if (!vector || !Array.isArray(vector) || vector.length !== expectedDimension) {
+                            throw new Error(`Runtime embedding dimension mismatch in crawler: Expected vector of length ${expectedDimension}, but got ${vector ? vector.length : "undefined"}.`);
+                        }
+
                         const pointId = crypto.randomUUID();
                         const meta = metadataBuilder.buildMetadata({
                             documentId: String(document._id),
@@ -196,7 +205,7 @@ const runCrawlBackground = async (jobId) => {
 
                         points.push({
                             id: pointId,
-                            vector: embeddings[i],
+                            vector,
                             payload: {
                                 id: pointId,
                                 documentId: meta.documentId,
@@ -381,10 +390,19 @@ const runCrawlBackground = async (jobId) => {
 
                 if (splitTexts.length > 0) {
                     const embeddings = await embeddingService.getChunksEmbeddings(splitTexts);
+                    
+                    const { getTestEmbeddingDimension } = require("../../ai/config/embeddings");
+                    const expectedDimension = await getTestEmbeddingDimension();
+
                     const points = [];
                     const timestamp = new Date().toISOString();
 
                     for (let i = 0; i < splitTexts.length; i++) {
+                        const vector = embeddings[i];
+                        if (!vector || !Array.isArray(vector) || vector.length !== expectedDimension) {
+                            throw new Error(`Runtime embedding dimension mismatch in crawler: Expected vector of length ${expectedDimension}, but got ${vector ? vector.length : "undefined"}.`);
+                        }
+
                         const pointId = crypto.randomUUID();
                         const meta = metadataBuilder.buildMetadata({
                             documentId: String(document._id),
@@ -398,7 +416,7 @@ const runCrawlBackground = async (jobId) => {
 
                         points.push({
                             id: pointId,
-                            vector: embeddings[i],
+                            vector,
                             payload: {
                                 id: pointId,
                                 documentId: meta.documentId,

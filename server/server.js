@@ -1,4 +1,6 @@
-require("dotenv").config({ override: true });
+const path = require("path");
+require("dotenv").config({ path: path.join(__dirname, "..", ".env"), override: true });
+require("dotenv").config({ path: path.join(__dirname, ".env"), override: true });
 
 const app = require("./app");
 const connectDB = require("./config/db");
@@ -62,8 +64,13 @@ const startServer = async () => {
         }
 
         // Verify Qdrant connection during startup
-        const { ensureCollection } = require("./ai/config/qdrant");
-        await ensureCollection();
+        try {
+            const { ensureCollection } = require("./ai/config/qdrant");
+            await ensureCollection();
+            console.log("✓ Qdrant collection verified successfully on startup.");
+        } catch (e) {
+            console.error("⚠️ WARNING: Qdrant connection failed during startup:", e.message);
+        }
 
         app.listen(PORT, () => {
 

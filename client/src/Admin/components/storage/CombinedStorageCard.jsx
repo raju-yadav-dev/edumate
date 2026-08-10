@@ -4,9 +4,13 @@ import { formatBytes } from "../../utils/formatBytes";
 
 function CombinedStorageCard({ combined = {}, mongodb = {}, supabase = {}, qdrant = {} }) {
     const total = Number(combined.total || 0);
-    const mongoWidth = total ? Math.min((Number(mongodb.used || 0) / total) * 100, 100) : 0;
-    const supabaseWidth = total ? Math.min((Number(supabase.used || 0) / total) * 100, 100 - mongoWidth) : 0;
-    const qdrantWidth = total ? Math.min((Number(qdrant.used || 0) / total) * 100, 100 - mongoWidth - supabaseWidth) : 0;
+    const isMongoConnected = mongodb.connected;
+    const isSupabaseConnected = supabase.connected;
+    const isQdrantConnected = qdrant.connected;
+
+    const mongoWidth = total && isMongoConnected ? Math.min((Number(mongodb.used || 0) / total) * 100, 100) : 0;
+    const supabaseWidth = total && isSupabaseConnected ? Math.min((Number(supabase.used || 0) / total) * 100, 100 - mongoWidth) : 0;
+    const qdrantWidth = total && isQdrantConnected ? Math.min((Number(qdrant.used || 0) / total) * 100, 100 - mongoWidth - supabaseWidth) : 0;
 
     return (
         <article className="storage-dashboard-card combined-storage-card">
@@ -29,9 +33,18 @@ function CombinedStorageCard({ combined = {}, mongodb = {}, supabase = {}, qdran
             </div>
 
             <div className="storage-kpis">
-                <span><small>MongoDB (Atlas)</small><b>{formatBytes(mongodb.used)} ({Number(mongodb.usage || 0).toFixed(0)}%)</b></span>
-                <span><small>Supabase Storage</small><b>{formatBytes(supabase.used)} ({Number(supabase.usage || 0).toFixed(0)}%)</b></span>
-                <span><small>Qdrant Vector DB</small><b>{formatBytes(qdrant.used)} ({Number(qdrant.usage || 0).toFixed(0)}%)</b></span>
+                <span>
+                    <small>MongoDB (Atlas)</small>
+                    <b>{isMongoConnected ? `${formatBytes(mongodb.used)} (${Number(mongodb.usage || 0).toFixed(0)}%)` : "Unavailable"}</b>
+                </span>
+                <span>
+                    <small>Supabase Storage</small>
+                    <b>{isSupabaseConnected ? `${formatBytes(supabase.used)} (${Number(supabase.usage || 0).toFixed(0)}%)` : "Unavailable"}</b>
+                </span>
+                <span>
+                    <small>Qdrant Vector DB</small>
+                    <b>{isQdrantConnected ? `${formatBytes(qdrant.used)} (${Number(qdrant.usage || 0).toFixed(0)}%)` : "Unavailable"}</b>
+                </span>
             </div>
 
             <div className="storage-legend">

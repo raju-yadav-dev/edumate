@@ -7,14 +7,19 @@
 const rerank = async (query, chunks) => {
     if (!chunks || chunks.length === 0) return [];
     
-    const lowerQuery = query.toLowerCase();
+    let expandedQuery = query;
+    if (/\bcss\b/i.test(expandedQuery)) {
+        expandedQuery = expandedQuery.replace(/\bcss\b/gi, "computational sciences");
+    }
+    
+    const lowerQuery = expandedQuery.toLowerCase();
     const queryWords = lowerQuery
         .replace(/[^\w\s]/g, "")
         .split(/\s+/)
         .filter(w => w.length > 2);
         
     const isFeeQuery = lowerQuery.includes("fee") || lowerQuery.includes("cost") || lowerQuery.includes("tuition");
-    const isFacultyQuery = lowerQuery.includes("faculty") || lowerQuery.includes("faculties") || lowerQuery.includes("teacher") || lowerQuery.includes("professor");
+    const isFacultyQuery = lowerQuery.includes("faculty") || lowerQuery.includes("faculties") || lowerQuery.includes("teacher") || lowerQuery.includes("professor") || lowerQuery.includes("hod") || lowerQuery.includes("head") || lowerQuery.includes("dean") || lowerQuery.includes("director") || lowerQuery.includes("coordinator") || lowerQuery.includes("staff");
     const isCourseQuery = lowerQuery.includes("course") || lowerQuery.includes("bca") || lowerQuery.includes("overview") || lowerQuery.includes("eligibility");
 
     const scoredChunks = chunks.map(chunk => {

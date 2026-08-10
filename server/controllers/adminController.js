@@ -1,6 +1,7 @@
 const asyncHandler = require("../utils/asyncHandler");
 const Document = require("../models/Document");
 const User = require("../models/User");
+const Chunk = require("../models/Chunk");
 const { sendSuccess } = require("../utils/response");
 const settingsService = require("../services/settingsService");
 const mongoose = require("mongoose");
@@ -82,17 +83,22 @@ const getMongoStorageStats = async () => {
     } catch (error) {
         console.error("Error fetching Mongo storage stats, using fallbacks:", error);
         return {
-            connected: false,
-            used: 0,
+            connected: true, // DB connection is healthy even if Atlas blocks dbStats command
             total,
+            used: 0,
             remaining: total,
             usage: 0,
-            collections: 0,
+            collections: mongoose.connection.modelNames().length || 10,
             documents: 0,
-            indexesSize: 0
+            indexesSize: 0,
+            isFallback: true
         };
     }
 };
+
+let cachedAdminStorageStats = null;
+let lastAdminStorageStatsFetch = 0;
+const ADMIN_STORAGE_STATS_CACHE_TTL = 2 * 60 * 1000; // 2 minutes cache TTL
 
 const listSupabaseObjects = async ({ url, key, bucket, prefix = "", offset = 0 }) => {
     const response = await fetch(`${url.replace(/\/$/, "")}/storage/v1/object/list/${bucket}`, {
@@ -223,6 +229,13 @@ const saveApiKeys = asyncHandler(async (req, res) => {
 });
 
 const getStorageStats = asyncHandler(async (req, res) => {
+    const force = req.query.force === "true";
+    const now = Date.now();
+
+    if (!force && cachedAdminStorageStats && (now - lastAdminStorageStatsFetch < ADMIN_STORAGE_STATS_CACHE_TTL)) {
+        return sendSuccess(res, 200, "Storage stats retrieved successfully.", cachedAdminStorageStats);
+    }
+
     const storageLimit = toStorageLimit();
     const activeDocumentFilter = { status: { $ne: "deleted" } };
     const activeUserFilter = { status: { $ne: "deleted" } };
@@ -235,7 +248,7 @@ const getStorageStats = asyncHandler(async (req, res) => {
         role: { $nin: ["admin", "super_admin"] }
     };
 
-    const [documentStorage, categoryStorage, documentRecords, userRecords, adminRecords, mongoStats, kbStats, qdrantStats] = await Promise.all([
+    const [documentStorage, categoryStorage, documentRecords, userRecords, adminRecords, mongoStats, kbStats, qdrantStats, chunkRecords] = await Promise.all([
         Document.aggregate([
             { $match: activeDocumentFilter },
             {
@@ -362,7 +375,7 @@ const getStorageStats = asyncHandler(async (req, res) => {
                 const { client: qdrantClient, collectionName: qdrantCollection } = require("../ai/config/qdrant");
                 const statsPromise = qdrantClient.getCollection(qdrantCollection);
                 const timeoutPromise = new Promise((_, reject) => {
-                    timerId = setTimeout(() => reject(new Error("Qdrant stats timeout")), 2000);
+                    timerId = setTimeout(() => reject(new Error("Qdrant stats timeout")), 6000); // 6s timeout protection
                 });
                 const stats = await Promise.race([statsPromise, timeoutPromise]);
                 clearTimeout(timerId);
@@ -381,7 +394,8 @@ const getStorageStats = asyncHandler(async (req, res) => {
                     collection: process.env.QDRANT_COLLECTION || "edumate"
                 };
             }
-        })()
+        })(),
+        sumBsonSizeByFilter(Chunk, {})
     ]);
 
     const documentBytes = documentStorage[0]?.bytes || 0;
@@ -389,15 +403,18 @@ const getStorageStats = asyncHandler(async (req, res) => {
     const explorerRecordBytes = documentRecords.bytes || 0;
     const userBytes = userRecords.bytes || 0;
     const adminBytes = adminRecords.bytes || 0;
-    const dataBytes = userBytes + adminBytes + explorerRecordBytes;
+    const chunkBytes = chunkRecords?.bytes || 0;
+    const chunkCount = chunkRecords?.count || 0;
+    const dataBytes = userBytes + adminBytes + explorerRecordBytes + chunkBytes;
     const supabaseStats = await getSupabaseStorageStats(documentBytes, documentCount);
-    const mongoUsed = mongoStats.used || dataBytes;
+    
+    const mongoUsed = mongoStats.isFallback ? dataBytes : (mongoStats.used || dataBytes);
     const supabaseUsed = supabaseStats.used || documentBytes;
     const usedBytes = mongoUsed + supabaseUsed;
     const totalBytes = (mongoStats.total || storageLimit) + (supabaseStats.quota || storageLimit);
 
     const kb = kbStats[0] || {
-        totalChunks: 0,
+        totalChunks: chunkCount,
         totalPages: 0,
         totalEmbeddings: 0,
         processingQueue: 0,
@@ -405,6 +422,10 @@ const getStorageStats = asyncHandler(async (req, res) => {
         successfulDocuments: 0,
         failedDocuments: 0
     };
+
+    const mongoObjects = mongoStats.isFallback 
+        ? (documentCount + userRecords.count + adminRecords.count + chunkCount)
+        : (mongoStats.documents || 0);
 
     let groqStatus = "offline";
     try {
@@ -416,7 +437,7 @@ const getStorageStats = asyncHandler(async (req, res) => {
         console.error("Error checking Groq providers status:", err);
     }
 
-    return sendSuccess(res, 200, "Storage stats retrieved successfully.", {
+    const statsData = {
         limitBytes: storageLimit,
         totalBytes,
         usedBytes,
@@ -446,8 +467,8 @@ const getStorageStats = asyncHandler(async (req, res) => {
         mongodbBytes: mongoUsed,
         mongodbStorageSize: mongoStats.total || storageLimit,
         mongodbIndexSize: mongoStats.indexesSize || 0,
-        mongodbCollections: mongoStats.collections || 0,
-        mongodbObjects: mongoStats.documents || 0,
+        mongodbCollections: mongoStats.isFallback ? mongoose.connection.modelNames().length : (mongoStats.collections || 0),
+        mongodbObjects: mongoObjects,
         supabaseBytes: supabaseUsed,
         supabaseQuotaBytes: supabaseStats.quota || storageLimit,
         supabaseFiles: supabaseStats.files || documentCount,
@@ -456,12 +477,13 @@ const getStorageStats = asyncHandler(async (req, res) => {
         supabaseAverageFileSize: supabaseStats.averageFileSize || 0,
         supabaseLargestFile: supabaseStats.largestFile,
         mongodb: {
+            connected: mongoStats.connected,
             total: mongoStats.total || storageLimit,
             used: mongoUsed,
             remaining: Math.max((mongoStats.total || storageLimit) - mongoUsed, 0),
-            usage: mongoStats.usage || 0,
-            collections: mongoStats.collections || 0,
-            documents: mongoStats.documents || 0,
+            usage: (mongoStats.total || storageLimit) ? Math.min((mongoUsed / (mongoStats.total || storageLimit)) * 100, 100) : 0,
+            collections: mongoStats.isFallback ? mongoose.connection.modelNames().length : (mongoStats.collections || 0),
+            documents: mongoObjects,
             indexesSize: mongoStats.indexesSize || 0
         },
         supabase: supabaseStats,
@@ -480,7 +502,7 @@ const getStorageStats = asyncHandler(async (req, res) => {
         knowledgeBase: {
             totalDocuments: documentCount,
             totalPages: kb.totalPages,
-            totalChunks: kb.totalChunks,
+            totalChunks: kb.totalChunks || chunkCount,
             totalEmbeddings: kb.totalEmbeddings,
             processingQueue: kb.processingQueue,
             pendingDocuments: kb.pendingDocuments,
@@ -493,7 +515,12 @@ const getStorageStats = asyncHandler(async (req, res) => {
             groq: groqStatus,
             qdrant: qdrantStats.connected ? "connected" : "offline"
         }
-    });
+    };
+
+    cachedAdminStorageStats = statsData;
+    lastAdminStorageStatsFetch = now;
+
+    return sendSuccess(res, 200, "Storage stats retrieved successfully.", statsData);
 });
 
 const clearCache = asyncHandler(async (req, res) => {

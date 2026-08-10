@@ -23,14 +23,14 @@ export default function StorageOverviewSummary({ stats = {}, onRefresh }) {
 
     const selectedService = serviceOptions.find((option) => option.value === service) ?? serviceOptions[0];
 
-    async function refreshStats() {
+    async function refreshStats(force = false) {
         if (typeof onRefresh !== "function" || refreshing) {
             return;
         }
 
         try {
             setRefreshing(true);
-            await onRefresh();
+            await onRefresh(force);
         } finally {
             setRefreshing(false);
         }

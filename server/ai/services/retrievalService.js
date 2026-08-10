@@ -50,6 +50,26 @@ const retrieveRelevantChunks = async ({
             with_payload: true
         });
 
+        // Detailed RAG debug logging for Qdrant retrieval
+        console.log("\n[RAG DEBUG] ==================== QDRANT RETRIEVAL ====================");
+        console.log(`[RAG DEBUG] Query embedding dimension: ${queryEmbedding ? queryEmbedding.length : "N/A"}`);
+        console.log(`[RAG DEBUG] Qdrant top 10 results:`);
+        if (Array.isArray(results)) {
+            results.slice(0, 10).forEach((point, idx) => {
+                const payload = point.payload || {};
+                console.log(`  [Result ${idx + 1}]`);
+                console.log(`    similarity score : ${point.score}`);
+                console.log(`    documentId       : ${payload.documentId}`);
+                console.log(`    filename         : ${payload.originalName || payload.filename || "N/A"}`);
+                console.log(`    chunkId          : ${point.id}`);
+                console.log(`    chunk text       : ${payload.content ? payload.content.replace(/\n/g, " ").slice(0, 200) : "N/A"}...`);
+                console.log(`    metadata/source  : ${JSON.stringify(payload)}`);
+            });
+        } else {
+            console.log("  No results returned or results is not an array.");
+        }
+        console.log("[RAG DEBUG] ==========================================================\n");
+
         if (!Array.isArray(results) || results.length === 0) {
             return [];
         }
@@ -97,9 +117,20 @@ const Chunk = require("../../models/Chunk");
  */
 const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL_LIMIT, ignoreInstitution = false }) => {
     let candidates = [];
-    
+
+    // Expand "CSS" or "css" (Computational Sciences) and department abbreviations for better matching
+    let expandedQuestion = question;
+    if (/\bcss\b/i.test(expandedQuestion)) {
+        expandedQuestion = expandedQuestion.replace(/\bcss\b/gi, "computational sciences");
+    }
+
+    console.log(`[RAG DEBUG] User query: "${question}"`);
+    if (expandedQuestion !== question) {
+        console.log(`[RAG DEBUG] Expanded query: "${expandedQuestion}"`);
+    }
+
     // 1. Vector Search
-    const queryEmbedding = await embeddingService.getQueryEmbedding(question);
+    const queryEmbedding = await embeddingService.getQueryEmbedding(expandedQuestion);
     
     // Construct robust Qdrant nested filter
     const must = [];
@@ -129,10 +160,7 @@ const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL
     candidates = await retrieveRelevantChunks({ queryEmbedding, limit, filter: qdrantFilter, isRawFilter: true });
 
     // 2. Keyword/Lexical Fallback
-    const apiKey = process.env.GEMINI_API_KEY;
-    const isMockActive = !apiKey || !apiKey.startsWith("AIzaSy");
-
-    if (isMockActive || candidates.length < Math.min(limit, 3)) {
+    if (candidates.length < Math.min(limit, 3)) {
         console.log("[Retrieval Service] Running MongoDB keyword search fallback...");
         try {
             const cleanQuery = question.toLowerCase().replace(/[^a-z0-9\s]/g, " ").trim();
@@ -189,16 +217,12 @@ const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL
                     score: 0.85 // High baseline for direct keyword hits
                 }));
 
-                if (isMockActive) {
-                    candidates = fallbackCandidates;
-                } else {
-                    const candidateIds = new Set(candidates.map(c => c.id));
-                    fallbackCandidates.forEach(fc => {
-                        if (!candidateIds.has(fc.id)) {
-                            candidates.push(fc);
-                        }
-                    });
-                }
+                const candidateIds = new Set(candidates.map(c => c.id));
+                fallbackCandidates.forEach(fc => {
+                    if (!candidateIds.has(fc.id)) {
+                        candidates.push(fc);
+                    }
+                });
             }
         } catch (mongoSearchError) {
             console.error("[Retrieval Service] MongoDB keyword fallback failed:", mongoSearchError.message);

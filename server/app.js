@@ -137,6 +137,92 @@ app.get("/api/debug-docs", async (req, res) => {
     }
 });
 
+app.get("/api/verify-hod-css", async (req, res) => {
+    try {
+        const User = require("./models/User");
+        const chatService = require("./ai/services/chatService");
+
+        let user = await User.findOne();
+        if (!user) {
+            user = await User.create({
+                fullName: "Test Student",
+                email: `test-${Date.now()}@heritageit.edu`,
+                password: "Password123",
+                role: "student",
+                institution: "Brainware University",
+                department: "Computational Sciences"
+            });
+        }
+
+        const queries = [
+            "who is the HOD of CSS department?",
+            "who is the HOD of CSS?",
+            "who is the head of department of computational sciences?",
+            "Dr Jayanta Aich",
+            "Professor and HoD Department of Computational Sciences"
+        ];
+
+        const results = [];
+        for (const q of queries) {
+            try {
+                const result = await chatService.askQuestion({
+                    user,
+                    question: q,
+                    conversationId: null,
+                    parentId: null
+                });
+
+                results.push({
+                    query: q,
+                    message: result.message,
+                    sources: result.sources,
+                    intent: result.intent
+                });
+            } catch (e) {
+                results.push({
+                    query: q,
+                    error: e.message
+                });
+            }
+        }
+        res.json({ success: true, results });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get("/api/debug-faculty-chunks", async (req, res) => {
+    try {
+        const Chunk = require("./models/Chunk");
+        const Document = require("./models/Document");
+        const doc = await Document.findOne({ originalName: /Computational Sciences/i }).lean();
+        if (!doc) {
+            return res.status(404).json({ error: "Document not found" });
+        }
+        const chunks = await Chunk.find({ document: doc._id }).lean();
+        res.json({ doc, chunks });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get("/api/search-all-db-chunks", async (req, res) => {
+    try {
+        const Chunk = require("./models/Chunk");
+        const Document = require("./models/Document");
+        const queryStr = req.query.q || "Jayanta";
+        const chunks = await Chunk.find({ content: new RegExp(queryStr, "i") }).lean();
+        const enriched = [];
+        for (const c of chunks) {
+            const doc = await Document.findById(c.document).lean();
+            enriched.push({ chunk: c, doc });
+        }
+        res.json({ count: chunks.length, query: queryStr, results: enriched });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 app.use(notFound);
 app.use(errorHandler);
 

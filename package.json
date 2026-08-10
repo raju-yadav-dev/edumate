@@ -11,6 +11,7 @@
     "dev": "node scripts/startup.js",
     "build": "npm run build --workspaces --if-present",
     "doctor": "node scripts/doctor.js",
+    "test:embedding": "node scripts/testEmbedding.js",
     "lint": "npm run lint --workspaces --if-present",
     "clean": "node scripts/clean.js",
     "format": "node scripts/format.js",

@@ -38,6 +38,11 @@ const fetchWithRetry = async (url, options, maxAttempts = 6) => {
                 signal: controller.signal
             });
             clearTimeout(timeoutId);
+
+            if (response.ok) {
+                return response;
+            }
+
             const clone = response.clone();
             let isRateLimit = response.status === 429;
             let errorMessage = "";
@@ -82,33 +87,58 @@ const fetchWithRetry = async (url, options, maxAttempts = 6) => {
     }
 };
 
-const getMockEmbedding = (text) => {
-    let hash = 0;
-    const str = String(text || "");
-    for (let i = 0; i < str.length; i++) {
-        hash = str.charCodeAt(i) + ((hash << 5) - hash);
+let cachedDimension = null;
+
+/**
+ * Validates the embedding model by generating a test embedding on startup
+ * and returning its actual dimension size. Caches the result.
+ * @returns {Promise<number>}
+ */
+const getTestEmbeddingDimension = async (options = {}) => {
+    if (cachedDimension !== null) {
+        return cachedDimension;
     }
-    const vector = new Array(768).fill(0);
-    for (let i = 0; i < 768; i++) {
-        vector[i] = Math.sin(hash + i) * 0.1;
+
+    console.log("[Embedding API] Testing embedding provider connection & verifying dimension size...");
+    try {
+        const testVector = await embedText("test", options);
+        if (Array.isArray(testVector) && testVector.length > 0) {
+            cachedDimension = testVector.length;
+            console.log(`[Embedding API] Verification successful. Detected dimension: ${cachedDimension} (Model: ${process.env.EMBEDDING_MODEL || "gemini-embedding-001"})`);
+            return cachedDimension;
+        } else {
+            throw new Error("Returned embedding is not a valid array.");
+        }
+    } catch (err) {
+        console.error(`[Embedding API] CRITICAL: Startup embedding validation failed: ${err.message}`);
+        throw err;
     }
-    return vector;
+};
+
+let qdrantDimCache = null;
+const getQdrantDimension = async () => {
+    if (qdrantDimCache !== null) return qdrantDimCache;
+    try {
+        const { client: qdrantClient, collectionName: qdrantCollection } = require("./qdrant");
+        const collectionInfo = await qdrantClient.getCollection(qdrantCollection);
+        qdrantDimCache = collectionInfo.config?.params?.vectors?.size || 768;
+        return qdrantDimCache;
+    } catch (e) {
+        return 768;
+    }
 };
 
 const getEmbeddingProvider = () => {
-    return process.env.EMBEDDING_PROVIDER || process.env.LLM_PROVIDER || "gemini";
-};
-
-const getGeminiApiKey = () => {
-    return process.env.GEMINI_API_KEY;
+    return process.env.EMBEDDING_PROVIDER || "jina";
 };
 
 /**
  * Generates an embedding vector for a single text fragment using the selected provider
  * @param {string} text
+ * @param {object} options
  * @returns {Promise<Array<number>>}
  */
-const embedText = async (text) => {
+const embedText = async (text, options = {}) => {
     if (!text || typeof text !== "string") {
         throw new Error("Input text must be a valid non-empty string.");
     }
@@ -121,7 +151,7 @@ const embedText = async (text) => {
 
         try {
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 8000);
+            const timeoutId = setTimeout(() => controller.abort(), options.timeout || 8000);
             const response = await fetch(`${baseUrl}/api/embed`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -141,7 +171,7 @@ const embedText = async (text) => {
         }
 
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 8000);
+        const timeoutId = setTimeout(() => controller.abort(), options.timeout || 8000);
         const response = await fetch(`${baseUrl}/api/embeddings`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -160,55 +190,62 @@ const embedText = async (text) => {
             throw new Error("Ollama Embedding response did not return a valid embedding vector.");
         }
         return payload.embedding;
-    } else {
-        // Gemini
-        const apiKey = getGeminiApiKey();
-        if (!apiKey || !apiKey.startsWith("AIzaSy")) {
-            console.warn("[Embedding API] GEMINI_API_KEY is not set or invalid (must start with 'AIzaSy'). Using mock fallback embedding.");
-            return getMockEmbedding(text);
+    } else if (provider === "jina") {
+        const apiKey = process.env.JINA_API_KEY;
+        if (!apiKey) {
+            throw new Error("[Embedding API] JINA_API_KEY is not set.");
         }
-        const modelName = process.env.EMBEDDING_MODEL || process.env.GEMINI_EMBEDDING_MODEL || AI_CONSTANTS.EMBEDDING_MODEL || "gemini-embedding-001";
+        const modelName = process.env.EMBEDDING_MODEL || "jina-embeddings-v3";
+        const task = options.task || "retrieval.passage";
+        const dimensions = 768;
+
+        const qdrantDim = await getQdrantDimension();
+        console.log(`[Embedding API] Request - Provider: ${provider}, Model: ${modelName}, Task: ${task}, Chunks: 1, Qdrant Dim: ${qdrantDim}, Batch: 1/1`);
 
         try {
-            const requestBody = {
-                model: `models/${modelName}`,
-                content: { parts: [{ text }] }
-            };
-            
-            // gemini-embedding-001 does not support outputDimensionality parameter
-            if (modelName !== "gemini-embedding-001") {
-                requestBody.outputDimensionality = 768;
-            }
-
-            const response = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:embedContent?key=${apiKey}`, {
+            const response = await fetchWithRetry(`https://api.jina.ai/v1/embeddings`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(requestBody)
-            });
+                headers: { 
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${apiKey}`
+                },
+                body: JSON.stringify({
+                    model: modelName,
+                    task: task,
+                    dimensions: dimensions,
+                    input: [text]
+                }),
+                timeout: options.timeout || 10000
+            }, options.maxAttempts || 3);
 
             const payload = await response.json();
             if (!response.ok) {
-                throw new Error(payload.error?.message || `Gemini Embedding API error: ${response.status}`);
+                throw new Error(payload.detail || payload.message || `Jina Embedding API error: ${response.status}`);
             }
 
-            const values = payload.embedding?.values;
-            if (!Array.isArray(values)) {
-                throw new Error("Gemini Embedding did not return an array of values.");
+            const embedding = payload.data?.[0]?.embedding;
+            if (!Array.isArray(embedding)) {
+                throw new Error("Jina Embedding did not return an array of values.");
             }
-            return values;
+
+            console.log(`[Embedding API] Success - Returned vector dimension: ${embedding.length}, Qdrant Dim: ${qdrantDim}`);
+            return embedding;
         } catch (err) {
-            console.warn(`[Embedding API] Gemini embedding error: ${err.message}. Using mock fallback vector.`);
-            return getMockEmbedding(text);
+            console.error(`[Embedding API] Failure - Jina embedding error: ${err.message}`);
+            throw err;
         }
+    } else {
+        throw new Error(`Unsupported embedding provider: ${provider}`);
     }
 };
 
 /**
  * Generates embedding vectors for a batch of text fragments
  * @param {Array<string>} texts
+ * @param {object} options
  * @returns {Promise<Array<Array<number>>>}
  */
-const embedTexts = async (texts) => {
+const embedTexts = async (texts, options = {}) => {
     if (!Array.isArray(texts) || texts.length === 0) {
         return [];
     }
@@ -247,94 +284,74 @@ const embedTexts = async (texts) => {
 
         const results = [];
         for (const text of sanitized) {
-            const emb = await embedText(text);
+            const emb = await embedText(text, options);
             results.push(emb);
         }
         return results;
-    } else {
-        // Gemini batch embedding
-        const apiKey = getGeminiApiKey();
-        if (!apiKey || !apiKey.startsWith("AIzaSy")) {
-            console.warn("[Embedding API] GEMINI_API_KEY is not set or invalid (must start with 'AIzaSy'). Returning mock batch embeddings.");
-            return sanitized.map((t) => getMockEmbedding(t));
+    } else if (provider === "jina") {
+        const apiKey = process.env.JINA_API_KEY;
+        if (!apiKey) {
+            throw new Error("[Embedding API] JINA_API_KEY is not set.");
         }
-        const modelName = process.env.EMBEDDING_MODEL || process.env.GEMINI_EMBEDDING_MODEL || AI_CONSTANTS.EMBEDDING_MODEL || "gemini-embedding-001";
+        const modelName = process.env.EMBEDDING_MODEL || "jina-embeddings-v3";
+        const task = options.task || "retrieval.passage";
+        const dimensions = 768;
 
-        // Google batch api allows up to 100 requests per batch call. We chunk into sub-batches of 50.
-        const batchSize = 50;
+        const qdrantDim = await getQdrantDimension();
+        const batchSize = 32;
         const results = [];
+        const totalBatches = Math.ceil(sanitized.length / batchSize);
 
         for (let i = 0; i < sanitized.length; i += batchSize) {
-            if (i > 0) {
-                await sleep(500);
-            }
+            const batchNum = Math.floor(i / batchSize) + 1;
             const subBatch = sanitized.slice(i, i + batchSize);
-            const requests = subBatch.map((text) => {
-                const req = {
-                    model: `models/${modelName}`,
-                    content: { parts: [{ text }] }
-                };
-                
-                // gemini-embedding-001 does not support outputDimensionality parameter
-                if (modelName !== "gemini-embedding-001") {
-                    req.outputDimensionality = 768;
-                }
-                return req;
-            });
+            console.log(`[Embedding API] Batch ${batchNum}/${totalBatches} - Provider: ${provider}, Model: ${modelName}, Task: ${task}, Chunks: ${subBatch.length}, Qdrant Dim: ${qdrantDim}`);
 
             try {
-                const response = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:batchEmbedContents?key=${apiKey}`, {
+                const response = await fetchWithRetry(`https://api.jina.ai/v1/embeddings`, {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ requests })
-                });
+                    headers: { 
+                        "Content-Type": "application/json",
+                        "Authorization": `Bearer ${apiKey}`
+                    },
+                    body: JSON.stringify({
+                        model: modelName,
+                        task: task,
+                        dimensions: dimensions,
+                        input: subBatch
+                    }),
+                    timeout: options.timeout || 15000
+                }, options.maxAttempts || 3);
 
                 const payload = await response.json();
                 if (!response.ok) {
-                    throw new Error(payload.error?.message || `Gemini Batch Embedding API error: ${response.status}`);
+                    throw new Error(payload.detail || payload.message || `Jina Batch Embedding API error: ${response.status}`);
                 }
 
-                const embeddings = payload.embeddings;
-                if (!Array.isArray(embeddings)) {
-                    throw new Error("Gemini Batch Embedding did not return an array of embeddings.");
+                const embeddingsData = payload.data;
+                if (!Array.isArray(embeddingsData)) {
+                    throw new Error("Jina Batch Embedding did not return a valid data array.");
                 }
-                results.push(...embeddings.map((emb) => emb.values));
+
+                const sorted = [...embeddingsData].sort((a, b) => a.index - b.index);
+                const batchVectors = sorted.map((item) => item.embedding);
+                results.push(...batchVectors);
+
+                console.log(`[Embedding API] Batch ${batchNum}/${totalBatches} Success - Returned vector dimension: ${batchVectors[0]?.length || "Unknown"}`);
             } catch (batchError) {
-                // If it is a network error or authentication/bad-request error, sequential requests will also fail.
-                // Fallback immediately to mock embeddings to prevent timing out.
-                const isNetworkOrAuthError = isPermanentNetworkError(batchError) ||
-                                            batchError.message.includes("API key") ||
-                                            batchError.message.includes("Forbidden") ||
-                                            batchError.message.includes("API_KEY") ||
-                                            batchError.message.includes("Bad Request") ||
-                                            batchError.message.includes("status 400") ||
-                                            batchError.message.includes("status 403");
-
-                if (isNetworkOrAuthError) {
-                    console.warn(`[Embedding API] Gemini batch request failed due to network/auth issue. Falling back to mock embeddings immediately. Error: ${batchError.message}`);
-                    results.push(...subBatch.map((text) => getMockEmbedding(text)));
-                } else {
-                    console.warn(`[Embedding API] Gemini batch request failed. Falling back to individual requests. Error: ${batchError.message}`);
-                    // Fallback to sequential individual embeds for this subBatch
-                    for (const text of subBatch) {
-                        try {
-                            const emb = await embedText(text);
-                            results.push(emb);
-                        } catch (singleError) {
-                            console.error(`[Embedding API] Individual embedding failed. Using mock fallback vector.`);
-                            results.push(getMockEmbedding(text));
-                        }
-                        await sleep(100);
-                    }
-                }
+                console.error(`[Embedding API] Batch ${batchNum}/${totalBatches} Failure - Jina batch request failed: ${batchError.message}`);
+                throw batchError;
             }
         }
 
         return results;
+    } else {
+        throw new Error(`Unsupported embedding provider: ${provider}`);
     }
 };
 
 module.exports = {
     embedText,
-    embedTexts
+    embedTexts,
+    getTestEmbeddingDimension
 };

@@ -22,6 +22,10 @@ const verifyQdrant = async (maxAttempts = 10) => {
             await ensureCollection();
             return true;
         } catch (err) {
+            if (err.message.includes("dimension mismatch") || err.message.includes("validation failed")) {
+                console.error(colors.red(`❌ Startup blocked: ${err.message}`));
+                process.exit(1);
+            }
             console.log(colors.yellow(`⚠️ Qdrant status check: Connection attempt ${attempts}/${maxAttempts} failed: ${err.message}. Retrying in 2 seconds...`));
             if (attempts < maxAttempts) {
                 await new Promise((resolve) => setTimeout(resolve, 2000));

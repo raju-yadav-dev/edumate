@@ -125,9 +125,9 @@ User Question: "${question}"`;
         if (lowerQ.includes("fee") || lowerQ.includes("cost") || lowerQ.includes("tuition") || lowerQ.includes("charge")) {
             fallbackSubs.push(`${detectedTopic} fee structure tuition fees`.trim());
         }
-        if (lowerQ.includes("faculty") || lowerQ.includes("faculties") || lowerQ.includes("teacher") || lowerQ.includes("professor") || lowerQ.includes("staff")) {
+        if (lowerQ.includes("faculty") || lowerQ.includes("faculties") || lowerQ.includes("teacher") || lowerQ.includes("professor") || lowerQ.includes("staff") || lowerQ.includes("hod") || lowerQ.includes("head") || lowerQ.includes("dean") || lowerQ.includes("director") || lowerQ.includes("coordinator")) {
             // Include Department of Computational Sciences mapping for BCA/Computer Application
-            const deptExt = (detectedTopic.toUpperCase().includes("BCA") || lowerQ.includes("bca")) 
+            const deptExt = (detectedTopic.toUpperCase().includes("BCA") || lowerQ.includes("bca") || lowerQ.includes("css")) 
                 ? "Department of Computational Sciences faculty" 
                 : "faculty members";
             fallbackSubs.push(`${detectedTopic} ${deptExt}`.trim());

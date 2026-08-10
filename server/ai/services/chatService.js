@@ -58,6 +58,17 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
         throw error;
     }
 
+    // Expand "CSS" or "css" (Computational Sciences) and department abbreviations for better matching
+    let expandedQuestion = normalizedQuestion;
+    if (/\bcss\b/i.test(expandedQuestion)) {
+        expandedQuestion = expandedQuestion.replace(/\bcss\b/gi, "computational sciences");
+    }
+
+    console.log(`[RAG DEBUG] User query: "${normalizedQuestion}"`);
+    if (expandedQuestion !== normalizedQuestion) {
+        console.log(`[RAG DEBUG] Expanded query: "${expandedQuestion}"`);
+    }
+
     // 1. Retrieve dialogue history memory context
     const { historyText, activeTopic } = await conversationService.getRecentMemory({
         userId: activeUser._id,
@@ -68,7 +79,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
 
     // 2. Query Analysis (Topic Switch, Rewrite Query, Intent, Entities, Repeat Check)
     const analysisResult = await queryRewriterService.analyzeQuery({
-        question: normalizedQuestion,
+        question: expandedQuestion,
         historyText,
         activeTopic
     });
@@ -232,6 +243,20 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
                     isRepeat,
                     activeTopic: resolvedActiveTopic
                 });
+
+                // RAG debug logging for final selected chunks and prompt context
+                console.log("\n[RAG DEBUG] ==================== LLM PROMPT CONTEXT ====================");
+                console.log("[RAG DEBUG] Final chunks selected for the LLM:");
+                combinedDocChunks.forEach((chunk, idx) => {
+                    console.log(`  [Chunk ${idx + 1}]`);
+                    console.log(`    documentId: ${chunk.metadata?.documentId}`);
+                    console.log(`    filename  : ${chunk.metadata?.filename || chunk.metadata?.originalName || "N/A"}`);
+                    console.log(`    chunkId   : ${chunk.id}`);
+                    console.log(`    text      : "${chunk.content.replace(/\n/g, " ").slice(0, 200)}..."`);
+                    console.log(`    metadata/source  : ${JSON.stringify(chunk.metadata)}`);
+                });
+                console.log(`[RAG DEBUG] Exact final context sent to the LLM:\n${JSON.stringify(tempMessages, null, 2)}`);
+                console.log("[RAG DEBUG] ============================================================\n");
 
                 const attemptResponse = await llmService.generateCompletion(tempMessages);
                 textResponse = attemptResponse;

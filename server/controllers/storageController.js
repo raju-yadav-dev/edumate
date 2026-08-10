@@ -3,10 +3,9 @@ const {
 } = require("../services/storageService");
 
 const getStorageOverview = async (req, res) => {
-
     try {
-
-        const stats = await getCombinedStorage();
+        const force = req.query.force === "true";
+        const stats = await getCombinedStorage(force);
 
         return res.status(200).json({
 

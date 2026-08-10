@@ -2,7 +2,7 @@ import "./Admin.css";
 import "./Login/AdminLogin.css";
 import "./AdminTheme.css";
 
-import { AlertTriangle, Database, FileText, Folder, Shield, UserRoundCheck } from "lucide-react";
+import { AlertTriangle, Database, FileText, Folder, Shield, UserRoundCheck, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FaEye, FaEyeSlash } from "react-icons/fa";
 
@@ -306,6 +306,7 @@ function Admin({ mode = "auto" }) {
     const [isDropActive, setIsDropActive] = useState(false);
     const [uploadProgress, setUploadProgress] = useState(null);
     const [uploadQueue, setUploadQueue] = useState([]);
+    const [activeConflict, setActiveConflict] = useState(null);
     const [undoStack, setUndoStack] = useState([]);
     const [redoStack, setRedoStack] = useState([]);
     const [jobs, setJobs] = useState({ queue: [], running: [], failed: [], completedCount: 0, totalCount: 0 });
@@ -581,6 +582,7 @@ function Admin({ mode = "auto" }) {
             }
         } catch (fetchError) {
             console.error("Failed to load documents:", fetchError);
+            setError(fetchError?.message || "Unable to load documents.");
             handleAuthError(fetchError);
             setDocuments(activeFolder === "admissions" ? DEMO_DOCUMENTS : []);
             setTotalItems(activeFolder === "admissions" ? DEMO_DOCUMENTS.length : 0);
@@ -620,9 +622,9 @@ function Admin({ mode = "auto" }) {
         }
     }, [userSearch, roleFilter, adminUser, authUser, handleAuthError]);
 
-    const loadStorageStats = useCallback(async () => {
+    const loadStorageStats = useCallback(async (force = false) => {
         try {
-            const response = await getAdminStorageStats();
+            const response = await getAdminStorageStats(force);
             setStorageStats(response.data || null);
         } catch (statsError) {
             console.error("Failed to load storage stats:", statsError);
@@ -852,29 +854,42 @@ function Admin({ mode = "auto" }) {
         }
 
         if (validFiles.length > 0) {
-            const newQueueItems = validFiles.map(file => {
-                const pathParts = file.relativePath ? file.relativePath.split("/").slice(0, -1) : [];
-                const itemCategory = pathParts.length > 0 ? createNestedFolders(pathParts) : activeFolder;
+            setUploadQueue(currQueue => {
+                const newQueueItems = [];
+                for (const file of validFiles) {
+                    const isDuplicate = currQueue.some(item => 
+                        item.name === file.name && 
+                        item.size === file.size &&
+                        (item.status === "queued" || item.status === "uploading" || item.status === "paused" || item.status === "conflict")
+                    );
+                    if (isDuplicate) continue;
 
-                return {
-                    id: `${Date.now()}-${crypto?.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 9)}-${file.name}`,
-                    file,
-                    name: file.name,
-                    relativePath: file.relativePath || file.name,
-                    category: itemCategory,
-                    size: file.size,
-                    progress: 0,
-                    status: "queued",
-                    error: "",
-                    institution: upload.institution || "",
-                    department: upload.department || "",
-                    version: upload.version || "1",
-                    notes: upload.notes || ""
-                };
+                    const pathParts = file.relativePath ? file.relativePath.split("/").slice(0, -1) : [];
+                    const itemCategory = pathParts.length > 0 ? createNestedFolders(pathParts) : activeFolder;
+
+                    newQueueItems.push({
+                        id: `${Date.now()}-${crypto?.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 9)}-${file.name}`,
+                        file,
+                        name: file.name,
+                        relativePath: file.relativePath || file.name,
+                        category: itemCategory,
+                        size: file.size,
+                        progress: 0,
+                        status: "queued",
+                        error: "",
+                        institution: upload.institution || "",
+                        department: upload.department || "",
+                        version: upload.version || "1",
+                        notes: upload.notes || ""
+                    });
+                }
+
+                if (newQueueItems.length > 0) {
+                    setTimeout(() => setNotice(`Added ${newQueueItems.length} file(s) to the upload queue.`), 50);
+                    return [...currQueue, ...newQueueItems];
+                }
+                return currQueue;
             });
-
-            setUploadQueue(curr => [...curr, ...newQueueItems]);
-            setNotice(`Added ${newQueueItems.length} file(s) to the upload queue.`);
         }
     }, [folders, activeFolder, upload]);
 
@@ -981,6 +996,14 @@ function Admin({ mode = "auto" }) {
             const wasAborted = xhrRef && xhrRef.status === 0;
             if (wasAborted) {
                 console.log(`Upload for item ${itemId} was aborted.`);
+            } else if (err.status === 409 && err.duplicateDocument) {
+                setUploadQueue(curr => curr.map(item => item.id === itemId ? { ...item, status: "conflict", error: err.message, xhr: null } : item));
+                setActiveConflict({
+                    itemId,
+                    file: nextItem.file,
+                    duplicateDocument: err.duplicateDocument,
+                    category: nextItem.category
+                });
             } else {
                 setUploadQueue(curr => curr.map(item => item.id === itemId ? { ...item, status: "failed", error: err.message || "Upload failed", xhr: null } : item));
             }
@@ -1992,6 +2015,74 @@ function Admin({ mode = "auto" }) {
         });
     }, []);
 
+    const handleConflictMove = useCallback(async () => {
+        if (!activeConflict) return;
+        try {
+            setBusy(true);
+            await moveAdminDocument(activeConflict.duplicateDocument.id, activeConflict.category);
+            setUploadQueue(curr => curr.filter(item => item.id !== activeConflict.itemId));
+            setNotice("File moved successfully.");
+            void loadDocuments();
+            void loadStorageStats();
+        } catch (e) {
+            console.error("Failed to move duplicate file:", e);
+            setUploadQueue(curr => curr.map(item => item.id === activeConflict.itemId ? { ...item, status: "failed", error: e.message || "Move failed" } : item));
+            setError(e.message || "Failed to move existing file.");
+        } finally {
+            setBusy(false);
+            setActiveConflict(null);
+        }
+    }, [activeConflict, loadDocuments, loadStorageStats]);
+
+    const handleConflictReplace = useCallback(async () => {
+        if (!activeConflict) return;
+        const confirmReplace = window.confirm("Are you sure you want to replace the existing file and generate new embeddings?");
+        if (!confirmReplace) return;
+
+        try {
+            setBusy(true);
+            setUploadQueue(curr => curr.map(item => item.id === activeConflict.itemId ? { ...item, status: "uploading", progress: 0 } : item));
+            
+            const uploadPayload = {
+                file: activeConflict.file,
+                category: activeConflict.category,
+                institution: upload.institution || "",
+                department: upload.department || "",
+                version: upload.version || "1",
+                notes: upload.notes || ""
+            };
+            
+            await replaceAdminDocument(
+                activeConflict.duplicateDocument.id,
+                uploadPayload
+            );
+
+            setUploadQueue(curr => curr.filter(item => item.id !== activeConflict.itemId));
+            setNotice("File replaced successfully.");
+            void loadDocuments();
+            void loadStorageStats();
+        } catch (e) {
+            console.error("Failed to replace file:", e);
+            setUploadQueue(curr => curr.map(item => item.id === activeConflict.itemId ? { ...item, status: "failed", error: e.message || "Replace failed" } : item));
+            setError(e.message || "Failed to replace existing file.");
+        } finally {
+            setBusy(false);
+            setActiveConflict(null);
+        }
+    }, [activeConflict, upload, loadDocuments, loadStorageStats]);
+
+    const handleConflictKeep = useCallback(() => {
+        if (!activeConflict) return;
+        setUploadQueue(curr => curr.filter(item => item.id !== activeConflict.itemId));
+        setActiveConflict(null);
+    }, [activeConflict]);
+
+    const handleConflictCancel = useCallback(() => {
+        if (!activeConflict) return;
+        setUploadQueue(curr => curr.filter(item => item.id !== activeConflict.itemId));
+        setActiveConflict(null);
+    }, [activeConflict]);
+
     const shouldShowLogin = mode === "login" || !isAdminAuthenticated;
 
     if (shouldShowLogin) {
@@ -2222,6 +2313,74 @@ function Admin({ mode = "auto" }) {
                 ) : null}
 
 
+
+                {activeConflict && (
+                    <div className="rename-folder-modal-overlay" onClick={handleConflictCancel}>
+                        <div className="rename-folder-modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "500px" }}>
+                            <header className="rename-folder-modal-header">
+                                <h3 style={{ margin: 0, color: "var(--admin-gold)", display: "flex", alignItems: "center", gap: "8px" }}>
+                                    <AlertTriangle size={18} />
+                                    File Already Exists
+                                </h3>
+                                <button className="rename-folder-modal-close-btn" onClick={handleConflictCancel}>
+                                    <X size={16} />
+                                </button>
+                            </header>
+                            
+                            <div className="rename-folder-modal-body" style={{ display: "flex", flexDirection: "column", gap: "12px", color: "#ccc", fontSize: "13px" }}>
+                                <p>The file <strong>{activeConflict.file.name}</strong> already exists in the knowledge base.</p>
+                                
+                                <div style={{ background: "rgba(255,255,255,0.03)", padding: "10px", borderRadius: "6px", border: "1px solid var(--admin-line)" }}>
+                                    <div style={{ marginBottom: "6px" }}>
+                                        <span style={{ color: "var(--admin-muted)" }}>Current Location:</span>
+                                        <div style={{ fontWeight: "600", color: "#fff" }}>{formatFolderLabel(activeConflict.duplicateDocument.category)}</div>
+                                    </div>
+                                    <div>
+                                        <span style={{ color: "var(--admin-muted)" }}>Selected Destination:</span>
+                                        <div style={{ fontWeight: "600", color: "var(--admin-gold)" }}>{formatFolderLabel(activeConflict.category)}</div>
+                                    </div>
+                                </div>
+                                
+                                <p>What would you like to do?</p>
+                            </div>
+                            
+                            <footer className="rename-folder-modal-footer" style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                                <div style={{ display: "flex", gap: "8px", width: "100%" }}>
+                                    <button 
+                                        className="admin-primary-btn" 
+                                        onClick={handleConflictMove}
+                                        style={{ flex: 1, padding: "8px", background: "var(--admin-gold)", color: "#000", border: "none", borderRadius: "6px", fontWeight: "600", cursor: "pointer" }}
+                                    >
+                                        Move Here
+                                    </button>
+                                    <button 
+                                        className="admin-secondary-btn" 
+                                        onClick={handleConflictReplace}
+                                        style={{ flex: 1, padding: "8px", background: "rgba(255,82,82,0.1)", color: "#ff5252", border: "1px solid rgba(255,82,82,0.3)", borderRadius: "6px", fontWeight: "600", cursor: "pointer" }}
+                                    >
+                                        Replace Existing
+                                    </button>
+                                </div>
+                                <div style={{ display: "flex", gap: "8px", width: "100%" }}>
+                                    <button 
+                                        className="admin-secondary-btn" 
+                                        onClick={handleConflictKeep}
+                                        style={{ flex: 1, padding: "8px", background: "rgba(255,255,255,0.05)", color: "#fff", border: "1px solid var(--admin-line)", borderRadius: "6px", cursor: "pointer" }}
+                                    >
+                                        Keep Existing
+                                    </button>
+                                    <button 
+                                        className="admin-secondary-btn" 
+                                        onClick={handleConflictCancel}
+                                        style={{ flex: 1, padding: "8px", background: "rgba(255,255,255,0.05)", color: "#fff", border: "1px solid var(--admin-line)", borderRadius: "6px", cursor: "pointer" }}
+                                    >
+                                        Cancel
+                                    </button>
+                                </div>
+                            </footer>
+                        </div>
+                    </div>
+                )}
 
                 <div className="notification-banner">
                     {notice ? <div className="status-pill success">{notice}</div> : null}

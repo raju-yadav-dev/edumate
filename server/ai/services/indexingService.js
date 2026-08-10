@@ -261,10 +261,19 @@ const runIndexingJob = async (documentId) => {
 
         await deleteDocumentIndex(documentId);
 
+        // Retrieve expected embedding dimension from configured model (strictly 768 for Jina)
+        const expectedDimension = 768;
+
         const points = [];
         const timestamp = new Date().toISOString();
         rawChunks.forEach((chunk, index) => {
-            const sha = crypto.createHash("sha256").update(`${documentId}:${index}:${chunk.content}`).digest("hex");
+            const vector = embeddings[index];
+            if (!vector || !Array.isArray(vector) || vector.length !== expectedDimension) {
+                throw new Error(`Runtime embedding dimension mismatch: Expected vector of length ${expectedDimension}, but got ${vector ? vector.length : "undefined"}.`);
+            }
+
+            // Deterministic point ID based on documentId + chunkIndex
+            const sha = crypto.createHash("sha256").update(`${documentId}:${index}`).digest("hex");
             const pointId = `${sha.slice(0, 8)}-${sha.slice(8, 12)}-4${sha.slice(13, 16)}-a${sha.slice(17, 20)}-${sha.slice(20, 32)}`;
             const meta = metadataBuilder.buildMetadata({
                 documentId: String(documentId),
@@ -277,7 +286,7 @@ const runIndexingJob = async (documentId) => {
             });
             points.push({
                 id: pointId,
-                vector: embeddings[index],
+                vector,
                 payload: {
                     id: pointId,
                     documentId: meta.documentId,

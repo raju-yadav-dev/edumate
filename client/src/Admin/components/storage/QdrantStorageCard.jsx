@@ -13,10 +13,14 @@ function QdrantStorageCard({ qdrant = {} }) {
                     <h2>Qdrant Vector DB</h2>
                     <div className="storage-value-row">
                         <p>
-                            <b>{formatBytes(qdrant.used)}</b> of {formatBytes(qdrant.total)} used
+                            {isConnected ? (
+                                <><b>{formatBytes(qdrant.used)}</b> of {formatBytes(qdrant.total)} used</>
+                            ) : (
+                                <span style={{ color: "var(--admin-red)" }}>Unavailable</span>
+                            )}
                         </p>
                         <strong style={{ color: isConnected ? "var(--admin-green)" : "var(--admin-muted)" }}>
-                            {Number(qdrant.usage || 0).toFixed(0)}%
+                            {isConnected ? `${Number(qdrant.usage || 0).toFixed(0)}%` : "Unavailable"}
                         </strong>
                     </div>
                 </div>
@@ -24,26 +28,26 @@ function QdrantStorageCard({ qdrant = {} }) {
                 <BrainCircuit size={20} />
             </div>
 
-            <ProgressBar usage={qdrant.usage} tone="qdrant" />
+            <ProgressBar usage={isConnected ? qdrant.usage : 0} tone="qdrant" />
 
             <div className="storage-kpis">
                 <span>
                     <small>Indexed Chunks</small>
-                    <b>{Number(qdrant.vectors || 0).toLocaleString()}</b>
+                    <b>{isConnected ? Number(qdrant.vectors || 0).toLocaleString() : "Unavailable"}</b>
                 </span>
                 <span>
                     <small>Remaining</small>
-                    <b>{formatBytes(qdrant.remaining)}</b>
+                    <b>{isConnected ? formatBytes(qdrant.remaining) : "Unavailable"}</b>
                 </span>
                 <span>
                     <small>Status</small>
                     <b
                         className={qdrant.status || "unknown"}
                         style={{
-                            color: qdrant.status === "green" ? "var(--admin-green)" : (qdrant.status === "yellow" ? "var(--admin-gold)" : "var(--admin-muted)")
+                            color: qdrant.status === "green" ? "var(--admin-green)" : (qdrant.status === "yellow" ? "var(--admin-gold)" : "var(--admin-red)")
                         }}
                     >
-                        {qdrant.status || "unknown"}
+                        {isConnected ? (qdrant.status || "unknown") : "offline"}
                     </b>
                 </span>
                 <span>
