@@ -116,9 +116,10 @@ const Chunk = require("../../models/Chunk");
  * @returns {Promise<Array<Object>>}
  */
 const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL_LIMIT, ignoreInstitution = false }) => {
-    let candidates = [];
+    let semanticCandidates = [];
+    let keywordCandidates = [];
 
-    // Expand "CSS" or "css" (Computational Sciences) and department abbreviations for better matching
+    // Expand abbreviations for better matching
     let expandedQuestion = question;
     if (/\bcss\b/i.test(expandedQuestion)) {
         expandedQuestion = expandedQuestion.replace(/\bcss\b/gi, "computational sciences");
@@ -129,74 +130,91 @@ const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL
         console.log(`[RAG DEBUG] Expanded query: "${expandedQuestion}"`);
     }
 
-    // 1. Vector Search
-    const queryEmbedding = await embeddingService.getQueryEmbedding(expandedQuestion);
-    
-    // Construct robust Qdrant nested filter
-    const must = [];
-    if (user?.institution && !ignoreInstitution) {
-        must.push({
-            should: [
-                { key: "institution", match: { value: user.institution } },
-                { key: "institution", match: { value: "all" } },
-                { key: "institution", match: { value: "general" } },
-                { key: "institution", match: { value: "" } }
-            ]
+    // 1. Vector/Semantic Search (fetch more candidates e.g. limit * 3 or 50)
+    try {
+        const queryEmbedding = await embeddingService.getQueryEmbedding(expandedQuestion);
+        
+        // Construct robust Qdrant nested filter (active university ONLY, no department)
+        const must = [];
+        if (user?.institution && !ignoreInstitution) {
+            must.push({
+                should: [
+                    { key: "institution", match: { value: user.institution } },
+                    { key: "institution", match: { value: "all" } },
+                    { key: "institution", match: { value: "general" } },
+                    { key: "institution", match: { value: "" } }
+                ]
+            });
+        }
+
+        const qdrantFilter = must.length > 0 ? { must } : undefined;
+        semanticCandidates = await retrieveRelevantChunks({ 
+            queryEmbedding, 
+            limit: Math.max(limit * 3, 50), 
+            filter: qdrantFilter, 
+            isRawFilter: true 
         });
-    }
-    if (user?.department && !ignoreInstitution) {
-        must.push({
-            should: [
-                { key: "department", match: { value: user.department } },
-                { key: "department", match: { value: "all" } },
-                { key: "department", match: { value: "general" } },
-                { key: "department", match: { value: "academic" } },
-                { key: "department", match: { value: "" } }
-            ]
-        });
+    } catch (vectorErr) {
+        console.error("[Retrieval Service] Semantic search failed:", vectorErr.message);
     }
 
-    const qdrantFilter = must.length > 0 ? { must } : undefined;
-    candidates = await retrieveRelevantChunks({ queryEmbedding, limit, filter: qdrantFilter, isRawFilter: true });
+    // 2. Keyword/Lexical Search (fetch up to 50 candidates)
+    try {
+        const cleanQuery = question.toLowerCase().replace(/[^a-z0-9\s]/g, " ").trim();
+        const words = cleanQuery.split(/\s+/).filter(w => w.length > 1);
+        
+        // Define a comprehensive stop words list
+        const stopWords = new Set([
+            "give", "details", "about", "what", "is", "the", "for", "tell", "me", "show", 
+            "how", "course", "program", "programme", "who", "where", "when", "why", "which",
+            "are", "am", "a", "an", "of", "in", "on", "at", "to", "with", "by", "from", 
+            "and", "or", "but", "about", "us", "you", "he", "she", "they", "them", "i", 
+            "we", "our", "their", "his", "her", "it", "its", "does", "do", "did", "has", "have", "had"
+        ]);
+        let keywords = words.filter(w => !stopWords.has(w));
 
-    // 2. Keyword/Lexical Fallback
-    if (candidates.length < Math.min(limit, 3)) {
-        console.log("[Retrieval Service] Running MongoDB keyword search fallback...");
-        try {
-            const cleanQuery = question.toLowerCase().replace(/[^a-z0-9\s]/g, " ").trim();
-            const words = cleanQuery.split(/\s+/).filter(w => w.length > 1);
-            const stopWords = new Set(["give", "details", "about", "what", "is", "the", "for", "tell", "me", "show", "how", "course", "program", "programme"]);
-            const keywords = words.filter(w => !stopWords.has(w));
+        // Domain term expansion for faculty / departments
+        if (cleanQuery.includes("faculty") || cleanQuery.includes("faculties") || cleanQuery.includes("teacher") || cleanQuery.includes("professor") || cleanQuery.includes("hod")) {
+            if (cleanQuery.includes("bca") || cleanQuery.includes("computational") || cleanQuery.includes("computer") || cleanQuery.includes("css")) {
+                if (!keywords.includes("computational")) keywords.push("computational");
+                if (!keywords.includes("sciences")) keywords.push("sciences");
+                if (!keywords.includes("faculty")) keywords.push("faculty");
+            }
+        }
 
-            // Domain term expansion: For BCA faculty queries, include Computational Sciences
-            if (cleanQuery.includes("faculty") || cleanQuery.includes("faculties")) {
-                if (cleanQuery.includes("bca") || cleanQuery.includes("computational") || cleanQuery.includes("computer")) {
-                    if (!keywords.includes("computational")) keywords.push("computational");
-                    if (!keywords.includes("sciences")) keywords.push("sciences");
-                }
+        if (keywords.length > 0) {
+            const regexes = keywords.map(kw => {
+                const escaped = kw.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+                return new RegExp(`\\b${escaped}\\b`, "i");
+            });
+
+            // Match chunks containing at least one keyword
+            const mustConditions = [
+                { $or: regexes.map(r => ({ content: r })) }
+            ];
+
+            if (user?.institution && !ignoreInstitution) {
+                mustConditions.push({
+                    "metadata.institution": { $in: [user.institution, "all", "general", "", null] }
+                });
             }
 
-            if (keywords.length > 0) {
-                const regexes = keywords.map(kw => {
-                    const escaped = kw.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-                    return new RegExp(`\\b${escaped}\\b`, "i");
+            const mongoQuery = { $and: mustConditions };
+            const matchedChunks = await Chunk.find(mongoQuery).limit(50).lean();
+
+            keywordCandidates = matchedChunks.map(c => {
+                // Calculate density overlap score (0 to 1)
+                let matches = 0;
+                const contentLower = c.content.toLowerCase();
+                keywords.forEach(kw => {
+                    if (contentLower.includes(kw)) {
+                        matches++;
+                    }
                 });
+                const densityScore = matches / keywords.length;
+                const score = 0.35 + (densityScore * 0.15); // Base score of 0.35 + density boost
 
-                const mustConditions = [
-                    { $or: regexes.map(r => ({ content: r })) }
-                ];
-
-                if (user?.institution && !ignoreInstitution) {
-                    mustConditions.push({
-                        "metadata.institution": { $in: [user.institution, "all", "general", ""] }
-                    });
-                }
-
-                const mongoQuery = { $and: mustConditions };
-
-                const matchedChunks = await Chunk.find(mongoQuery).limit(limit).lean();
-
-                const fallbackCandidates = matchedChunks.map(c => ({
+                return {
                     id: c._id.toString(),
                     content: c.content,
                     metadata: {
@@ -208,28 +226,51 @@ const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL
                         category: c.metadata?.category || "",
                         department: c.metadata?.department || "",
                         institution: c.metadata?.institution || "",
+                        university: c.metadata?.institution || "",
                         uploadedBy: c.metadata?.uploadedBy || "",
                         chunkIndex: c.metadata?.chunkIndex || 0,
                         createdAt: c.createdAt || "",
                         sourceType: "document",
                         URL: ""
                     },
-                    score: 0.85 // High baseline for direct keyword hits
-                }));
+                    score
+                };
+            });
 
-                const candidateIds = new Set(candidates.map(c => c.id));
-                fallbackCandidates.forEach(fc => {
-                    if (!candidateIds.has(fc.id)) {
-                        candidates.push(fc);
-                    }
-                });
+            keywordCandidates.sort((a, b) => b.score - a.score);
+        }
+    } catch (mongoSearchError) {
+        console.error("[Retrieval Service] MongoDB keyword search failed:", mongoSearchError.message);
+    }
+
+    // 3. Combine and Deduplicate
+    const combined = [...semanticCandidates, ...keywordCandidates];
+    const seen = new Set();
+    const uniqueCandidates = [];
+
+    for (const cand of combined) {
+        const contentSig = `${cand.metadata?.documentId}_${cand.content.trim().slice(0, 100)}`;
+        if (!seen.has(contentSig)) {
+            seen.add(contentSig);
+            // Ensure both institution and university are set in metadata
+            if (cand.metadata) {
+                cand.metadata.university = cand.metadata.institution || cand.metadata.university || "";
+                cand.metadata.filename = cand.metadata.filename || cand.metadata.originalName || "";
             }
-        } catch (mongoSearchError) {
-            console.error("[Retrieval Service] MongoDB keyword fallback failed:", mongoSearchError.message);
+            uniqueCandidates.push(cand);
+        } else {
+            const existing = uniqueCandidates.find(c => `${c.metadata?.documentId}_${c.content.trim().slice(0, 100)}` === contentSig);
+            if (existing && cand.score > existing.score) {
+                existing.score = cand.score;
+                if (cand.initialScore) existing.initialScore = cand.initialScore;
+            }
         }
     }
 
-    return candidates;
+    // Sort descending by final score
+    uniqueCandidates.sort((a, b) => b.score - a.score);
+
+    return uniqueCandidates;
 };
 
 module.exports = {

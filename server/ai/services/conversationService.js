@@ -170,12 +170,14 @@ const saveMessageTurn = async ({ user, conversationId, question, response, inten
             }
         });
 
+        const finalIntent = Array.isArray(intent) ? intent.join(",") : String(intent || "unknown");
+
         chat.messages.push({
             id: uMsgId,
             parentId: finalParentId,
             role: "user",
             content: question,
-            intent: intent,
+            intent: finalIntent,
             confidence: confidence,
             provider: "user",
             topic: topic || "",
@@ -187,7 +189,7 @@ const saveMessageTurn = async ({ user, conversationId, question, response, inten
             parentId: uMsgId,
             role: "assistant",
             content: response.answer || response,
-            intent: intent,
+            intent: finalIntent,
             confidence: response.confidence === "high" ? 0.9 : response.confidence === "medium" ? 0.65 : 0.25,
             sources: response.sources || [],
             provider,

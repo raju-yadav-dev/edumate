@@ -12,6 +12,76 @@ const UniversalExtractor = require("../../crawler/extractors/UniversalExtractor"
 const BUCKET = process.env.SUPABASE_STORAGE_BUCKET || process.env.SUPABASE_BUCKET || "documents";
 
 const bufferCache = new Map();
+
+/**
+ * Uses Gemini API to transcribe scanned PDF page-by-page.
+ */
+const extractTextFromScannedPdf = async (buffer) => {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+        throw new Error("GEMINI_API_KEY is not set. Cannot run OCR fallback.");
+    }
+    const model = process.env.GEMINI_COMPLETION_MODEL || "gemini-3.5-flash";
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    
+    const requestBody = {
+        contents: [
+            {
+                parts: [
+                    {
+                        inlineData: {
+                            mimeType: "application/pdf",
+                            data: buffer.toString("base64")
+                        }
+                    },
+                    {
+                        text: "Extract all the text from this scanned PDF document page-by-page. For each page, please start with [PAGE_START_X] and end with [PAGE_END_X], where X is the page number. Ensure no pages are omitted and formatting/layout is preserved where possible."
+                    }
+                ]
+            }
+        ]
+    };
+    
+    const fetch = (() => {
+        try {
+            return require("node-fetch");
+        } catch {
+            return global.fetch;
+        }
+    })();
+
+    const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestBody)
+    });
+    
+    const payload = await response.json();
+    if (!response.ok) {
+        throw new Error(payload.error?.message || `Gemini scanned-PDF OCR failed with status ${response.status}`);
+    }
+    
+    const extractedText = payload.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    
+    const pages = [];
+    const pageRegex = /\[PAGE_START_(\d+)\]([\s\S]*?)\[PAGE_END_\1\]/g;
+    let match;
+    while ((match = pageRegex.exec(extractedText)) !== null) {
+        pages.push({
+            pageNumber: parseInt(match[1]),
+            text: match[2].trim()
+        });
+    }
+    
+    if (pages.length === 0) {
+        pages.push({
+            pageNumber: 1,
+            text: extractedText.trim()
+        });
+    }
+    
+    return pages;
+};
 let isWorkerRunning = false;
 const INDEXING_CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.INDEXING_CONCURRENCY) || 3));
 
@@ -200,17 +270,27 @@ const runIndexingJob = async (documentId) => {
             ocrFlag = parsed.requiresOcr;
             pageCount = parsed.numPages || 1;
             
-            // Collect full text to measure char count
-            const fullText = (parsed.pages || []).map(p => p.text || "").join("\n");
+            let pages = parsed.pages || [];
+            const fullText = pages.map(p => p.text || "").join("\n");
             text = fullText;
 
             if (ocrFlag || text.trim().length === 0) {
-                throw new Error("Extraction returned empty text (Image-only or scanned PDF with no text layer).");
+                console.log(`[INDEX] PDF requires OCR or has no text layer. Attempting Gemini scanned-PDF OCR...`);
+                try {
+                    pages = await withTimeout(extractTextFromScannedPdf(buffer), 60000, "Gemini OCR timed out (60s)");
+                    pageCount = pages.length;
+                    text = pages.map(p => p.text || "").join("\n");
+                    ocrFlag = false; // Successfully ran OCR
+                    console.log(`[INDEX] Gemini scanned-PDF OCR successful. Extracted ${text.length} characters.`);
+                } catch (ocrErr) {
+                    console.error("[INDEX] Gemini scanned-PDF OCR failed:", ocrErr.message);
+                    throw new Error(`Scanned PDF extraction failed (OCR unsuccessful): ${ocrErr.message}`);
+                }
             }
 
             // 2. Chunking Stage
             console.log(`[CHUNK] Started`);
-            for (const page of parsed.pages || []) {
+            for (const page of pages) {
                 const pageChunks = splitter.splitText(page.text || "");
                 pageChunks.forEach((chunk) => {
                     rawChunks.push({ content: chunk, pageNumber: page.pageNumber });

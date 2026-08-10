@@ -187,37 +187,174 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
             // TIER 1: ADMIN-UPLOADED DOCUMENTS
             // ==========================================
             console.log("[CHAT] Evaluating Tier 1 (Admin-Uploaded Documents)...");
+            // ==========================================
+            // TIER 1: ADMIN-UPLOADED DOCUMENTS (Intent-Specific & Validated)
+            // ==========================================
+            console.log("[CHAT] Evaluating Tier 1 (Admin-Uploaded Documents with Intent Decomposition)...");
+            
+            const targetIntents = [];
+            const qCombined = (String(normalizedQuestion) + " " + String(rewrittenQuery)).toLowerCase();
+            
+            if (/\b(fee|fees|tuition|payment|cost|charge|charges)\b/i.test(qCombined)) {
+                targetIntents.push("fee");
+            }
+            if (/\b(faculty|faculties|teacher|teachers|professor|professors|staff|instructor|instructors|members)\b/i.test(qCombined)) {
+                targetIntents.push("faculty");
+            }
+            if (/\b(eligibility|criteria|requirement|requirements|qualification|qualifications|eligible)\b/i.test(qCombined)) {
+                targetIntents.push("eligibility");
+            }
+            if (/\b(hod|head|chairperson|coordinator|dean|director)\b/i.test(qCombined)) {
+                targetIntents.push("HOD");
+            }
+            if (/\b(duration|length|period|time|years|semesters|long)\b/i.test(qCombined)) {
+                targetIntents.push("duration");
+            }
+            
+            if (targetIntents.length === 0) {
+                if (intent === "fees") targetIntents.push("fee");
+                else if (intent === "faculty") targetIntents.push("faculty");
+                else targetIntents.push(intent || "general_chat");
+            }
+            
+            const INTENT_EXPANSIONS = {
+                fee: ["tuition fee", "course fee", "semester fee", "annual fee", "admission fee", "fee structure", "payment", "fees"],
+                faculty: ["faculty details", "faculty members", "professors", "teachers", "teaching staff", "faculty list"],
+                eligibility: ["eligibility criteria", "admission criteria", "eligibility requirements", "admission requirements", "qualification"],
+                HOD: ["HOD", "head of department", "head of computational sciences", "department head", "HOD qualification", "HOD details"],
+                duration: ["duration", "course duration", "duration of course", "course length", "how many years", "semesters"]
+            };
+
+            const retrievedResultsByIntent = {};
             const combinedDocChunks = [];
             const docSeenIds = new Set();
+            const adminDocumentsSearched = [];
 
-            for (const subq of activeSubqueries) {
-                const subCandidates = await SearchManager.searchLocalPdfs(subq, activeUser, 6);
-                const subRanked = await RankingEngine.rerankCandidates(subq, subCandidates, activeUser);
+            const validateEvidenceWithLLM = async (tgtIntent, chunks, courseTopic) => {
+                if (!chunks || chunks.length === 0) return [];
+                const candidates = chunks.slice(0, 5);
+                const chunksText = candidates.map((c, idx) => {
+                    return `[Chunk Index: ${idx}]\nDocument: ${c.metadata?.filename || c.metadata?.originalName || "Unknown"}\nContent: ${c.content}`;
+                }).join("\n\n");
+                
+                const systemPrompt = `You are a precise academic data auditor.
+Analyze the provided text chunks and determine if they contain concrete, explicit, and factual evidence for the requested intent: "${tgtIntent}" for the course/subject: "${courseTopic || "general"}".
 
-                // Detailed retrieval logging format as requested
-                console.log("\n==================================================");
-                console.log(`QUERY: ${normalizedQuestion}`);
-                console.log(`SUBQUERY: ${subq}`);
-                console.log(`SOURCE: Admin-Uploaded Documents (Tier 1)`);
-                if (subRanked.length === 0) {
-                    console.log("DOCUMENT: None matched");
-                    console.log("SCORE: 0");
-                    console.log("RERANK SCORE: 0");
-                    console.log("SELECTED CHUNKS: 0");
-                } else {
-                    subRanked.forEach((chunk, idx) => {
-                        console.log(`DOCUMENT: ${chunk.metadata?.originalName || chunk.metadata?.filename || "Unknown"}`);
-                        console.log(`SCORE: ${chunk.initialScore ?? chunk.score}`);
-                        console.log(`RERANK SCORE: ${chunk.rerankScore ?? chunk.score}`);
-                        console.log(`SELECTED CHUNKS [${idx + 1}]: ${chunk.content.slice(0, 150).replace(/\n/g, " ")}...`);
-                    });
+Validation Rules for Intent "fee":
+- The text must contain actual fee, tuition, payment, or cost details (e.g. monetary amounts in INR/₹, payment rules, fee structures).
+- Do NOT classify general course benefits/features (like "access to modern computer labs", "expert mentorship", "industry projects", "placement assistance") as fees.
+- If a chunk mentions "fee structure" but contains no actual figures, payment details, or rules, it is NOT relevant.
+- Do NOT infer or invent a fee.
+
+Validation Rules for Intent "faculty":
+- The text must contain information about faculty members, professors, teachers, lecturers, teaching staff (e.g., names, profiles, credentials).
+- Do NOT accept general statements about "expert faculty" without names or specific details.
+
+Validation Rules for Intent "eligibility":
+- The text must contain admission criteria, eligibility requirements, minimum marks, or qualifications.
+
+Validation Rules for Intent "HOD":
+- The text must contain details about the HOD (Head of Department), department head, or director (e.g., name, qualification, role).
+
+Validation Rules for Intent "duration":
+- The text must contain the course duration or length (e.g., years, semesters).
+
+For other intents:
+- The text must contain direct, relevant answers to the intent.
+
+Return a JSON array of objects, one for each chunk index, indicating if it is relevant. Format:
+[
+  { "index": 0, "relevant": true, "reason": "Contains actual fee figures." },
+  { "index": 1, "relevant": false, "reason": "Only mentions labs and mentorship, which are benefits, not fees." }
+]
+Return ONLY a valid JSON block, without markdown formatting or backticks.`;
+
+                const userPrompt = `Chunks to audit:\n\n${chunksText}`;
+                
+                try {
+                    const response = await llmService.generateCompletion([
+                        { role: "system", content: "You are a precise JSON evidence auditor." },
+                        { role: "user", content: systemPrompt + "\n\n" + userPrompt }
+                    ], { temperature: 0.1, maxOutputTokens: 300 });
+                    
+                    const cleaned = String(response)
+                        .replace(/```json/g, "")
+                        .replace(/```/g, "")
+                        .trim();
+                    const parsed = JSON.parse(cleaned);
+                    if (Array.isArray(parsed)) {
+                        return parsed;
+                    }
+                } catch (e) {
+                    console.error(`[RAG EVIDENCE AUDIT] Audit failed for intent ${tgtIntent}:`, e.message);
                 }
-                console.log("==================================================\n");
+                return candidates.map((_, idx) => ({ index: idx, relevant: true, reason: "Fallback (audit failed)" }));
+            };
 
-                const topSubChunks = subRanked.filter(c => c.score >= RankingEngine.SIMILARITY_CONFIDENCE_THRESHOLD);
-                const selectedForSub = topSubChunks.length > 0 ? topSubChunks.slice(0, 3) : subRanked.slice(0, 2);
+            for (const targetIntent of targetIntents) {
+                const expansions = INTENT_EXPANSIONS[targetIntent];
+                let searchQuery = rewrittenQuery;
+                if (expansions) {
+                    searchQuery = `${rewrittenQuery}, ${expansions.join(", ")}`;
+                }
 
-                for (const chunk of selectedForSub) {
+                console.log(`[RAG INTENT RETRIEVAL] Searching for intent: "${targetIntent}" with expanded query: "${searchQuery}"`);
+
+                let chunks = await SearchManager.searchLocalPdfs(searchQuery, activeUser, 10);
+                let ranked = await RankingEngine.rerankCandidates(searchQuery, chunks, activeUser);
+
+                let validatedChunks = [];
+                let validationDetails = [];
+
+                if (ranked.length > 0) {
+                    const validationResult = await validateEvidenceWithLLM(targetIntent, ranked, entities?.course || resolvedActiveTopic);
+                    validationDetails = validationResult;
+                    
+                    for (const item of validationResult) {
+                        if (item.relevant) {
+                            const chunk = ranked[item.index];
+                            if (chunk) {
+                                validatedChunks.push(chunk);
+                            }
+                        }
+                    }
+                }
+
+                if (validatedChunks.length === 0) {
+                    console.log(`[RAG INTENT RETRIEVAL] No relevant evidence found for intent "${targetIntent}" in primary search. Searching again...`);
+                    const broaderQuery = `${activeUser.institution || ""} ${targetIntent} ${entities?.course || resolvedActiveTopic || ""}`.trim();
+                    let fallbackChunks = await SearchManager.searchLocalPdfs(broaderQuery, activeUser, 10);
+                    let fallbackRanked = await RankingEngine.rerankCandidates(broaderQuery, fallbackChunks, activeUser);
+                    
+                    if (fallbackRanked.length > 0) {
+                        const fallbackValidationResult = await validateEvidenceWithLLM(targetIntent, fallbackRanked, entities?.course || resolvedActiveTopic);
+                        validationDetails = fallbackValidationResult;
+                        
+                        for (const item of fallbackValidationResult) {
+                            if (item.relevant) {
+                                const chunk = fallbackRanked[item.index];
+                                if (chunk) {
+                                    validatedChunks.push(chunk);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                retrievedResultsByIntent[targetIntent] = {
+                    chunks: validatedChunks,
+                    allCandidates: ranked,
+                    validation: validationDetails
+                };
+
+                ranked.forEach(c => {
+                    const docName = c.metadata?.filename || c.metadata?.originalName;
+                    if (docName && !adminDocumentsSearched.includes(docName)) {
+                        adminDocumentsSearched.push(docName);
+                    }
+                });
+
+                for (const chunk of validatedChunks) {
                     if (!docSeenIds.has(chunk.id)) {
                         docSeenIds.add(chunk.id);
                         combinedDocChunks.push(chunk);
@@ -226,9 +363,24 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
             }
 
             adminDocsCount = combinedDocChunks.length;
-            const maxDocScore = combinedDocChunks.length > 0 ? Math.max(...combinedDocChunks.map(c => c.score)) : 0;
+            
+            let groundingInstructions = "";
+            for (const targetIntent of targetIntents) {
+                const validated = retrievedResultsByIntent[targetIntent]?.chunks || [];
+                if (validated.length === 0) {
+                    if (targetIntent === "fee") {
+                        groundingInstructions += `\n- The fee information was not found in the Admin documents. You MUST return exactly: "The fee information was not found in the Admin documents." for the fee section. Do not fabricate, infer, or guess any fee. Do not classify course benefits/features as fees.`;
+                    } else {
+                        groundingInstructions += `\n- The ${targetIntent} information was not found in the Admin documents. You MUST explicitly state that the ${targetIntent} information was not found in the Admin documents.`;
+                    }
+                } else {
+                    if (targetIntent === "fee") {
+                        groundingInstructions += `\n- For the fee information: Answer ONLY from the retrieved evidence. Ensure you do not classify course benefits/features (labs, mentorship, projects) as fees. Do not infer or invent a fee. Do not use generic phrases like "average fee may be...", "typically...", "generally..." unless the user explicitly asks for general information.`;
+                    }
+                }
+            }
 
-            if (maxDocScore >= RankingEngine.SIMILARITY_CONFIDENCE_THRESHOLD && combinedDocChunks.length > 0) {
+            if (combinedDocChunks.length > 0 || groundingInstructions !== "") {
                 console.log(`[CHAT] Tier 1 verified as SUFFICIENT with ${combinedDocChunks.length} chunks.`);
 
                 const tempMessages = promptService.buildPromptMessages({
@@ -244,21 +396,74 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
                     activeTopic: resolvedActiveTopic
                 });
 
-                // RAG debug logging for final selected chunks and prompt context
-                console.log("\n[RAG DEBUG] ==================== LLM PROMPT CONTEXT ====================");
-                console.log("[RAG DEBUG] Final chunks selected for the LLM:");
-                combinedDocChunks.forEach((chunk, idx) => {
-                    console.log(`  [Chunk ${idx + 1}]`);
-                    console.log(`    documentId: ${chunk.metadata?.documentId}`);
-                    console.log(`    filename  : ${chunk.metadata?.filename || chunk.metadata?.originalName || "N/A"}`);
-                    console.log(`    chunkId   : ${chunk.id}`);
-                    console.log(`    text      : "${chunk.content.replace(/\n/g, " ").slice(0, 200)}..."`);
-                    console.log(`    metadata/source  : ${JSON.stringify(chunk.metadata)}`);
-                });
-                console.log(`[RAG DEBUG] Exact final context sent to the LLM:\n${JSON.stringify(tempMessages, null, 2)}`);
-                console.log("[RAG DEBUG] ============================================================\n");
+                if (tempMessages.length > 0 && tempMessages[0].role === "system") {
+                    tempMessages[0].content += `\n\n## STRICT GROUNDING AND CONSTRAINTS FOR THIS QUERY\n1. Answer ONLY from retrieved evidence.\n2. If evidence is missing for a requested part of the question (e.g. fee or faculty), state exactly that the information was not found in the Admin documents. Do not fill missing evidence with general knowledge.\n3. For the fee section: do not classify course benefits/features (e.g. labs, mentorship, projects) as fees. Do not infer or invent a fee. Do not use generic phrases like "average fee may be...", "typically...", "generally..." unless the user explicitly asks for general information.\n4. Never let evidence retrieved for "faculty" satisfy the "fee" requirement.\n5. If the Admin documents do not contain the requested fee, return exactly: "The fee information was not found in the Admin documents." for that section.\n${groundingInstructions}`;
+                }
 
-                const attemptResponse = await llmService.generateCompletion(tempMessages);
+                console.log("\n==================== [DEBUG RAG RETRIEVAL] ====================");
+                console.log(`Question: ${normalizedQuestion}`);
+                console.log(`Intent(s): ${targetIntents.join(", ")}`);
+                console.log(`Admin documents searched:\n  ${adminDocumentsSearched.length > 0 ? adminDocumentsSearched.join("\n  ") : "None"}`);
+                console.log("----------------------------------------------------------------");
+
+                for (const targetIntent of targetIntents) {
+                    const result = retrievedResultsByIntent[targetIntent];
+                    if (result) {
+                        console.log(`Intent: ${targetIntent}`);
+                        console.log(`Top retrieved chunks & Scores:`);
+                        result.allCandidates.slice(0, 5).forEach((c, idx) => {
+                            console.log(`  [Chunk ${idx + 1}] Score: ${c.score.toFixed(4)} | Doc: ${c.metadata?.filename || c.metadata?.originalName} | Text: ${c.content.replace(/\n/g, " ").slice(0, 100)}...`);
+                        });
+                        console.log(`Evidence accepted/rejected:`);
+                        result.validation.forEach((v) => {
+                            const cand = result.allCandidates[v.index];
+                            if (cand) {
+                                console.log(`  [Chunk ${v.index + 1}] ${v.relevant ? "ACCEPTED" : "REJECTED"} | Reason: ${v.reason}`);
+                            }
+                        });
+                        console.log("----------------------------------------------------------------");
+                    }
+                }
+
+                console.log(`Final context sent to LLM:\n${JSON.stringify(tempMessages, null, 2)}`);
+                console.log("===============================================================\n");
+
+                let attemptResponse = await llmService.generateCompletion(tempMessages);
+
+                const performGroundingCheck = async (genAnswer, valChunks) => {
+                    if (!genAnswer || genAnswer.trim() === "") return genAnswer;
+                    if (valChunks.length === 0) return genAnswer;
+                    const chunksText = valChunks.map((c, idx) => {
+                        return `[Source: ${c.metadata?.filename || c.metadata?.originalName}, ChunkId: ${c.id}, DocumentId: ${c.metadata?.documentId}]\nContent: ${c.content}`;
+                    }).join("\n\n");
+                    
+                    const gSystemPrompt = `You are a strict academic verification assistant.
+Your task is to perform an evidence-grounding check on a generated chatbot answer.
+Verify that every factual claim (names, numbers, criteria, etc.) in the answer is directly and explicitly supported by the provided source chunks.
+
+Constraints:
+1. Every factual claim MUST be traceable to a source chunk.
+2. If a sentence in the answer contains any claim that is NOT found in the source chunks (e.g. general knowledge, external information, or inferred facts), you MUST rewrite or edit the answer to remove that ungrounded claim.
+3. If the answer contains a statement like "The fee/faculty/HOD/eligibility information was not found in the Admin documents", that is a valid controlled response and is grounded.
+4. Keep the same structure, tone, and formatting of the answer where possible, only removing or modifying ungrounded parts.
+
+Output ONLY the verified, grounded answer text. Do not add any introduction, explanation, backticks, or markdown wrappers.`;
+
+                    const gUserPrompt = `Source Chunks:\n${chunksText}\n\nGenerated Answer to verify:\n${genAnswer}`;
+                    try {
+                        const verified = await llmService.generateCompletion([
+                            { role: "system", content: "You are a strict grounding verification assistant." },
+                            { role: "user", content: gSystemPrompt + "\n\n" + gUserPrompt }
+                        ], { temperature: 0.1 });
+                        return String(verified).trim();
+                    } catch (e) {
+                        console.error("[RAG GROUNDING CHECK] Grounding check failed:", e.message);
+                        return genAnswer;
+                    }
+                };
+
+                attemptResponse = await performGroundingCheck(attemptResponse, combinedDocChunks);
+
                 textResponse = attemptResponse;
                 retrievedChunks = combinedDocChunks;
                 activeQuestionType = QUESTION_TYPES.UNIVERSITY_SPECIFIC;
@@ -268,9 +473,9 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
             }
 
             // ==========================================
-            // TIER 2: ADMIN-APPROVED WEBSITE URLS (Only if Tier 1 insufficient)
+            // TIER 2: ADMIN-APPROVED WEBSITE URLS (Bypassed for Phase 1 Focus on Admin Documents)
             // ==========================================
-            if (!textResponse) {
+            if (!textResponse && false) {
                 console.log("[CHAT] Tier 1 insufficient. Evaluating Tier 2 (Crawled Website URLs)...");
                 const combinedSiteChunks = [];
                 const siteSeenIds = new Set();
@@ -343,9 +548,9 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
             }
 
             // ==========================================
-            // TIER 3: INTERNET SEARCH (Only if Tiers 1 & 2 insufficient)
+            // TIER 3: INTERNET SEARCH (Bypassed for Phase 1 Focus on Admin Documents)
             // ==========================================
-            if (!textResponse) {
+            if (!textResponse && false) {
                 console.log("[CHAT] Tiers 1 & 2 insufficient. Evaluating Tier 3 (Internet Search)...");
                 const combinedWebResults = [];
                 const webSeenUrls = new Set();
@@ -530,7 +735,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
         conversationId,
         question: normalizedQuestion,
         response: formatted,
-        intent,
+        intent: Array.isArray(intent) ? intent.join(",") : String(intent || "unknown"),
         confidence: intentResult.confidence,
         provider,
         responseTimeMs,
