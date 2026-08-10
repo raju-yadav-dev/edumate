@@ -11,8 +11,6 @@ const UniversalExtractor = require("../../crawler/extractors/UniversalExtractor"
 
 const BUCKET = process.env.SUPABASE_STORAGE_BUCKET || process.env.SUPABASE_BUCKET || "documents";
 
-const bufferCache = new Map();
-
 /**
  * Uses Gemini API to transcribe scanned PDF page-by-page.
  */
@@ -21,8 +19,9 @@ const extractTextFromScannedPdf = async (buffer) => {
     if (!apiKey) {
         throw new Error("GEMINI_API_KEY is not set. Cannot run OCR fallback.");
     }
-    const model = process.env.GEMINI_COMPLETION_MODEL || "gemini-3.5-flash";
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    const configuredModel = process.env.GEMINI_COMPLETION_MODEL;
+    const model = (!configuredModel || configuredModel === "gemini-2.5-flash") ? "gemini-3.5-flash" : configuredModel;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
     
     const requestBody = {
         contents: [
@@ -52,7 +51,10 @@ const extractTextFromScannedPdf = async (buffer) => {
 
     const response = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": apiKey
+        },
         body: JSON.stringify(requestBody)
     });
     
@@ -82,6 +84,7 @@ const extractTextFromScannedPdf = async (buffer) => {
     
     return pages;
 };
+
 let isWorkerRunning = false;
 const INDEXING_CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.INDEXING_CONCURRENCY) || 3));
 

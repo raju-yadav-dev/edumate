@@ -18,8 +18,9 @@ class ImageExtractor {
             try {
                 const apiKey = process.env.GEMINI_API_KEY;
                 if (!apiKey) throw err;
-                const model = process.env.GEMINI_COMPLETION_MODEL || "gemini-3.5-flash";
-                const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+                const configuredModel = process.env.GEMINI_COMPLETION_MODEL;
+                const model = (!configuredModel || configuredModel === "gemini-2.5-flash") ? "gemini-3.5-flash" : configuredModel;
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
                 const fetch = (() => {
                     try {
                         return require("node-fetch");
@@ -37,7 +38,10 @@ class ImageExtractor {
                 };
                 const res = await fetch(url, {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    headers: {
+                        "Content-Type": "application/json",
+                        "x-goog-api-key": apiKey
+                    },
                     body: JSON.stringify(requestBody)
                 });
                 const payload = await res.json();

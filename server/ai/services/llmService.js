@@ -9,6 +9,14 @@ const fetch = (() => {
     }
 })();
 
+const getActiveModel = () => {
+    const configured = process.env.GEMINI_COMPLETION_MODEL;
+    if (!configured || configured === "gemini-2.5-flash") {
+        return "gemini-3.5-flash";
+    }
+    return configured;
+};
+
 /**
  * Call Google Gemini generateContent API
  */
@@ -17,7 +25,7 @@ const callGeminiCompletion = async (messages, options = {}) => {
     if (!apiKey) {
         throw new Error("GEMINI_API_KEY is not set.");
     }
-    const model = process.env.GEMINI_COMPLETION_MODEL || "gemini-3.5-flash";
+    const model = getActiveModel();
     
     const contents = [];
     let systemInstruction = "";
@@ -47,10 +55,13 @@ const callGeminiCompletion = async (messages, options = {}) => {
         };
     }
     
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
     const response = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": apiKey
+        },
         body: JSON.stringify(requestBody)
     });
     
@@ -70,7 +81,7 @@ const callGeminiStream = async (messages, onChunk, options = {}) => {
     if (!apiKey) {
         throw new Error("GEMINI_API_KEY is not set.");
     }
-    const model = process.env.GEMINI_COMPLETION_MODEL || "gemini-3.5-flash";
+    const model = getActiveModel();
     
     const contents = [];
     let systemInstruction = "";
@@ -100,10 +111,13 @@ const callGeminiStream = async (messages, onChunk, options = {}) => {
         };
     }
     
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent`;
     const response = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": apiKey
+        },
         body: JSON.stringify(requestBody)
     });
     
@@ -153,168 +167,51 @@ const callGeminiStream = async (messages, onChunk, options = {}) => {
 };
 
 /**
- * Call local Ollama chat API
- */
-const callOllamaCompletion = async (messages, options = {}) => {
-    const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
-    const model = process.env.OLLAMA_MODEL || "llama3.2:3b";
-    
-    const response = await fetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            model,
-            messages,
-            stream: false,
-            options: {
-                temperature: 0.2
-            }
-        })
-    });
-    
-    if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`Ollama failed with status ${response.status}: ${errText}`);
-    }
-    
-    const payload = await response.json();
-    return payload.message?.content || "";
-};
-
-/**
- * Call local Ollama streaming chat API
- */
-const callOllamaStream = async (messages, onChunk, options = {}) => {
-    const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
-    const model = process.env.OLLAMA_MODEL || "llama3.2:3b";
-    
-    const response = await fetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            model,
-            messages,
-            stream: true,
-            options: {
-                temperature: 0.2
-            }
-        })
-    });
-    
-    if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`Ollama stream failed with status ${response.status}: ${errText}`);
-    }
-    
-    const decoder = new (require("util").TextDecoder || global.TextDecoder)("utf-8");
-    let buffer = "";
-    let fullText = "";
-    
-    for await (const chunk of response.body) {
-        const text = typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: true });
-        buffer += text;
-        const lines = buffer.split("\n");
-        buffer = lines.pop();
-        for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed) continue;
-            try {
-                const parsed = JSON.parse(trimmed);
-                const content = parsed.message?.content || "";
-                if (content) {
-                    fullText += content;
-                    onChunk(content);
-                }
-            } catch (err) {}
-        }
-    }
-    return fullText;
-};
-
-/**
- * Unified completion handler calling Groq with fallback to Gemini and Ollama.
+ * Unified completion handler calling Gemini.
  * @param {Array<Object>} messages - Array of { role, content }
  * @param {Object} [options={}] - Optional parameter overrides
  * @returns {Promise<string>}
  */
 const generateCompletion = async (messages, options = {}) => {
-    const timeoutMs = options.timeoutMs || 25000;
-    const provider = process.env.LLM_PROVIDER || "groq";
+    const model = getActiveModel();
+    const apiKey = process.env.GEMINI_API_KEY;
+    const authStatus = apiKey ? "API key configured" : "API key missing";
     
-    console.log(`[LLM Service] Requesting completion via primary provider: ${provider}...`);
-    
-    const errors = [];
-    
-    // Ordered providers list based on primary selection
-    const providersToTry = [provider];
-    if (provider !== "groq") providersToTry.push("groq");
-    if (provider !== "gemini") providersToTry.push("gemini");
-    if (provider !== "ollama") providersToTry.push("ollama");
-
-    for (const activeProvider of providersToTry) {
-        try {
-            if (activeProvider === "groq") {
-                const result = await groqProviderManager.generateCompletion({ messages, timeoutMs });
-                if (result.success) {
-                    return result.content;
-                }
-                const errorMsg = result.failures && result.failures.length > 0
-                    ? result.failures.map(f => `[${f.provider}] Attempt ${f.attempt}: ${f.message}`).join("; ")
-                    : "No working Groq API keys available.";
-                throw new Error(errorMsg);
-            } else if (activeProvider === "gemini") {
-                return await callGeminiCompletion(messages, options);
-            } else if (activeProvider === "ollama") {
-                return await callOllamaCompletion(messages, options);
-            }
-        } catch (err) {
-            console.warn(`[LLM Service] Provider '${activeProvider}' failed: ${err.message}. Trying next available provider...`);
-            errors.push({ provider: activeProvider, message: err.message });
-        }
+    try {
+        const result = await callGeminiCompletion(messages, options);
+        console.log(`Provider: gemini`);
+        console.log(`Model: ${model}`);
+        console.log(`Authentication: ${authStatus}`);
+        console.log(`Request: SUCCESS`);
+        return result;
+    } catch (err) {
+        console.log(`Provider: gemini`);
+        console.log(`Model: ${model}`);
+        console.log(`Authentication: ${authStatus}`);
+        console.log(`Request: FAILED`);
+        throw err;
     }
-
-    const combinedError = errors.map(e => `[${e.provider}]: ${e.message}`).join(" | ");
-    throw new Error(`LLM Service failed all providers. Details: ${combinedError}`);
 };
 
 const generateStream = async (messages, onChunk, options = {}) => {
-    const timeoutMs = options.timeoutMs || 25000;
-    const signal = options.signal;
-    const provider = process.env.LLM_PROVIDER || "groq";
-
-    console.log(`[LLM Service] Requesting streaming completion via primary provider: ${provider}...`);
+    const model = getActiveModel();
+    const apiKey = process.env.GEMINI_API_KEY;
+    const authStatus = apiKey ? "API key configured" : "API key missing";
     
-    const errors = [];
-    
-    const providersToTry = [provider];
-    if (provider !== "groq") providersToTry.push("groq");
-    if (provider !== "gemini") providersToTry.push("gemini");
-    if (provider !== "ollama") providersToTry.push("ollama");
-
-    for (const activeProvider of providersToTry) {
-        try {
-            if (activeProvider === "groq") {
-                const result = await groqProviderManager.generateStream({ messages, onChunk, timeoutMs, signal });
-                if (result.success) {
-                    return result.content;
-                }
-                const errorMsg = result.failures && result.failures.length > 0
-                    ? result.failures.map(f => `[${f.provider}] Attempt ${f.attempt}: ${f.message}`).join("; ")
-                    : "No working Groq API keys available.";
-                throw new Error(errorMsg);
-            } else if (activeProvider === "gemini") {
-                return await callGeminiStream(messages, onChunk, options);
-            } else if (activeProvider === "ollama") {
-                return await callOllamaStream(messages, onChunk, options);
-            }
-        } catch (err) {
-            console.warn(`[LLM Service] Streaming provider '${activeProvider}' failed: ${err.message}. Trying next available provider...`);
-            errors.push({ provider: activeProvider, message: err.message });
-        }
+    try {
+        const result = await callGeminiStream(messages, onChunk, options);
+        console.log(`Provider: gemini`);
+        console.log(`Model: ${model}`);
+        console.log(`Authentication: ${authStatus}`);
+        console.log(`Request: SUCCESS`);
+        return result;
+    } catch (err) {
+        console.log(`Provider: gemini`);
+        console.log(`Model: ${model}`);
+        console.log(`Authentication: ${authStatus}`);
+        console.log(`Request: FAILED`);
+        throw err;
     }
-
-    const combinedError = errors.map(e => `[${e.provider}]: ${e.message}`).join(" | ");
-    throw new Error(`LLM Service streaming failed all providers. Details: ${combinedError}`);
 };
 
 module.exports = {

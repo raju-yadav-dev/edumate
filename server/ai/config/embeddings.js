@@ -145,52 +145,7 @@ const embedText = async (text, options = {}) => {
 
     const provider = getEmbeddingProvider();
 
-    if (provider === "ollama") {
-        const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
-        const model = process.env.EMBEDDING_MODEL || process.env.OLLAMA_EMBEDDING_MODEL || process.env.OLLAMA_MODEL || "llama3.2:3b";
-
-        try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), options.timeout || 8000);
-            const response = await fetch(`${baseUrl}/api/embed`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                signal: controller.signal,
-                body: JSON.stringify({ model, input: text })
-            });
-            clearTimeout(timeoutId);
-
-            if (response.ok) {
-                const payload = await response.json();
-                if (payload.embeddings && payload.embeddings[0]) {
-                    return payload.embeddings[0];
-                }
-            }
-        } catch (e) {
-            // Fall back to /api/embeddings
-        }
-
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), options.timeout || 8000);
-        const response = await fetch(`${baseUrl}/api/embeddings`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            signal: controller.signal,
-            body: JSON.stringify({ model, prompt: text })
-        });
-        clearTimeout(timeoutId);
-
-        if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`Ollama Embedding API error status ${response.status}: ${errText}`);
-        }
-
-        const payload = await response.json();
-        if (!payload.embedding || !Array.isArray(payload.embedding)) {
-            throw new Error("Ollama Embedding response did not return a valid embedding vector.");
-        }
-        return payload.embedding;
-    } else if (provider === "jina") {
+    if (provider === "jina") {
         const apiKey = process.env.JINA_API_KEY;
         if (!apiKey) {
             throw new Error("[Embedding API] JINA_API_KEY is not set.");
@@ -257,38 +212,7 @@ const embedTexts = async (texts, options = {}) => {
 
     const provider = getEmbeddingProvider();
 
-    if (provider === "ollama") {
-        const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
-        const model = process.env.EMBEDDING_MODEL || process.env.OLLAMA_EMBEDDING_MODEL || process.env.OLLAMA_MODEL || "llama3.2:3b";
-
-        try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 15000);
-            const response = await fetch(`${baseUrl}/api/embed`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                signal: controller.signal,
-                body: JSON.stringify({ model, input: sanitized })
-            });
-            clearTimeout(timeoutId);
-
-            if (response.ok) {
-                const payload = await response.json();
-                if (payload.embeddings && Array.isArray(payload.embeddings)) {
-                    return payload.embeddings;
-                }
-            }
-        } catch (e) {
-            // Fall back to sequential processing
-        }
-
-        const results = [];
-        for (const text of sanitized) {
-            const emb = await embedText(text, options);
-            results.push(emb);
-        }
-        return results;
-    } else if (provider === "jina") {
+    if (provider === "jina") {
         const apiKey = process.env.JINA_API_KEY;
         if (!apiKey) {
             throw new Error("[Embedding API] JINA_API_KEY is not set.");

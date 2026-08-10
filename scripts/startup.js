@@ -16,24 +16,14 @@ const { verifyEnvironment } = require("./verifyEnvironment");
 const { startQdrantContainer } = require("./dockerManager");
 const { verifyMongo } = require("./verifyMongo");
 const { verifySupabase } = require("./verifySupabase");
-const { verifyGroq } = require("./verifyGroq");
+const { verifyGemini } = require("./verifyGemini");
 const { verifyQdrant } = require("./verifyQdrant");
 const { printBanner, printDashboard } = require("./banner");
 
-const pingOllama = async (baseUrl) => {
-    try {
-        const response = await fetch(`${baseUrl}/api/tags`);
-        return response.ok;
-    } catch (e) {
-        return false;
-    }
-};
 
 const startDev = async () => {
     printBanner();
     console.log(logger.cyan("🚀 Starting EduMate automated development launcher...\n"));
-
-    let ollamaProcess = null;
 
     // 1. Check Node and npm version
     verifyNodeVersion();
@@ -78,53 +68,12 @@ const startDev = async () => {
     }
     console.log();
 
-    // 7. Start/Check Ollama if provider is ollama
-    if (process.env.LLM_PROVIDER === "ollama") {
-        const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
-        const isRunning = await pingOllama(baseUrl);
-        if (!isRunning) {
-            console.log(logger.cyan("Ollama not active. Starting local Ollama service ('ollama serve')..."));
-            ollamaProcess = spawn("ollama", ["serve"], {
-                stdio: "pipe",
-                shell: true
-            });
-            
-            let stdoutBuffer = "";
-            let stderrBuffer = "";
-            ollamaProcess.stdout.on("data", (chunk) => {
-                stdoutBuffer += chunk.toString();
-                const lines = stdoutBuffer.split("\n");
-                stdoutBuffer = lines.pop();
-                for (const line of lines) {
-                    const trimmed = line.trim();
-                    if (trimmed) console.log(`${logger.yellow("[Ollama]")} ${trimmed}`);
-                }
-            });
-            ollamaProcess.stderr.on("data", (chunk) => {
-                stderrBuffer += chunk.toString();
-                const lines = stderrBuffer.split("\n");
-                stderrBuffer = lines.pop();
-                for (const line of lines) {
-                    const trimmed = line.trim();
-                    if (trimmed) console.error(`${logger.red("[Ollama Error]")} ${trimmed}`);
-                }
-            });
 
-            ollamaProcess.on("close", (code) => {
-                console.log(logger.yellow(`Ollama process exited with code ${code}`));
-            });
 
-            // wait 2.5 seconds for service startup
-            await new Promise((resolve) => setTimeout(resolve, 2500));
-        } else {
-            console.log(logger.green("✓ Ollama service is already running."));
-        }
-    }
-
-    // Check Groq API
-    const aiOk = await verifyGroq();
+    // Check Gemini API
+    const aiOk = await verifyGemini();
     if (!aiOk) {
-        logger.warn("⚠️ WARNING: Groq API connection check failed. Chat bot completions will fail until valid keys are configured in .env or the admin settings panel.");
+        logger.warn("⚠️ WARNING: Gemini API connection check failed. Chat bot completions will fail until valid keys are configured in .env.");
     }
     console.log();
 
@@ -198,11 +147,7 @@ const startDev = async () => {
         try {
             frontendProcess.kill();
         } catch (e) {}
-        if (ollamaProcess) {
-            try {
-                ollamaProcess.kill();
-            } catch (e) {}
-        }
+
         process.exit();
     };
 

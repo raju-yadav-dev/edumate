@@ -59,6 +59,7 @@ const runSetup = async () => {
         process.exit(1);
     }
 
+
     console.log("\n" + logger.cyan("============================================================"));
     logger.success("✓ EduMate Setup Completed Successfully!");
     console.log(logger.green("All services are validated and operational."));

@@ -25,12 +25,7 @@ const REQUIRED_VARS = [
     "QDRANT_COLLECTION"
 ];
 
-if (process.env.LLM_PROVIDER === "groq") {
-    const hasGroqKey = process.env.GROQ_API_KEY || process.env.GROQ_API_KEY_1;
-    if (!hasGroqKey) {
-        REQUIRED_VARS.push("GROQ_API_KEY");
-    }
-} else if (process.env.LLM_PROVIDER === "gemini") {
+if (process.env.LLM_PROVIDER === "gemini") {
     REQUIRED_VARS.push("GEMINI_API_KEY");
 }
 
