@@ -77,6 +77,54 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
         parentId
     });
 
+    // ==========================================
+    // ADMIN DOCUMENT DELIVERY FEATURE
+    // ==========================================
+    const documentDeliveryService = require("../../services/documentDeliveryService");
+    const docDeliveryResult = await documentDeliveryService.handleDocumentDelivery({
+        user: activeUser,
+        question: normalizedQuestion,
+        conversationId,
+        parentId,
+        historyText
+    });
+    if (docDeliveryResult) {
+        const responseTimeMs = Date.now() - startedAt;
+        const chat = await conversationService.saveMessageTurn({
+            user: activeUser,
+            conversationId,
+            question: normalizedQuestion,
+            response: docDeliveryResult,
+            intent: "document_delivery",
+            confidence: 0.9,
+            provider: "system",
+            responseTimeMs,
+            userMessageId,
+            assistantMessageId,
+            parentId,
+            topic: docDeliveryResult.topic || activeTopic || "",
+            entities: {}
+        });
+
+        if (onChunk) {
+            onChunk(docDeliveryResult.answer);
+        }
+
+        return {
+            conversationId: chat?._id || conversationId || null,
+            mode: activeUser._id ? "authenticated" : "guest",
+            message: docDeliveryResult.answer,
+            intent: "document_delivery",
+            intentConfidence: 0.9,
+            confidence: docDeliveryResult.confidence,
+            sources: docDeliveryResult.sources,
+            sourceLabel: docDeliveryResult.sourceLabel || "📚 University Documents",
+            provider: "system",
+            responseTimeMs,
+            suggestions: []
+        };
+    }
+
     // 2. Query Analysis (Topic Switch, Rewrite Query, Intent, Entities, Repeat Check)
     const analysisResult = await queryRewriterService.analyzeQuery({
         question: expandedQuestion,
