@@ -29,7 +29,9 @@ export async function askEduMate({ question, conversationId, signal, onChunk, la
     if (!response.ok) {
         const payload = await response.json().catch(() => ({}));
         const validationDetails = Array.isArray(payload.errors) ? ` ${payload.errors.join(" ")}` : "";
-        throw new Error(`${payload.message || "Unable to ask EduMate."}${validationDetails}`);
+        const error = new Error(`${payload.message || "Unable to ask EduMate."}${validationDetails}`);
+        error.status = response.status;
+        throw error;
     }
 
     if (useStream) {

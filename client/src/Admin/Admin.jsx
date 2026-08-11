@@ -2083,16 +2083,46 @@ function Admin({ mode = "auto" }) {
         setActiveConflict(null);
     }, [activeConflict]);
 
+    const handleAdminLogin = useCallback(async (event) => {
+        event.preventDefault();
+        
+        const email = adminEmailRef.current?.value || "";
+        const password = adminPasswordRef.current?.value || "";
+        
+        if (!email.trim() || !password.trim()) {
+            setAuthError("Email and password are required.");
+            return;
+        }
+
+        try {
+            setAuthLoading(true);
+            setAuthError("");
+            const result = await loginAdmin({ email, password });
+            
+            if (result && result.data && result.metadata?.accessToken) {
+                setAdminSession(result.data, result.metadata.accessToken);
+            } else {
+                throw new Error("Invalid response structure from server.");
+            }
+        } catch (err) {
+            setAuthError(err.message || "Failed to log in. Please try again.");
+        } finally {
+            setAuthLoading(false);
+        }
+    }, [setAdminSession]);
+
     const shouldShowLogin = mode === "login" || !isAdminAuthenticated;
 
     if (shouldShowLogin) {
         return (
             <div className="login-page admin-auth-screen">
                 <section className="login-card admin-auth-card">
-                    <h1>EduMate</h1>
-                    <p>Admin access only</p>
+                    <div className="admin-auth-header">
+                        <h1>EduMate</h1>
+                        <p>Admin access only</p>
+                    </div>
 
-                    <form onSubmit={handleAdminLogin}>
+                    <form onSubmit={handleAdminLogin} className="admin-auth-form">
                         <input ref={adminEmailRef} type="email" placeholder="Admin email" defaultValue={adminUser?.email || ""} />
 
                         <div className="login-password-box admin-password-box">

@@ -167,12 +167,31 @@ const callGeminiStream = async (messages, onChunk, options = {}) => {
 };
 
 /**
- * Unified completion handler calling Gemini.
+ * Unified completion handler routing to the active LLM provider.
  * @param {Array<Object>} messages - Array of { role, content }
  * @param {Object} [options={}] - Optional parameter overrides
  * @returns {Promise<string>}
  */
 const generateCompletion = async (messages, options = {}) => {
+    const provider = process.env.LLM_PROVIDER || "groq";
+    const timeoutMs = options.timeoutMs || 25000;
+
+    if (provider === "groq") {
+        const result = await groqProviderManager.generateCompletion({ messages, timeoutMs });
+        if (result.success) {
+            console.log(`Provider: groq`);
+            console.log(`Model: ${process.env.GROQ_MODEL || "llama-3.3-70b-versatile"}`);
+            console.log(`Request: SUCCESS`);
+            return result.content;
+        }
+        const errorMsg = result.failures && result.failures.length > 0
+            ? result.failures.map(f => `[${f.provider}] Attempt ${f.attempt}: ${f.message}`).join("; ")
+            : "No working Groq API keys available.";
+        console.log(`Provider: groq`);
+        console.log(`Request: FAILED`);
+        throw new Error(`Groq Completion Failed: ${errorMsg}`);
+    }
+
     const model = getActiveModel();
     const apiKey = process.env.GEMINI_API_KEY;
     const authStatus = apiKey ? "API key configured" : "API key missing";
@@ -194,6 +213,26 @@ const generateCompletion = async (messages, options = {}) => {
 };
 
 const generateStream = async (messages, onChunk, options = {}) => {
+    const provider = process.env.LLM_PROVIDER || "groq";
+    const timeoutMs = options.timeoutMs || 25000;
+    const signal = options.signal;
+
+    if (provider === "groq") {
+        const result = await groqProviderManager.generateStream({ messages, onChunk, timeoutMs, signal });
+        if (result.success) {
+            console.log(`Provider: groq`);
+            console.log(`Model: ${process.env.GROQ_MODEL || "llama-3.3-70b-versatile"}`);
+            console.log(`Request: SUCCESS`);
+            return result.content;
+        }
+        const errorMsg = result.failures && result.failures.length > 0
+            ? result.failures.map(f => `[${f.provider}] Attempt ${f.attempt}: ${f.message}`).join("; ")
+            : "No working Groq API keys available.";
+        console.log(`Provider: groq`);
+        console.log(`Request: FAILED`);
+        throw new Error(`Groq Streaming Failed: ${errorMsg}`);
+    }
+
     const model = getActiveModel();
     const apiKey = process.env.GEMINI_API_KEY;
     const authStatus = apiKey ? "API key configured" : "API key missing";

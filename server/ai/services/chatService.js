@@ -428,16 +428,24 @@ Return ONLY a valid JSON block, without markdown formatting or backticks.`;
                 console.log(`Final context sent to LLM:\n${JSON.stringify(tempMessages, null, 2)}`);
                 console.log("===============================================================\n");
 
-                let attemptResponse = await llmService.generateCompletion(tempMessages);
+                if (onChunk) {
+                    textResponse = "STREAMING_PLACEHOLDER";
+                    retrievedChunks = combinedDocChunks;
+                    activeQuestionType = QUESTION_TYPES.UNIVERSITY_SPECIFIC;
+                    sourceLabel = SOURCE_LABELS.UNIVERSITY;
+                    provider = "groq";
+                    finalMessages = tempMessages;
+                } else {
+                    let attemptResponse = await llmService.generateCompletion(tempMessages);
 
-                const performGroundingCheck = async (genAnswer, valChunks) => {
-                    if (!genAnswer || genAnswer.trim() === "") return genAnswer;
-                    if (valChunks.length === 0) return genAnswer;
-                    const chunksText = valChunks.map((c, idx) => {
-                        return `[Source: ${c.metadata?.filename || c.metadata?.originalName}, ChunkId: ${c.id}, DocumentId: ${c.metadata?.documentId}]\nContent: ${c.content}`;
-                    }).join("\n\n");
-                    
-                    const gSystemPrompt = `You are a strict academic verification assistant.
+                    const performGroundingCheck = async (genAnswer, valChunks) => {
+                        if (!genAnswer || genAnswer.trim() === "") return genAnswer;
+                        if (valChunks.length === 0) return genAnswer;
+                        const chunksText = valChunks.map((c, idx) => {
+                            return `[Source: ${c.metadata?.filename || c.metadata?.originalName}, ChunkId: ${c.id}, DocumentId: ${c.metadata?.documentId}]\nContent: ${c.content}`;
+                        }).join("\n\n");
+                        
+                        const gSystemPrompt = `You are a strict academic verification assistant.
 Your task is to perform an evidence-grounding check on a generated chatbot answer.
 Verify that every factual claim (names, numbers, criteria, etc.) in the answer is directly and explicitly supported by the provided source chunks.
 
@@ -449,27 +457,28 @@ Constraints:
 
 Output ONLY the verified, grounded answer text. Do not add any introduction, explanation, backticks, or markdown wrappers.`;
 
-                    const gUserPrompt = `Source Chunks:\n${chunksText}\n\nGenerated Answer to verify:\n${genAnswer}`;
-                    try {
-                        const verified = await llmService.generateCompletion([
-                            { role: "system", content: "You are a strict grounding verification assistant." },
-                            { role: "user", content: gSystemPrompt + "\n\n" + gUserPrompt }
-                        ], { temperature: 0.1 });
-                        return String(verified).trim();
-                    } catch (e) {
-                        console.error("[RAG GROUNDING CHECK] Grounding check failed:", e.message);
-                        return genAnswer;
-                    }
-                };
+                        const gUserPrompt = `Source Chunks:\n${chunksText}\n\nGenerated Answer to verify:\n${genAnswer}`;
+                        try {
+                            const verified = await llmService.generateCompletion([
+                                { role: "system", content: "You are a strict grounding verification assistant." },
+                                { role: "user", content: gSystemPrompt + "\n\n" + gUserPrompt }
+                            ], { temperature: 0.1 });
+                            return String(verified).trim();
+                        } catch (e) {
+                            console.error("[RAG GROUNDING CHECK] Grounding check failed:", e.message);
+                            return genAnswer;
+                        }
+                    };
 
-                attemptResponse = await performGroundingCheck(attemptResponse, combinedDocChunks);
+                    attemptResponse = await performGroundingCheck(attemptResponse, combinedDocChunks);
 
-                textResponse = attemptResponse;
-                retrievedChunks = combinedDocChunks;
-                activeQuestionType = QUESTION_TYPES.UNIVERSITY_SPECIFIC;
-                sourceLabel = SOURCE_LABELS.UNIVERSITY;
-                provider = "groq";
-                finalMessages = tempMessages;
+                    textResponse = attemptResponse;
+                    retrievedChunks = combinedDocChunks;
+                    activeQuestionType = QUESTION_TYPES.UNIVERSITY_SPECIFIC;
+                    sourceLabel = SOURCE_LABELS.UNIVERSITY;
+                    provider = "groq";
+                    finalMessages = tempMessages;
+                }
             }
 
             // ==========================================
@@ -537,13 +546,22 @@ Output ONLY the verified, grounded answer text. Do not add any introduction, exp
                         activeTopic: resolvedActiveTopic
                     });
 
-                    const attemptResponse = await llmService.generateCompletion(tempMessages);
-                    textResponse = attemptResponse;
-                    retrievedChunks = combinedSiteChunks;
-                    activeQuestionType = QUESTION_TYPES.UNIVERSITY_SPECIFIC;
-                    sourceLabel = SOURCE_LABELS.UNIVERSITY;
-                    provider = "groq";
-                    finalMessages = tempMessages;
+                    if (onChunk) {
+                        textResponse = "STREAMING_PLACEHOLDER";
+                        retrievedChunks = combinedSiteChunks;
+                        activeQuestionType = QUESTION_TYPES.UNIVERSITY_SPECIFIC;
+                        sourceLabel = SOURCE_LABELS.UNIVERSITY;
+                        provider = "groq";
+                        finalMessages = tempMessages;
+                    } else {
+                        const attemptResponse = await llmService.generateCompletion(tempMessages);
+                        textResponse = attemptResponse;
+                        retrievedChunks = combinedSiteChunks;
+                        activeQuestionType = QUESTION_TYPES.UNIVERSITY_SPECIFIC;
+                        sourceLabel = SOURCE_LABELS.UNIVERSITY;
+                        provider = "groq";
+                        finalMessages = tempMessages;
+                    }
                 }
             }
 
@@ -581,13 +599,22 @@ Output ONLY the verified, grounded answer text. Do not add any introduction, exp
                         activeTopic: resolvedActiveTopic
                     });
 
-                    const attemptResponse = await llmService.generateCompletion(tempMessages);
-                    textResponse = attemptResponse;
-                    webResults = combinedWebResults;
-                    activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
-                    sourceLabel = SOURCE_LABELS.WEB;
-                    provider = "groq";
-                    finalMessages = tempMessages;
+                    if (onChunk) {
+                        textResponse = "STREAMING_PLACEHOLDER";
+                        webResults = combinedWebResults;
+                        activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
+                        sourceLabel = SOURCE_LABELS.WEB;
+                        provider = "groq";
+                        finalMessages = tempMessages;
+                    } else {
+                        const attemptResponse = await llmService.generateCompletion(tempMessages);
+                        textResponse = attemptResponse;
+                        webResults = combinedWebResults;
+                        activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
+                        sourceLabel = SOURCE_LABELS.WEB;
+                        provider = "groq";
+                        finalMessages = tempMessages;
+                    }
                 }
             }
         } else {
@@ -609,13 +636,22 @@ Output ONLY the verified, grounded answer text. Do not add any introduction, exp
                     activeTopic: resolvedActiveTopic
                 });
 
-                const attemptResponse = await llmService.generateCompletion(tempMessages);
-                textResponse = attemptResponse;
-                webResults = internetResults;
-                activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
-                sourceLabel = SOURCE_LABELS.WEB;
-                provider = "groq";
-                finalMessages = tempMessages;
+                if (onChunk) {
+                    textResponse = "STREAMING_PLACEHOLDER";
+                    webResults = internetResults;
+                    activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
+                    sourceLabel = SOURCE_LABELS.WEB;
+                    provider = "groq";
+                    finalMessages = tempMessages;
+                } else {
+                    const attemptResponse = await llmService.generateCompletion(tempMessages);
+                    textResponse = attemptResponse;
+                    webResults = internetResults;
+                    activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
+                    sourceLabel = SOURCE_LABELS.WEB;
+                    provider = "groq";
+                    finalMessages = tempMessages;
+                }
             }
         }
 

@@ -26,6 +26,8 @@ const REQUIRED_VARS = [
 
 if (process.env.LLM_PROVIDER === "gemini") {
     REQUIRED_VARS.push("GEMINI_API_KEY");
+} else if (process.env.LLM_PROVIDER === "groq") {
+    REQUIRED_VARS.push("GROQ_API_KEY");
 }
 
 /**

@@ -2,6 +2,9 @@ import { useEffect, useRef } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
+const CAMPUS_DEFAULT_LAT = 22.7212;
+const CAMPUS_DEFAULT_LNG = 88.4848;
+
 // Custom offline-safe drop-pin shaped SVG Icons for Map markers
 const startIcon = L.divIcon({
     className: "custom-marker-start",

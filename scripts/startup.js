@@ -17,6 +17,7 @@ const { startQdrantContainer } = require("./dockerManager");
 const { verifyMongo } = require("./verifyMongo");
 const { verifySupabase } = require("./verifySupabase");
 const { verifyGemini } = require("./verifyGemini");
+const { verifyGroq } = require("./verifyGroq");
 const { verifyQdrant } = require("./verifyQdrant");
 const { printBanner, printDashboard } = require("./banner");
 
@@ -70,10 +71,19 @@ const startDev = async () => {
 
 
 
-    // Check Gemini API
-    const aiOk = await verifyGemini();
-    if (!aiOk) {
-        logger.warn("⚠️ WARNING: Gemini API connection check failed. Chat bot completions will fail until valid keys are configured in .env.");
+    // 7. Check Configured AI API
+    const provider = process.env.LLM_PROVIDER || "groq";
+    let aiOk = true;
+    if (provider === "groq") {
+        aiOk = await verifyGroq();
+        if (!aiOk) {
+            logger.warn("⚠️ WARNING: Groq API connection check failed. Chat bot completions will fail until valid keys are configured in .env.");
+        }
+    } else if (provider === "gemini") {
+        aiOk = await verifyGemini();
+        if (!aiOk) {
+            logger.warn("⚠️ WARNING: Gemini API connection check failed. Chat bot completions will fail until valid keys are configured in .env.");
+        }
     }
     console.log();
 

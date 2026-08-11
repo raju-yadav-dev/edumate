@@ -582,6 +582,12 @@ function Chat() {
             setStreamingText("");
             setStreamingMessageId(null);
             
+            if (error?.status === 401) {
+                logout();
+                alert("Session expired. Please log in again.");
+                return;
+            }
+            
             if (error?.name === "AbortError") {
                 setThreads((currentThreads) => currentThreads.map((thread) => {
                     if (thread.id !== currentThreadId) {

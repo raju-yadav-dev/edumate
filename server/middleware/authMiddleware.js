@@ -21,7 +21,11 @@ const authenticate = async (req, res, next) => {
         req.user = user;
         return next();
     } catch (error) {
-        console.error(error);
+        if (error.name === "TokenExpiredError") {
+            console.warn(`[Auth] Token expired at ${error.expiredAt}`);
+        } else {
+            console.error(`[Auth] Token verification failed: ${error.message}`);
+        }
         return sendError(res, 401, "Invalid or expired authentication token.");
     }
 };
