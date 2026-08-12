@@ -237,7 +237,7 @@ const getStorageStats = asyncHandler(async (req, res) => {
     }
 
     const storageLimit = toStorageLimit();
-    const activeDocumentFilter = { status: { $ne: "deleted" } };
+    const activeDocumentFilter = { status: "active" };
     const activeUserFilter = { status: { $ne: "deleted" } };
     const adminUserFilter = {
         ...activeUserFilter,

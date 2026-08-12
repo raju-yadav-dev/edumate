@@ -83,10 +83,13 @@ const uploadToSupabase = async (file, category) => {
     const uniqueName = `${Date.now()}-${crypto.randomUUID()}${extension}`;
     const storagePath = `${category}/${uniqueName}`;
 
+    const isImage = file.mimetype && file.mimetype.startsWith("image/");
+    const uploadMimeType = isImage ? "application/pdf" : file.mimetype;
+
     const { error } = await supabase.storage
         .from(BUCKET)
         .upload(storagePath, file.buffer, {
-            contentType: file.mimetype,
+            contentType: uploadMimeType,
             upsert: false
         });
 
@@ -111,7 +114,7 @@ const uploadDocument = async ({ file, body, user }) => {
     const duplicate = await Document.findOne({
         checksum,
         institution: body.institution || user.institution || "",
-        status: { $ne: "deleted" }
+        status: "active"
     });
 
     if (duplicate) {
@@ -164,10 +167,13 @@ const uploadDocument = async ({ file, body, user }) => {
     // Run Supabase upload and indexing in the background asynchronously
     (async () => {
         try {
+            const isImage = file.mimetype && file.mimetype.startsWith("image/");
+            const uploadMimeType = isImage ? "application/pdf" : file.mimetype;
+
             const { error: uploadError } = await supabase.storage
                 .from(BUCKET)
                 .upload(storagePath, file.buffer, {
-                    contentType: file.mimetype,
+                    contentType: uploadMimeType,
                     upsert: false
                 });
 
@@ -647,7 +653,7 @@ const bulkReindex = async ({ category, ids, user }) => {
 };
 
 const getJobsStatus = async () => {
-    const activeFilter = { status: { $ne: "deleted" } };
+    const activeFilter = { status: "active" };
     const [pending, processing, failed, completedCount, totalCount] = await Promise.all([
         Document.find({ ...activeFilter, embeddingStatus: "pending" }).select("originalName category updatedAt fileSize"),
         Document.find({ ...activeFilter, embeddingStatus: "processing" }).select("originalName category updatedAt fileSize"),
@@ -665,7 +671,7 @@ const getJobsStatus = async () => {
 };
 
 const retryFailed = async ({ user }) => {
-    const failedDocs = await Document.find({ status: { $ne: "deleted" }, embeddingStatus: "failed" });
+    const failedDocs = await Document.find({ status: "active", embeddingStatus: "failed" });
     let count = 0;
     for (const doc of failedDocs) {
         const errorMsg = doc.metadata?.error || "";
@@ -687,7 +693,7 @@ const retryFailed = async ({ user }) => {
 };
 
 const ignoreFailed = async ({ documentId, user }) => {
-    const document = await Document.findOne({ _id: documentId, status: { $ne: "deleted" } });
+    const document = await Document.findOne({ _id: documentId, status: "active" });
     if (!document) {
         const error = new Error("Document not found.");
         error.statusCode = 404;

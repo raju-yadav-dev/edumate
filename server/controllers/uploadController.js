@@ -4,7 +4,7 @@ const path = require("path");
 const Document = require("../models/Document");
 const supabase = require("../config/supabase");
 
-const BUCKET = process.env.SUPABASE_BUCKET;
+const BUCKET = process.env.SUPABASE_STORAGE_BUCKET || process.env.SUPABASE_BUCKET || "documents";
 
 const uploadDocument = async (req, res) => {
     try {
@@ -43,10 +43,13 @@ const uploadDocument = async (req, res) => {
         // Upload to Supabase
         //------------------------------------------
 
+        const isImage = file.mimetype && file.mimetype.startsWith("image/");
+        const uploadMimeType = isImage ? "application/pdf" : file.mimetype;
+
         const { error } = await supabase.storage
             .from(BUCKET)
             .upload(storagePath, file.buffer, {
-                contentType: file.mimetype,
+                contentType: uploadMimeType,
                 upsert: false
             });
 

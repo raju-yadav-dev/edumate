@@ -248,6 +248,8 @@ export async function listAdminDocuments(query = {}) {
         }
     });
 
+    params.set("_t", String(Date.now())); // Cache buster
+
     const response = await fetch(`${DOCUMENT_API_BASE_URL}?${params.toString()}`, {
         headers: token ? {
             Authorization: `Bearer ${token}`
@@ -307,7 +309,7 @@ export async function deleteAdminUser(userId) {
 export async function getAdminStorageStats(force = false) {
     const token = getAdminAccessToken();
 
-    const response = await fetch(`${ADMIN_API_BASE_URL}/storage-stats${force ? "?force=true" : ""}`, {
+    const response = await fetch(`${ADMIN_API_BASE_URL}/storage-stats?_t=${Date.now()}${force ? "&force=true" : ""}`, {
         headers: token ? {
             Authorization: `Bearer ${token}`
         } : {}
