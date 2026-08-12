@@ -159,6 +159,10 @@ export default function ChatMessage({ message, prevMessage, onRegenerate, isLast
             return false;
         }
 
+        if (message.sourceLabel === "📚 University Documents") {
+            return true;
+        }
+
         if (prevMessage && prevMessage.role === "user") {
             const query = String(prevMessage.content || "").toLowerCase();
             return (
@@ -205,7 +209,7 @@ export default function ChatMessage({ message, prevMessage, onRegenerate, isLast
     const sourceLabel = getSourceLabel();
 
     const getCleanContent = () => {
-        if (showCitations && isCitationsOnlyRequest(prevMessage)) {
+        if (showCitations && (isCitationsOnlyRequest(prevMessage) || message.sourceLabel === "📚 University Documents")) {
             return "Here are the supportive documents:";
         }
         let content = message.content || "";

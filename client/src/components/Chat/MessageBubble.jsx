@@ -267,6 +267,10 @@ function MessageBubble({
             return false;
         }
 
+        if (message.sourceLabel === "📚 University Documents") {
+            return true;
+        }
+
         if (prevMessage && prevMessage.role === "user") {
             const query = String(prevMessage.content || "").toLowerCase();
             return (
@@ -292,7 +296,7 @@ function MessageBubble({
     })();
 
     const displayContent = (() => {
-        if (!isUser && showCitations && isCitationsOnlyRequest(prevMessage)) {
+        if (!isUser && showCitations && (isCitationsOnlyRequest(prevMessage) || message.sourceLabel === "📚 University Documents")) {
             return "Here are the supportive documents:";
         }
         return message.content;

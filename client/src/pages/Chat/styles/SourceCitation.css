@@ -142,3 +142,14 @@
     background: rgba(59, 130, 246, 0.1);
     color: #3b82f6;
 }
+
+.clickable-citation-card {
+    cursor: pointer;
+    transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.clickable-citation-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--primary, #6366f1) !important;
+    background: var(--bg-citation-hover, rgba(99, 102, 241, 0.05)) !important;
+}

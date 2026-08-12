@@ -24,26 +24,27 @@ export default function SourceCitation({ sources = [] }) {
                 <div className="citations-list">
                     {sources.map((src, idx) => {
                         const isWeb = src.type === "web";
+                        const targetUrl = isWeb ? src.reference : src.downloadUrl;
+                        const CardWrapper = targetUrl ? "a" : "div";
+                        const extraProps = targetUrl ? {
+                            href: targetUrl,
+                            target: "_blank",
+                            rel: "noopener noreferrer",
+                            style: { textDecoration: "none" }
+                        } : {};
+
                         return (
-                            <div key={idx} className={`citation-badge-card ${isWeb ? "web" : "document"}`}>
+                            <CardWrapper 
+                                key={idx} 
+                                className={`citation-badge-card ${isWeb ? "web" : "document"} ${targetUrl ? "clickable-citation-card" : ""}`}
+                                {...extraProps}
+                            >
                                 <div className="citation-card-main">
                                     <span className={`pdf-icon-wrapper ${isWeb ? "web" : "document"}`}>
                                         {isWeb ? <Globe size={18} /> : <FileText size={18} />}
                                     </span>
                                     <div className="citation-metadata">
-                                        {isWeb && src.reference ? (
-                                            <a 
-                                                className="citation-doc-title web-link" 
-                                                href={src.reference} 
-                                                target="_blank" 
-                                                rel="noopener noreferrer"
-                                                title={src.title}
-                                            >
-                                                {src.title}
-                                            </a>
-                                        ) : (
-                                            <h4 className="citation-doc-title" title={src.title}>{src.title}</h4>
-                                        )}
+                                        <h4 className="citation-doc-title" title={src.title}>{src.title}</h4>
                                         <p className="citation-doc-reference">
                                             {isWeb ? src.metadata?.domain || "Web Source" : src.reference}
                                         </p>
@@ -71,7 +72,7 @@ export default function SourceCitation({ sources = [] }) {
                                         </span>
                                     )}
                                 </div>
-                            </div>
+                            </CardWrapper>
                         );
                     })}
                 </div>

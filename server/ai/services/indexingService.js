@@ -85,6 +85,7 @@ const extractTextFromScannedPdf = async (buffer) => {
     return pages;
 };
 
+const bufferCache = new Map();
 let isWorkerRunning = false;
 const INDEXING_CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.INDEXING_CONCURRENCY) || 3));
 
@@ -287,7 +288,23 @@ const runIndexingJob = async (documentId) => {
                     console.log(`[INDEX] Gemini scanned-PDF OCR successful. Extracted ${text.length} characters.`);
                 } catch (ocrErr) {
                     console.error("[INDEX] Gemini scanned-PDF OCR failed:", ocrErr.message);
-                    throw new Error(`Scanned PDF extraction failed (OCR unsuccessful): ${ocrErr.message}`);
+                    
+                    // Fall back gracefully to binary string extraction/placeholder to prevent queue crashes when Gemini is unconfigured or rate-limited
+                    const rawStr = buffer.toString("binary");
+                    const printableMatches = rawStr.match(/[\x20-\x7E]{4,}/g) || [];
+                    const cleanWords = printableMatches
+                        .map(s => s.trim())
+                        .filter(s => s.length > 3 && !s.startsWith("/") && !s.includes("obj") && !s.includes("endobj"));
+                    
+                    const fallbackText = cleanWords.slice(0, 150).join(" ");
+                    text = fallbackText || `[Scanned PDF: Text extraction unavailable. ${ocrErr.message}]`;
+                    pages = [{
+                        pageNumber: 1,
+                        text: text
+                    }];
+                    pageCount = 1;
+                    ocrFlag = false;
+                    console.warn(`[INDEX] OCR failed or unavailable. Fallback plain text extracted instead (${text.length} characters).`);
                 }
             }
 
