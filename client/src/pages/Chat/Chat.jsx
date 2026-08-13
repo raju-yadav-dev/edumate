@@ -654,7 +654,7 @@ function Chat() {
     }, [activeBranchMessages, messageSearch]);
 
     const groupedSections = useMemo(() => {
-        const query = messageSearch.trim().toLowerCase();
+        const query = chatSearch.trim().toLowerCase();
 
         const filteredThreads = threads.filter((thread) => {
             if (!query) {
@@ -667,8 +667,8 @@ function Chat() {
         return [
             { label: "Pinned", items: filteredThreads.filter((thread) => thread.pinned) },
             { label: "Today", items: filteredThreads.filter((thread) => thread.bucket === "Today" && !thread.pinned) },
-            { label: "Yesterday", items: filteredThreads.filter((thread) => thread.bucket === "Yesterday") },
-            { label: "Previous Week", items: filteredThreads.filter((thread) => thread.bucket === "Previous Week") },
+            { label: "Yesterday", items: filteredThreads.filter((thread) => thread.bucket === "Yesterday" && !thread.pinned) },
+            { label: "Previous Week", items: filteredThreads.filter((thread) => thread.bucket === "Previous Week" && !thread.pinned) },
             { label: "Archive", items: filteredThreads.filter((thread) => thread.bucket === "Archive") }
         ];
     }, [threads, chatSearch]);
@@ -1032,6 +1032,12 @@ function Chat() {
                 isAuthenticated={isAuthenticated}
                 user={user}
                 onLogout={handleLogout}
+                sendMessage={sendMessage}
+                onVoiceContinuousClick={() => startContinuousConversation(sendMessage)}
+                activeLang={activeLang}
+                setLanguage={setLanguage}
+                setInput={setInput}
+                voiceState={voiceState}
             />
 
             <section className="edu-chat-workspace">
