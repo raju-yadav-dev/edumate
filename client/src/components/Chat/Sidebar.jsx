@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { 
     Archive,
     BookOpen,
+    ChevronDown,
     ChevronLeft,
     ChevronRight,
     Clock,
@@ -55,6 +56,33 @@ function Sidebar({
 }) {
     const [showHistoryModal, setShowHistoryModal] = useState(false);
     const [modalSearch, setModalSearch] = useState("");
+    const [showLanguagePopup, setShowLanguagePopup] = useState(false);
+
+    React.useEffect(() => {
+        if (!showLanguagePopup) return;
+
+        const handleOutsideClick = (event) => {
+            const popupEl = document.querySelector(".edu-lang-popup");
+            const triggerEl = document.querySelector(".edu-chat-feature-card.all-languages");
+            if (popupEl && !popupEl.contains(event.target) && triggerEl && !triggerEl.contains(event.target)) {
+                setShowLanguagePopup(false);
+            }
+        };
+
+        const handleKeyDown = (event) => {
+            if (event.key === "Escape") {
+                setShowLanguagePopup(false);
+            }
+        };
+
+        document.addEventListener("mousedown", handleOutsideClick);
+        document.addEventListener("keydown", handleKeyDown);
+
+        return () => {
+            document.removeEventListener("mousedown", handleOutsideClick);
+            document.removeEventListener("keydown", handleKeyDown);
+        };
+    }, [showLanguagePopup]);
 
     const avatarInitial = user?.fullName?.trim()?.charAt(0)?.toUpperCase() || "R";
 
@@ -89,18 +117,17 @@ function Sidebar({
 
     // Feature card click action handler
     const handleFeatureClick = (featureName) => {
+        if (featureName === "language") {
+            setShowLanguagePopup(prev => !prev);
+            return;
+        }
+
         if (!sendMessage) return;
 
         switch (featureName) {
             case "voice":
                 if (onVoiceContinuousClick) {
                     onVoiceContinuousClick();
-                }
-                break;
-            case "language":
-                if (setLanguage) {
-                    const nextLang = activeLang === "hi-IN" ? "en-US" : "hi-IN";
-                    setLanguage(nextLang);
                 }
                 break;
             case "navigation":
@@ -203,14 +230,23 @@ function Sidebar({
 
                     <div className="edu-chat-features-list">
                         <div 
-                            className="edu-chat-feature-card all-languages"
+                            className={`edu-chat-feature-card all-languages ${showLanguagePopup ? "active-popup" : ""}`}
                             onClick={() => handleFeatureClick("language")}
-                            title={`Toggle language (active: ${activeLang === "hi-IN" ? "Hindi" : "English"})`}
+                            title="Choose language"
+                            role="button"
+                            tabIndex={0}
+                            aria-label="Choose language support option"
+                            onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                    handleFeatureClick("language");
+                                }
+                            }}
                         >
                             <div className="edu-chat-feature-icon-wrapper">
                                 <Globe size={16} />
                             </div>
                             <span className="edu-chat-feature-card-text">All Language Support</span>
+                            <ChevronDown size={14} className="edu-lang-chevron" />
                         </div>
 
                         <div 
@@ -484,8 +520,77 @@ function Sidebar({
                             </div>
                         )}
                     </div>
-
                 </div>
+                {showLanguagePopup && (
+                    <div className="edu-lang-popup" onClick={(e) => e.stopPropagation()}>
+                        <div className="edu-lang-popup-title">Choose Language</div>
+                        <div className="edu-lang-options-list">
+                            <div 
+                                className={`edu-lang-option-card ${activeLang === "en" ? "is-selected" : ""}`}
+                                onClick={() => {
+                                    setLanguage("en");
+                                    setShowLanguagePopup(false);
+                                }}
+                                role="button"
+                                tabIndex={0}
+                                aria-label="Select English language"
+                                onKeyDown={(e) => {
+                                    if (e.key === "Enter" || e.key === " ") {
+                                        setLanguage("en");
+                                        setShowLanguagePopup(false);
+                                    }
+                                }}
+                            >
+                                <span className="edu-lang-name">English</span>
+                                <span className="edu-lang-radio-circle">
+                                    {activeLang === "en" && <span className="edu-lang-radio-dot" />}
+                                </span>
+                            </div>
+                            <div 
+                                className={`edu-lang-option-card ${activeLang === "hi" ? "is-selected" : ""}`}
+                                onClick={() => {
+                                    setLanguage("hi");
+                                    setShowLanguagePopup(false);
+                                }}
+                                role="button"
+                                tabIndex={0}
+                                aria-label="Select Hindi language"
+                                onKeyDown={(e) => {
+                                    if (e.key === "Enter" || e.key === " ") {
+                                        setLanguage("hi");
+                                        setShowLanguagePopup(false);
+                                    }
+                                }}
+                            >
+                                <span className="edu-lang-name">Hindi</span>
+                                <span className="edu-lang-radio-circle">
+                                    {activeLang === "hi" && <span className="edu-lang-radio-dot" />}
+                                </span>
+                            </div>
+                            <div 
+                                className={`edu-lang-option-card ${activeLang === "bn" ? "is-selected" : ""}`}
+                                onClick={() => {
+                                    setLanguage("bn");
+                                    setShowLanguagePopup(false);
+                                }}
+                                role="button"
+                                tabIndex={0}
+                                aria-label="Select Bengali language"
+                                onKeyDown={(e) => {
+                                    if (e.key === "Enter" || e.key === " ") {
+                                        setLanguage("bn");
+                                        setShowLanguagePopup(false);
+                                    }
+                                }}
+                            >
+                                <span className="edu-lang-name">Bengali</span>
+                                <span className="edu-lang-radio-circle">
+                                    {activeLang === "bn" && <span className="edu-lang-radio-dot" />}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </aside>
 
             {/* --- View All Chats / History Manager Modal --- */}

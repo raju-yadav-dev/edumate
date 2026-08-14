@@ -3,7 +3,7 @@ import { getApiRootUrl } from "./apiConfig";
 const API_ROOT = getApiRootUrl();
 const CHAT_API_BASE_URL = `${API_ROOT}/chat`;
 
-export async function askEduMate({ question, conversationId, signal, onChunk, latitude, longitude, userMessageId, assistantMessageId, parentId }) {
+export async function askEduMate({ question, conversationId, signal, onChunk, latitude, longitude, userMessageId, assistantMessageId, parentId, language }) {
     const token = localStorage.getItem("edumate-access-token");
     const useStream = typeof onChunk === "function";
 
@@ -22,6 +22,7 @@ export async function askEduMate({ question, conversationId, signal, onChunk, la
             userMessageId,
             assistantMessageId,
             parentId,
+            language,
             ...(useStream ? { stream: true } : {})
         })
     });

@@ -24,17 +24,25 @@ const knowledgeManager = require("../../knowledge/KnowledgeManager");
 const SearchManager = require("../../knowledge/SearchManager");
 const RankingEngine = require("../../knowledge/RankingEngine");
 
-const deterministicGreeting = (user) => ({
-    answer: `Hello ${user?.fullName || "there"}. I can help with institutional questions, documents, campus services, routes, and academic support.`,
-    confidence: "high",
-    sources: [
-        {
-            type: "system",
-            title: "EduMate Assistant",
-            reference: "deterministic-greeting"
-        }
-    ]
-});
+const deterministicGreeting = (user, language) => {
+    let answer = `Hello ${user?.fullName || "there"}. I can help with institutional questions, documents, campus services, routes, and academic support.`;
+    if (language === "hi") {
+        answer = `नमस्ते ${user?.fullName || "वहाँ"}। मैं संस्थागत प्रश्नों, दस्तावेजों, कैंपस सेवाओं, मार्गों और शैक्षणिक सहायता के बारे में जानकारी देने में आपकी मदद कर सकता हूँ।`;
+    } else if (language === "bn") {
+        answer = `হ্যালো ${user?.fullName || "সেখানে"}। আমি আপনাকে প্রাতিষ্ঠানিক প্রশ্ন, নথিপত্র, ক্যাম্পাস পরিষেবা, রুট এবং একাডেমিক সহায়তা সম্পর্কিত তথ্যে সাহায্য করতে পারি।`;
+    }
+    return {
+        answer,
+        confidence: "high",
+        sources: [
+            {
+                type: "system",
+                title: "EduMate Assistant",
+                reference: "deterministic-greeting"
+            }
+        ]
+    };
+};
 
 const buildGuestUser = () => ({
     _id: null,
@@ -47,7 +55,7 @@ const buildGuestUser = () => ({
 /**
  * Handles chatbot queries with RAG matching using Gemini 2.5 Flash and Qdrant
  */
-const askQuestion = async ({ user, question, conversationId, onChunk, signal, latitude, longitude, userMessageId, assistantMessageId, parentId }) => {
+const askQuestion = async ({ user, question, conversationId, onChunk, signal, latitude, longitude, userMessageId, assistantMessageId, parentId, language }) => {
     const startedAt = Date.now();
     const normalizedQuestion = String(question || "").trim();
     const activeUser = user || buildGuestUser();
@@ -199,7 +207,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
     let internetCount = 0;
 
     if (decision.service === "deterministic") {
-        formatted = deterministicGreeting(activeUser);
+        formatted = deterministicGreeting(activeUser, language);
         textResponse = formatted.answer;
     } else if (decision.service === "map") {
         const mapResult = await mapService.resolveLocationRequest({
@@ -441,7 +449,8 @@ Return ONLY a valid JSON block, without markdown formatting or backticks.`;
                     user: activeUser,
                     questionType: QUESTION_TYPES.UNIVERSITY_SPECIFIC,
                     isRepeat,
-                    activeTopic: resolvedActiveTopic
+                    activeTopic: resolvedActiveTopic,
+                    language
                 });
 
                 if (tempMessages.length > 0 && tempMessages[0].role === "system") {
@@ -502,6 +511,7 @@ Constraints:
 2. If a sentence in the answer contains any claim that is NOT found in the source chunks (e.g. general knowledge, external information, or inferred facts), you MUST rewrite or edit the answer to remove that ungrounded claim.
 3. If the answer contains a statement like "The fee/faculty/HOD/eligibility information was not found in the Admin documents", that is a valid controlled response and is grounded.
 4. Keep the same structure, tone, and formatting of the answer where possible, only removing or modifying ungrounded parts.
+5. You MUST output the verified answer in the exact same language as the generated answer (e.g. if the answer is in Hindi, output in Hindi; if in Bengali, output in Bengali; if in English, output in English). Do NOT translate the answer to another language.
 
 Output ONLY the verified, grounded answer text. Do not add any introduction, explanation, backticks, or markdown wrappers.`;
 
@@ -591,7 +601,8 @@ Output ONLY the verified, grounded answer text. Do not add any introduction, exp
                         user: activeUser,
                         questionType: QUESTION_TYPES.UNIVERSITY_SPECIFIC,
                         isRepeat,
-                        activeTopic: resolvedActiveTopic
+                        activeTopic: resolvedActiveTopic,
+                        language
                     });
 
                     if (onChunk) {
@@ -644,7 +655,8 @@ Output ONLY the verified, grounded answer text. Do not add any introduction, exp
                         user: activeUser,
                         questionType: QUESTION_TYPES.GENERAL_KNOWLEDGE,
                         isRepeat,
-                        activeTopic: resolvedActiveTopic
+                        activeTopic: resolvedActiveTopic,
+                        language
                     });
 
                     if (onChunk) {
@@ -681,7 +693,8 @@ Output ONLY the verified, grounded answer text. Do not add any introduction, exp
                     user: activeUser,
                     questionType: QUESTION_TYPES.GENERAL_KNOWLEDGE,
                     isRepeat,
-                    activeTopic: resolvedActiveTopic
+                    activeTopic: resolvedActiveTopic,
+                    language
                 });
 
                 if (onChunk) {

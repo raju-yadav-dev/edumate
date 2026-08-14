@@ -14,7 +14,7 @@ class VoiceConversationManager {
     constructor() {
         this.state = "idle"; // 'idle' | 'listening' | 'thinking' | 'speaking' | 'paused' | 'ended'
         this.isContinuousMode = false;
-        this.activeLang = "en"; // 'en' | 'hi' | 'bn'
+        this.activeLang = (typeof localStorage !== "undefined" && localStorage.getItem("edumate-language")) || "en"; // 'en' | 'hi' | 'bn'
         this.isMuted = false;
         this.elapsedSeconds = 0;
         this.timerInterval = null;
@@ -284,6 +284,9 @@ class VoiceConversationManager {
         if (detectedLang !== this.activeLang) {
             console.log(`[VoiceManager] Automatically switching language: ${this.activeLang} -> ${detectedLang}`);
             this.activeLang = detectedLang;
+            if (typeof localStorage !== "undefined") {
+                localStorage.setItem("edumate-language", detectedLang);
+            }
         }
 
         // 2. Check for Built-in Voice Commands

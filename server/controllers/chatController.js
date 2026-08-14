@@ -30,6 +30,7 @@ const askQuestion = asyncHandler(async (req, res) => {
                 assistantMessageId: req.body.assistantMessageId,
                 parentId: req.body.parentId,
                 signal: controller.signal,
+                language: req.body.language,
                 onChunk: (chunk) => {
                     res.write(`data: ${JSON.stringify({ type: "chunk", content: chunk })}\n\n`);
                     if (typeof res.flush === "function") res.flush();
@@ -65,7 +66,8 @@ const askQuestion = asyncHandler(async (req, res) => {
         longitude: req.body.longitude,
         userMessageId: req.body.userMessageId,
         assistantMessageId: req.body.assistantMessageId,
-        parentId: req.body.parentId
+        parentId: req.body.parentId,
+        language: req.body.language
     });
 
     return sendSuccess(res, 200, "EduMate response generated.", result);

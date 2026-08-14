@@ -10,7 +10,7 @@
  * @param {string} params.questionType - classified question type (university_specific, general_knowledge, hybrid)
  * @returns {Array<Object>} - Format ready for completion provider
  */
-const buildMessages = ({ question, intent, retrievedChunks, universitySiteResults = [], webResults = [], memory, user, questionType, isRepeat = false, activeTopic = "" }) => {
+const buildMessages = ({ question, intent, retrievedChunks, universitySiteResults = [], webResults = [], memory, user, questionType, isRepeat = false, activeTopic = "", language }) => {
     const defaultInstitution = process.env.PRIMARY_UNIVERSITY_NAME || "Brainware University";
     const activeInstitution = (user && user.institution && user.institution.trim()) ? user.institution : defaultInstitution;
 
@@ -142,7 +142,23 @@ const buildMessages = ({ question, intent, retrievedChunks, universitySiteResult
         "",
         "## Strict Grounding Policy",
         "",
-        "Always use exact figures and details from uploaded documents when provided. Do not use generic market averages."
+        "Always use exact figures and details from uploaded documents when provided. Do not use generic market averages.",
+        "",
+        "## LANGUAGE OF RESPONSE",
+        `You MUST respond strictly in ${(() => {
+            const SUPPORTED_LANGUAGES = {
+                en: "English",
+                hi: "Hindi",
+                bn: "Bengali"
+            };
+            const targetLangCode = SUPPORTED_LANGUAGES[language] ? language : "en";
+            return SUPPORTED_LANGUAGES[targetLangCode];
+        })()}.`,
+        `- If the target language is English, respond in English.`,
+        `- If the target language is Hindi, respond in Hindi (using Devanagari script).`,
+        `- If the target language is Bengali, respond in Bengali (using Bengali script).`,
+        `- Ensure all natural language response text, explanations, and descriptions are written entirely in the target language.`,
+        `- IMPORTANT: Do NOT translate proper nouns, acronyms, or institutional facts/figures incorrectly. The RAG-retrieved context must remain the absolute source of truth. The numeric values, currency symbols (e.g. ₹5000), names of blocks, courses, and department abbreviations (e.g. BCA, B.Tech) must be preserved exactly in the response. Only translate the surrounding natural language. For example: "Application fee: ₹5000" -> "आवेदन शुल्क ₹5000 है।" or "আবেদন ফি ₹5000।"`
     ].join("\n");
 
     const userPrompt = [

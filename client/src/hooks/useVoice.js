@@ -69,6 +69,9 @@ export default function useVoice() {
 
     const setLanguage = (lang) => {
         VoiceConversationManager.activeLang = lang;
+        if (typeof localStorage !== "undefined") {
+            localStorage.setItem("edumate-language", lang);
+        }
         setActiveLang(lang);
     };
 

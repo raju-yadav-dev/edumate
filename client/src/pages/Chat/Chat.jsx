@@ -535,6 +535,7 @@ function Chat() {
                 userMessageId: uMsgId,
                 assistantMessageId: aMsgId,
                 parentId: finalParentId,
+                language: activeLang,
                 onChunk: (event) => {
                     if (event.type === "chunk") {
                         finalText += event.content;
@@ -637,7 +638,7 @@ function Chat() {
             abortRef.current = null;
             setAttachments([]);
         }
-    }, [activeThreadId, attachments, conversationId, loading, gpsCoords, activeBranchMessages, activeChildMap]);
+    }, [activeThreadId, attachments, conversationId, loading, gpsCoords, activeBranchMessages, activeChildMap, activeLang]);
 
     const visibleMessages = useMemo(() => {
         if (!activeBranchMessages.length) {
