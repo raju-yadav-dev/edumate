@@ -185,7 +185,7 @@ async function evaluateRoute(route, options = {}) {
         const lngKey = Number(lng).toFixed(4);
         const cacheKey = `${latKey},${lngKey}`;
 
-        if (physicalHazardCache.has(cacheKey)) {
+        if (process.env.NODE_ENV !== "test" && physicalHazardCache.has(cacheKey)) {
             const cached = physicalHazardCache.get(cacheKey);
             if (now - cached.timestamp < cacheTTL) {
                 cachedResults.push(cached.hazards);
@@ -428,7 +428,7 @@ async function filterSafeRoutes(routes, options = {}) {
             continue;
         }
 
-        const safety = await evaluateRoute(route, options);
+        const safety = await module.exports.evaluateRoute(route, options);
         const routeWithSafety = {
             ...route,
             safety

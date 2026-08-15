@@ -269,7 +269,11 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
                     sources: mapResult.sources,
                     sourceLabel: SOURCE_LABELS.UNIVERSITY
                 })
-                : responseFormattingService.formatUnavailable({ reason: mapResult.answer });
+                : {
+                    answer: mapResult.answer,
+                    confidence: "low",
+                    sources: []
+                };
                 
             if (mapResult.mapData) {
                 formatted.mapData = mapResult.mapData;
@@ -535,7 +539,11 @@ User Question: "${rewrittenQuery}"`;
                 sources: mapResult.sources,
                 sourceLabel: SOURCE_LABELS.UNIVERSITY
             })
-            : responseFormattingService.formatUnavailable({ reason: mapResult.answer });
+            : {
+                answer: mapResult.answer,
+                confidence: "low",
+                sources: []
+            };
 
         if (mapResult.mapData) {
             formatted.mapData = mapResult.mapData;

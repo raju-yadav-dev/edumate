@@ -1,3 +1,5 @@
+process.env.NODE_ENV = "test";
+process.env.OPENROUTE_SERVICE_API_KEY = "test_key";
 const path = require("path");
 const mongoose = require("mongoose");
 const assert = require("assert");
@@ -147,6 +149,7 @@ async function runTests() {
         console.log("\nRunning TEST 5 & 6: Crime risk verification...");
         process.env.CRIME_DATA_ENABLED = "true";
         process.env.CRIME_DATA_URL = "http://mock-crime-feed.json";
+        process.env.CRIME_DATA_RADIUS_METERS = "50";
 
         const lowCrimeRoute = {
             geometry: [[22.7203, 88.4851], [22.7207, 88.4853]],

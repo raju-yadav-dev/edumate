@@ -19,7 +19,7 @@ class GeoJsonCrimeProvider {
         const now = Date.now();
         const ttlMs = (ttlSeconds || 600) * 1000;
 
-        if (cachedFeatures && (now - cacheTimestamp < ttlMs)) {
+        if (process.env.NODE_ENV !== "test" && cachedFeatures && (now - cacheTimestamp < ttlMs)) {
             console.log("[Crime Provider] Using cached GeoJSON features");
             return cachedFeatures;
         }

@@ -62,6 +62,10 @@ async function geocode(query) {
     // Clean up query
     let searchQuery = query.trim();
 
+    // Map spelling variations
+    searchQuery = searchQuery.replace(/shyamnager/gi, "Shyamnagar");
+
+
     // To prevent getting results from other parts of the world for common local place names,
     // we append "Kolkata, West Bengal, India" if there is no mention of "kolkata" or "india" or "bengal" in the query.
     const lowerQuery = searchQuery.toLowerCase();

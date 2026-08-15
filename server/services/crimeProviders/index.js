@@ -1,9 +1,14 @@
 const GeoJsonCrimeProvider = require("./geoJsonCrimeProvider");
 
+let geoJsonProviderInstance = null;
+
 function getCrimeProvider(name = process.env.CRIME_DATA_FORMAT || "geojson") {
     const cleanName = String(name || "").toLowerCase();
     if (cleanName === "geojson") {
-        return new GeoJsonCrimeProvider();
+        if (!geoJsonProviderInstance) {
+            geoJsonProviderInstance = new GeoJsonCrimeProvider();
+        }
+        return geoJsonProviderInstance;
     }
     throw new Error(`Unsupported crime provider: ${name}`);
 }
