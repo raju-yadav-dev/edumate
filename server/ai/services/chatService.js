@@ -148,12 +148,66 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
     }
 
     // 1. Retrieve dialogue history memory context
-    const { historyText, activeTopic } = await conversationService.getRecentMemory({
+    const { historyText, activeTopic, conversationContext } = await conversationService.getRecentMemory({
         userId: activeUser._id,
         conversationId,
         maxTokens: 1500,
         parentId
     });
+
+    // ==========================================
+    // BUG 1: AMBIGUOUS LOCATION QUERY CHECK
+    // ==========================================
+    const cleanQ = normalizedQuestion.replace(/[?.!]/g, "").trim().toLowerCase();
+    const ambiguousLocationPatterns = {
+        "building": "Sure. What would you like to know about the building?",
+        "room": "Sure. Which room or person are you looking for?",
+        "floor": "Sure. Which building or location are you referring to?",
+        "campus": "What would you like to know about the campus?",
+        "office": "Sure. Which office or department are you looking for?",
+        "department": "Sure. Which department are you looking for?",
+        "location": "Sure. What location or building are you trying to find?"
+    };
+
+    if (ambiguousLocationPatterns[cleanQ] !== undefined) {
+        const answer = ambiguousLocationPatterns[cleanQ];
+        console.log(`\n[INTENT]\nambiguous_location\n`);
+        
+        const responseTimeMs = Date.now() - startedAt;
+        const chat = await conversationService.saveMessageTurn({
+            user: activeUser,
+            conversationId,
+            question: normalizedQuestion,
+            response: { answer, confidence: "high" },
+            intent: "ambiguous_location",
+            confidence: 0.9,
+            provider: "system",
+            responseTimeMs,
+            userMessageId,
+            assistantMessageId,
+            parentId,
+            topic: activeTopic || "",
+            entities: { conversationContext }
+        });
+
+        if (onChunk) {
+            onChunk(answer);
+        }
+
+        return {
+            conversationId: chat?._id || conversationId || null,
+            mode: activeUser._id ? "authenticated" : "guest",
+            message: answer,
+            intent: "ambiguous_location",
+            intentConfidence: 0.9,
+            confidence: "high",
+            sources: [],
+            sourceLabel: "EduMate Clarification",
+            provider: "system",
+            responseTimeMs,
+            suggestions: []
+        };
+    }
 
     // ==========================================
     // ADMIN DOCUMENT DELIVERY FEATURE
@@ -181,7 +235,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
             assistantMessageId,
             parentId,
             topic: docDeliveryResult.topic || activeTopic || "",
-            entities: {}
+            entities: { conversationContext }
         });
 
         if (onChunk) {
@@ -207,11 +261,59 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
     const analysisResult = await queryRewriterService.analyzeQuery({
         question: expandedQuestion,
         historyText,
-        activeTopic
+        conversationContext
     });
-    const { rewrittenQuery, intent, entities, isRepeat, subqueries = [] } = analysisResult;
+    const { rewrittenQuery, intent, entities, isRepeat, subqueries = [], conversationContext: updatedContext, clarificationPrompt } = analysisResult;
     const activeSubqueries = (Array.isArray(subqueries) && subqueries.length > 0) ? subqueries : [rewrittenQuery];
     const resolvedActiveTopic = analysisResult.activeTopic || activeTopic || "";
+
+    // Debug logging for development
+    console.log(`\n[CONTEXT]\nCurrent topic: ${updatedContext?.currentTopic || "None"}`);
+    console.log(`\n[CONTEXT]\nUser query: ${normalizedQuestion}`);
+    console.log(`\n[CONTEXT]\nResolved query: ${rewrittenQuery}`);
+    console.log(`\n[INTENT]\n${intent}\n`);
+
+    if (clarificationPrompt) {
+        const responseTimeMs = Date.now() - startedAt;
+        const chat = await conversationService.saveMessageTurn({
+            user: activeUser,
+            conversationId,
+            question: normalizedQuestion,
+            response: { answer: clarificationPrompt, confidence: "high" },
+            intent: Array.isArray(intent) ? intent.join(",") : String(intent || "unknown"),
+            confidence: 0.9,
+            provider: "system",
+            responseTimeMs,
+            userMessageId,
+            assistantMessageId,
+            parentId,
+            topic: resolvedActiveTopic,
+            entities: { ...entities, conversationContext: updatedContext }
+        });
+
+        const suggestions = await suggestionsService.generateSuggestions({
+            question: normalizedQuestion,
+            answer: clarificationPrompt
+        });
+
+        if (onChunk) {
+            onChunk(clarificationPrompt);
+        }
+
+        return {
+            conversationId: chat?._id || conversationId || null,
+            mode: activeUser._id ? "authenticated" : "guest",
+            message: clarificationPrompt,
+            intent,
+            intentConfidence: 0.9,
+            confidence: "high",
+            sources: [],
+            sourceLabel: "EduMate Clarification",
+            provider: "system",
+            responseTimeMs,
+            suggestions
+        };
+    }
 
     // ==========================================
     // CAMPUS NAVIGATION SPECIAL ROUTING
@@ -296,7 +398,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
                 assistantMessageId,
                 parentId,
                 topic: "campus_navigation",
-                entities
+                entities: { ...entities, conversationContext: updatedContext }
             });
             
             return {
@@ -437,7 +539,7 @@ User Question: "${rewrittenQuery}"`;
             assistantMessageId,
             parentId,
             topic: "campus_navigation",
-            entities
+            entities: { ...entities, conversationContext: updatedContext }
         });
 
         return {
@@ -484,7 +586,7 @@ User Question: "${rewrittenQuery}"`;
             assistantMessageId,
             parentId,
             topic: resolvedActiveTopic,
-            entities
+            entities: { ...entities, conversationContext: updatedContext }
         });
 
         const suggestions = await suggestionsService.generateSuggestions({
@@ -529,7 +631,8 @@ User Question: "${rewrittenQuery}"`;
         const mapResult = await mapService.resolveLocationRequest({
             question: rewrittenQuery,
             user: activeUser,
-            userCoordinates: (latitude && longitude) ? { lat: Number(latitude), lng: Number(longitude) } : null
+            userCoordinates: (latitude && longitude) ? { lat: Number(latitude), lng: Number(longitude) } : null,
+            conversationContext: updatedContext
         });
 
         formatted = mapResult.found
@@ -547,6 +650,14 @@ User Question: "${rewrittenQuery}"`;
 
         if (mapResult.mapData) {
             formatted.mapData = mapResult.mapData;
+            // Update conversationContext with routing information if applicable
+            if (mapResult.mapData.type === "routing") {
+                updatedContext.routeStart = mapResult.mapData.startLocation;
+                updatedContext.routeDestination = mapResult.mapData.destination;
+                if (mapResult.mapData.selectedRouteNumber !== undefined) {
+                    updatedContext.selectedRouteNumber = mapResult.mapData.selectedRouteNumber;
+                }
+            }
         }
         if (mapResult.requiresLocationPermission) {
             formatted.requiresLocationPermission = true;
@@ -1160,7 +1271,7 @@ Output ONLY the verified, grounded answer text. Do not add any introduction, exp
         assistantMessageId,
         parentId,
         topic: resolvedActiveTopic,
-        entities,
+        entities: { ...entities, conversationContext: updatedContext },
         retrievalContext: {
             rewrittenQuery,
             adminDocsFound: adminDocsCount,

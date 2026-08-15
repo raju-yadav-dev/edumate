@@ -70,13 +70,29 @@ const getRecentMemory = async ({ userId, conversationId, maxTokens = 1500, paren
         content: m.content || ""
     }));
 
-    // Find the active topic from the branch messages (last non-empty topic)
+    // Find the active topic and conversationContext from the branch messages (last non-empty topic)
     let activeTopic = "";
+    let conversationContext = null;
     for (let i = branchMessages.length - 1; i >= 0; i--) {
-        if (branchMessages[i].topic) {
-            activeTopic = branchMessages[i].topic;
-            break;
+        const msg = branchMessages[i];
+        if (!activeTopic && msg.topic) {
+            activeTopic = msg.topic;
         }
+        if (!conversationContext && msg.role === "assistant" && msg.entities && msg.entities.conversationContext) {
+            conversationContext = msg.entities.conversationContext;
+        }
+    }
+
+    if (!conversationContext) {
+        conversationContext = {
+            currentTopic: null,
+            currentEntity: null,
+            currentIntent: null,
+            mentionedDepartment: null,
+            mentionedCollege: null,
+            lastRelevantDocument: null,
+            lastRetrievedSources: []
+        };
     }
 
     // Trim history to stay within memory limits
@@ -89,7 +105,8 @@ const getRecentMemory = async ({ userId, conversationId, maxTokens = 1500, paren
     return {
         historyText,
         rawHistory: trimmed,
-        activeTopic
+        activeTopic,
+        conversationContext
     };
 };
 

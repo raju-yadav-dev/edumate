@@ -46,6 +46,21 @@ const getRoute = asyncHandler(async (req, res) => {
         startCoords = { lat: CAMPUS_DEFAULT_LAT, lng: CAMPUS_DEFAULT_LNG, name: "Campus Gate" };
     }
 
+    // Validate coordinates strictly before passing to route calculation
+    const isValidCoordinate = (coords) => {
+        return coords && 
+               typeof coords.lat === "number" && isFinite(coords.lat) && 
+               typeof coords.lng === "number" && isFinite(coords.lng);
+    };
+
+    if (!isValidCoordinate(startCoords)) {
+        return sendError(res, 400, `I couldn't find the starting location '${start || "Start Location"}'. Please provide a nearby landmark or a more specific location.`);
+    }
+
+    if (!isValidCoordinate(destCoords)) {
+        return sendError(res, 400, `I couldn't find the destination '${destination || "Destination"}'. Please provide a nearby landmark or a more specific location.`);
+    }
+
     const routes = await getMapService().calculateAndCacheRoutes(startCoords, destCoords);
     return sendSuccess(res, 200, "Routes calculated successfully.", {
         startLocation: startCoords,

@@ -21,8 +21,18 @@ const CAMPUS_DEFAULT_LNG = 88.4848;
 /**
  * Resolves map and navigation requests from natural language queries
  */
-async function resolveLocationRequest({ question, user, userCoordinates }) {
+async function resolveLocationRequest({ question, user, userCoordinates, conversationContext }) {
     console.log(`[Map Service] Resolving location request for: "${question}"`);
+
+    let selectedRouteNumber = null;
+    const qLower = question.toLowerCase();
+    if (/\b(?:first|1st|route\s*1)\b/.test(qLower)) selectedRouteNumber = 1;
+    else if (/\b(?:second|2nd|route\s*2)\b/.test(qLower)) selectedRouteNumber = 2;
+    else if (/\b(?:third|3rd|route\s*3)\b/.test(qLower)) selectedRouteNumber = 3;
+
+    if (selectedRouteNumber === null && conversationContext && conversationContext.selectedRouteNumber) {
+        selectedRouteNumber = conversationContext.selectedRouteNumber;
+    }
 
     // 1. Ask LLM to parse intent parameters
     let parsedParams;
@@ -57,6 +67,15 @@ Query: "${question}"`;
     } catch (err) {
         console.error("[Map Service] LLM Parsing failed, using basic heuristic:", err.message);
         parsedParams = parseQueryHeuristically(question);
+    }
+
+    // Fallback to conversationContext if LLM returns unknown on a follow-up query
+    if (parsedParams.type === "unknown" && conversationContext && conversationContext.routeStart && conversationContext.routeDestination) {
+        if (selectedRouteNumber !== null || qLower.includes("how long") || qLower.includes("travel time") || qLower.includes("distance") || qLower.includes("show route") || qLower.includes("show the")) {
+            parsedParams.type = "route";
+            parsedParams.start = conversationContext.routeStart.name;
+            parsedParams.destination = conversationContext.routeDestination.name;
+        }
     }
 
     if (parsedParams.type === "unknown") {
@@ -106,57 +125,113 @@ Query: "${question}"`;
         let startCoords = null;
         let destCoords = null;
 
+        // Fallback to conversationContext route start/destination if names match or is a follow-up
+        if (conversationContext && conversationContext.routeStart && conversationContext.routeDestination) {
+            const isContextMatch = (name, contextLoc) => {
+                if (!name || !contextLoc) return false;
+                const n = name.toLowerCase();
+                const cn = String(contextLoc.name || "").toLowerCase();
+                return n === cn || n === "my location" || n === "current location" || cn.includes(n) || n.includes(cn);
+            };
+
+            if (selectedRouteNumber !== null || qLower.includes("how long") || qLower.includes("travel time") || qLower.includes("distance") ||
+                isContextMatch(startName, conversationContext.routeStart) || isContextMatch(destName, conversationContext.routeDestination)) {
+                startCoords = conversationContext.routeStart;
+                destCoords = conversationContext.routeDestination;
+            }
+        }
+
         // Resolve destination coordinates
-        try {
-            const destRes = await locationHelper.resolveLocation(destName);
-            destCoords = { lat: destRes.latitude, lng: destRes.longitude, name: destRes.name };
-        } catch (err) {
-            // Fallback: If destination is the university campus but geocoding fails, use default campus lat/lng
-            if (destName.toLowerCase().includes("brainware") || destName.toLowerCase().includes("university") || destName.toLowerCase().includes("campus")) {
-                destCoords = { lat: CAMPUS_DEFAULT_LAT, lng: CAMPUS_DEFAULT_LNG, name: "Brainware University" };
-            } else {
-                return {
-                    found: false,
-                    answer: `I could not resolve the destination "${destName}". Could you please verify the place name?`,
-                    sources: []
-                };
+        if (!destCoords) {
+            try {
+                const destRes = await locationHelper.resolveLocation(destName);
+                destCoords = { lat: destRes.latitude, lng: destRes.longitude, name: destRes.name };
+            } catch (err) {
+                // Fallback: If destination is the university campus but geocoding fails, use default campus lat/lng
+                if (destName.toLowerCase().includes("brainware") || destName.toLowerCase().includes("university") || destName.toLowerCase().includes("campus")) {
+                    destCoords = { lat: CAMPUS_DEFAULT_LAT, lng: CAMPUS_DEFAULT_LNG, name: "Brainware University" };
+                } else {
+                    return {
+                        found: false,
+                        answer: `I could not resolve the destination "${destName}". Could you please verify the place name?`,
+                        sources: []
+                    };
+                }
             }
         }
 
         // Resolve start coordinates
-        if (startName.toLowerCase() === "my location" || startName.toLowerCase() === "current location") {
-            if (userCoordinates && userCoordinates.lat && userCoordinates.lng) {
-                startCoords = { lat: userCoordinates.lat, lng: userCoordinates.lng, name: "Your Location" };
+        if (!startCoords) {
+            if (startName.toLowerCase() === "my location" || startName.toLowerCase() === "current location") {
+                if (userCoordinates && userCoordinates.lat && userCoordinates.lng) {
+                    startCoords = { lat: userCoordinates.lat, lng: userCoordinates.lng, name: "Your Location" };
+                } else {
+                    // If coordinates are missing, return a payload requesting geolocation permission
+                    return {
+                        found: true,
+                        requiresLocationPermission: true,
+                        answer: "📍 **Location Access Needed**\n\nTo show you accurate routes and directions from your current location, EduMate needs your device's location permission. Please click the button below to allow access, or manually enter your starting location.",
+                        sources: [],
+                        mapData: {
+                            type: "permission_request",
+                            destination: destCoords
+                        }
+                    };
+                }
             } else {
-                // If coordinates are missing, return a payload requesting geolocation permission
-                return {
-                    found: true,
-                    requiresLocationPermission: true,
-                    answer: "📍 **Location Access Needed**\n\nTo show you accurate routes and directions from your current location, EduMate needs your device's location permission. Please click the button below to allow access, or manually enter your starting location.",
-                    sources: [],
-                    mapData: {
-                        type: "permission_request",
-                        destination: destCoords
-                    }
-                };
+                try {
+                    const startRes = await locationHelper.resolveLocation(startName);
+                    startCoords = { lat: startRes.latitude, lng: startRes.longitude, name: startRes.name };
+                } catch (err) {
+                    return {
+                        found: false,
+                        answer: `I could not resolve the starting location "${startName}". Please enter a valid starting point.`,
+                        sources: []
+                    };
+                }
             }
-        } else {
-            try {
-                const startRes = await locationHelper.resolveLocation(startName);
-                startCoords = { lat: startRes.latitude, lng: startRes.longitude, name: startRes.name };
-            } catch (err) {
-                return {
-                    found: false,
-                    answer: `I could not resolve the starting location "${startName}". Please enter a valid starting point.`,
-                    sources: []
-                };
-            }
+        }
+
+        // Validate coordinates strictly before passing to route calculation
+        const isValidCoordinate = (coords) => {
+            return coords && 
+                   typeof coords.lat === "number" && isFinite(coords.lat) && 
+                   typeof coords.lng === "number" && isFinite(coords.lng);
+        };
+
+        if (!isValidCoordinate(startCoords)) {
+            return {
+                found: false,
+                answer: `I couldn't find the starting location '${startName}'. Please provide a nearby landmark or a more specific location.`,
+                sources: []
+            };
+        }
+
+        if (!isValidCoordinate(destCoords)) {
+            return {
+                found: false,
+                answer: `I couldn't find the destination '${destName}'. Please provide a nearby landmark or a more specific location.`,
+                sources: []
+            };
         }
 
         // Generate or retrieve routes
         try {
             const routes = await calculateAndCacheRoutes(startCoords, destCoords);
-            const naturalAnswer = formatRoutingResponse(destCoords.name, routes);
+
+            // Apply route selection
+            if (selectedRouteNumber !== null) {
+                routes.forEach(r => {
+                    r.recommended = (r.routeNumber === selectedRouteNumber);
+                });
+                if (routes.excludedRoutes) {
+                    routes.excludedRoutes.forEach(r => {
+                        r.recommended = (r.routeNumber === selectedRouteNumber);
+                    });
+                }
+            }
+
+            const naturalAnswer = formatRoutingResponse(startCoords.name, destCoords.name, routes, selectedRouteNumber);
 
             return {
                 found: true,
@@ -169,7 +244,8 @@ Query: "${question}"`;
                     type: "routing",
                     startLocation: startCoords,
                     destination: destCoords,
-                    routes
+                    routes,
+                    selectedRouteNumber: selectedRouteNumber || (routes[0] ? routes[0].routeNumber : null)
                 }
             };
         } catch (error) {
@@ -412,6 +488,13 @@ function processOrsFeature(feature, idx, airDistance) {
  * Calculates, caches, and compiles the three travel options.
  */
 async function calculateAndCacheRoutes(start, dest) {
+    if (!start || typeof start.lat !== "number" || !isFinite(start.lat) || typeof start.lng !== "number" || !isFinite(start.lng)) {
+        throw new Error("Invalid start coordinates provided for routing calculation.");
+    }
+    if (!dest || typeof dest.lat !== "number" || !isFinite(dest.lat) || typeof dest.lng !== "number" || !isFinite(dest.lng)) {
+        throw new Error("Invalid destination coordinates provided for routing calculation.");
+    }
+
     const cacheKeyStart = `${start.lat.toFixed(4)},${start.lng.toFixed(4)}_car_alt`;
     const cacheKeyEnd = `${dest.lat.toFixed(4)},${dest.lng.toFixed(4)}_car_alt`;
 
@@ -449,22 +532,19 @@ async function calculateAndCacheRoutes(start, dest) {
         if (apiKey) {
             try {
                 const geoJson = await fetchOrsRouteAlternatives(start, dest, apiKey);
-                if (geoJson && Array.isArray(geoJson.features)) {
+                if (geoJson && Array.isArray(geoJson.features) && geoJson.features.length > 0) {
                     options = geoJson.features.map((feat, idx) =>
                         processOrsFeature(feat, idx, airDistance)
                     );
                 }
             } catch (orsError) {
-                console.error("[Map Service] ORS call failed:", orsError.message);
-                throw orsError;
+                console.error("[Map Service] ORS call failed, falling back to mock routes:", orsError.message);
             }
-        } else {
-            console.warn("[Map Service] OpenRouteService API Key is not configured. Falling back to mock routes.");
-            options = generateMockRoutes(start, dest, airDistance);
         }
 
         if (options.length === 0) {
-            throw new Error("No routes could be fetched from routing provider.");
+            console.warn("[Map Service] No ORS routes found or error occurred. Falling back to mock routes.");
+            options = generateMockRoutes(start, dest, airDistance);
         }
 
         // ========================================
@@ -1029,42 +1109,84 @@ function generateMockPois(lat, lng, type) {
 /**
  * Formats routing travel options to clean natural text output
  */
-function formatRoutingResponse(destinationName, options) {
-    let md = `📍 **Destination: ${destinationName}**\n\n`;
+function formatRoutingResponse(startName, destinationName, options, selectedRouteNumber = null) {
+    const recommendedRoute = options.find(r => r.recommended) || options[0];
+    if (!recommendedRoute) {
+        return "No routes currently available.";
+    }
 
-    options.forEach((opt, idx) => {
-        let emoji = "🚗";
-        if (opt.mode === "bike") emoji = "🏍";
-        else if (opt.mode === "public_transport" || opt.mode === "bus") emoji = "🚌";
-        else if (opt.mode === "walking") emoji = "🚶";
-        else if (opt.mode === "cycling") emoji = "🚲";
+    const headerWording = (recommendedRoute.safety && recommendedRoute.safety.riskLevel === "LOW")
+        ? "Safest currently available route"
+        : "Lower-risk route based on available current data";
 
-        const recLabel = opt.recommended ? " (Recommended)" : "";
-        md += `${emoji} **Option ${idx + 1}${recLabel}** - **${opt.label}**\n`;
-        md += `• **Distance:** ${opt.distance}\n`;
-        md += `• **Travel Time:** ${opt.time}\n`;
+    let md = `🛣️ Route Recommendation\n\n`;
+    md += `${headerWording}:\n`;
+    md += `${startName} → ${destinationName}\n\n`;
 
-        if (opt.mode === "walking" || opt.mode === "cycling") {
-            md += `• **Cost:** Free\n`;
+    md += `${recommendedRoute.label || `Route ${recommendedRoute.routeNumber}`}\n`;
+    md += `Distance: ${recommendedRoute.distance}\n`;
+    md += `Estimated time: ${recommendedRoute.time}\n\n`;
+
+    md += `Safety:\n`;
+    const safety = recommendedRoute.safety;
+    if (!safety || safety.status === "UNKNOWN" || safety.riskLevel === "UNKNOWN") {
+        md += `Safety verification is currently unavailable for this route.\n\n`;
+    } else {
+        if (safety.physicalHazards?.flood > 0) {
+            md += `✗ Flood hazard detected along this route\n`;
         } else {
-            const isPt = opt.mode === "public_transport" || opt.mode === "bus";
-            md += `• **Estimated ${isPt ? "Fare" : "Fuel Cost"}:** ${opt.cost} (approx estimate)\n`;
+            md += `✓ No reported flood hazard\n`;
         }
-
-        if (opt.advantages) {
-            md += `• **Advantage:** ${opt.advantages}\n`;
+        if (safety.physicalHazards?.roadClosure > 0) {
+            md += `✗ Road closure detected along this route\n`;
+        } else {
+            md += `✓ No mapped road closure\n`;
         }
-
-        // Output short preview of instructions
-        if (opt.instructions && opt.instructions.length > 0) {
-            md += `• **Route Preview:** ${opt.instructions[0].text}\n`;
+        if (safety.crimeRisk?.status !== "AVAILABLE") {
+            md += `Safety verification is currently unavailable for this route.\n`;
+        } else {
+            const riskLvl = safety.crimeRisk.score >= 75 ? "High" : safety.crimeRisk.score >= 35 ? "Moderate" : "Low";
+            md += `✓ ${riskLvl} recent incident risk\n`;
         }
+        md += `\n`;
+    }
 
-        md += "\n";
+    md += `Why recommended:\n`;
+    if (recommendedRoute.routeNumber === options[0]?.routeNumber && (!safety || safety.status !== "UNKNOWN")) {
+        md += `This route has the lowest safety risk among the available routes.\n\n`;
+    } else if (selectedRouteNumber !== null) {
+        md += `This is the user-selected route (Route ${recommendedRoute.routeNumber}).\n\n`;
+    } else {
+        md += `This route is recommended based on currently available safety data.\n\n`;
+    }
+
+    md += `Alternative routes:\n`;
+    let alternativesExist = false;
+
+    let allRoutes = [...options];
+    if (options.excludedRoutes) {
+        allRoutes = allRoutes.concat(options.excludedRoutes);
+    }
+
+    allRoutes.forEach(r => {
+        if (r.routeNumber !== recommendedRoute.routeNumber) {
+            alternativesExist = true;
+            const riskLabel = r.safety?.status === "UNKNOWN"
+                ? "Safety verification unavailable"
+                : r.safety?.riskLevel === "LOW" ? "Low risk"
+                : r.safety?.riskLevel === "MEDIUM" ? "Moderate risk"
+                : r.safety?.riskLevel === "HIGH" ? "Higher risk"
+                : r.safety?.riskLevel === "EXCLUDED" ? "Higher risk (Excluded)"
+                : "Higher risk";
+            md += `${r.label || `Route ${r.routeNumber}`} — ${r.time} — ${riskLabel}\n`;
+        }
     });
 
-    md += `*Interactive routes mapped in the panel below. Click to inspect turn-by-turn steps, adjust zoom, or deep-link directions directly to Google Maps.*`;
+    if (!alternativesExist) {
+        md += `No alternative routes found.\n`;
+    }
 
+    md += `\n[Show Route]`;
     return md;
 }
 

@@ -64,6 +64,8 @@ async function geocode(query) {
 
     // Map spelling variations
     searchQuery = searchQuery.replace(/shyamnager/gi, "Shyamnagar");
+    searchQuery = searchQuery.replace(/bhadreshware/gi, "Bhadreswar");
+    searchQuery = searchQuery.replace(/bhadreswar/gi, "Bhadreswar");
 
 
     // To prevent getting results from other parts of the world for common local place names,
@@ -139,6 +141,45 @@ async function reverseGeocode(lat, lng) {
  */
 async function resolveLocation(queryName) {
     if (!queryName) throw new Error("Location query is required.");
+
+    // Robust local dictionary for common geocoding locations
+    const cleanQuery = queryName.trim().toLowerCase();
+    const fallbackLocations = {
+        "bhadreshware": {
+            name: "Bhadreswar Municipal Hospital, Grand Trunk Road, Chandannagar, Kolkata Metropolitan Area, Singur, Hooghly, West Bengal, 712125, India",
+            latitude: 22.8310988,
+            longitude: 88.3570138,
+            source: "local_dictionary"
+        },
+        "bhadreswar": {
+            name: "Bhadreswar Municipal Hospital, Grand Trunk Road, Chandannagar, Kolkata Metropolitan Area, Singur, Hooghly, West Bengal, 712125, India",
+            latitude: 22.8310988,
+            longitude: 88.3570138,
+            source: "local_dictionary"
+        },
+        "barasat junction": {
+            name: "Barasat Junction, Old Kalibari Road, Champadali, Barasat, Kolkata Metropolitan Area, Barasat - I, North 24 Parganas, West Bengal, 700125, India",
+            latitude: 22.7241945,
+            longitude: 88.4837829,
+            source: "local_dictionary"
+        },
+        "dum dum": {
+            name: "Dum Dum, Kolkata Metropolitan Area, Barrackpur - II, North 24 Parganas, West Bengal, 700081, India",
+            latitude: 22.6520597,
+            longitude: 88.4360417,
+            source: "local_dictionary"
+        },
+        "brainware university": {
+            name: "Brainware University, 398, Barasat - Petrapole Highway, Champadali, Barasat, Kolkata Metropolitan Area, Barasat - I, North 24 Parganas, West Bengal, 700125, India",
+            latitude: 22.7317524,
+            longitude: 88.4990443,
+            source: "local_dictionary"
+        }
+    };
+
+    if (fallbackLocations[cleanQuery]) {
+        return fallbackLocations[cleanQuery];
+    }
 
     // Check campus db
     const campusLoc = await lookupCampusLocation(queryName);

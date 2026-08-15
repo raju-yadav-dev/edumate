@@ -54,6 +54,13 @@ const startServer = async () => {
         // Connect to MongoDB asynchronously in the background
         connectDB()
             .then(async () => {
+                let campusLocationsReady = false;
+                let crawlerSchedulerRunning = false;
+                let qdrantConnected = false;
+                let qdrantCollectionVerified = false;
+                let campusNavigationReady = false;
+                let ragIndexingReady = false;
+
                 // Auto-seed campus locations if none exist
                 try {
                     const Location = require("./models/Location");
@@ -77,87 +84,308 @@ const startServer = async () => {
                         await Location.insertMany(campusLocations);
                         console.log("✓ Campus locations successfully seeded.");
                     }
+                    campusLocationsReady = true;
                 } catch (e) {
                     console.error("⚠️ Failed to auto-seed campus locations:", e.message);
                 }
 
-        // Start background crawler sync scheduler
-        try {
-            const syncScheduler = require("./crawler/SyncScheduler");
-            syncScheduler.start();
-        } catch (e) {
-            console.error("⚠️ Failed to initialize background scheduler:", e.message);
-        }
+                // Start background crawler sync scheduler
+                try {
+                    const syncScheduler = require("./crawler/SyncScheduler");
+                    syncScheduler.start();
+                    crawlerSchedulerRunning = true;
+                } catch (e) {
+                    console.error("⚠️ Failed to initialize background scheduler:", e.message);
+                }
 
-        // Verify Qdrant connection during startup
-        try {
-            const { ensureCollection } = require("./ai/config/qdrant");
-            await ensureCollection();
-            console.log("✓ Qdrant collection verified successfully on startup.");
-        } catch (e) {
-            console.error("⚠️ WARNING: Qdrant connection failed during startup:", e.message);
-        }
+                // Verify Qdrant connection during startup
+                try {
+                    const { ensureCollection } = require("./ai/config/qdrant");
+                    await ensureCollection();
+                    qdrantConnected = true;
+                    qdrantCollectionVerified = true;
+                    console.log("✓ Qdrant collection verified successfully on startup.");
+                } catch (e) {
+                    console.error("⚠️ WARNING: Qdrant connection failed during startup:", e.message);
+                }
 
-        // Campus Navigation startup migration and reindexing
-        try {
-            const Document = require("./models/Document");
-            const Chunk = require("./models/Chunk");
-            const indexingService = require("./ai/services/indexingService");
+                // Campus Navigation startup migration and reindexing
+                const Document = require("./models/Document");
+                const Chunk = require("./models/Chunk");
+                const indexingService = require("./ai/services/indexingService");
 
-            const ROMAN_MAP = {
-                "i": "1", "ii": "2", "iii": "3", "iv": "4", "v": "5", "vi": "6", "vii": "7", "viii": "8", "ix": "9",
-                "1": "1", "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7", "8": "8", "9": "9"
-            };
+                try {
+                    const ROMAN_MAP = {
+                        "i": "1", "ii": "2", "iii": "3", "iv": "4", "v": "5", "vi": "6", "vii": "7", "viii": "8", "ix": "9",
+                        "1": "1", "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7", "8": "8", "9": "9"
+                    };
 
-            const docsToMigrate = await Document.find({ status: "active", category: "campus_navigation_campus" });
-            if (docsToMigrate.length > 0) {
-                console.log(`[Startup Migration] Found ${docsToMigrate.length} building documents in old category.`);
-                for (const doc of docsToMigrate) {
-                    const fileNumMatch = doc.originalName.match(/(?:Building|Buliding)\s+([IVX0-9]+)/i);
-                    if (fileNumMatch) {
-                        const rawNum = fileNumMatch[1].toLowerCase();
-                        const num = ROMAN_MAP[rawNum] || fileNumMatch[1];
-                        doc.category = `campus_navigation_building_${num}`;
-                        await doc.save();
-                        console.log(`[Startup Migration] Migrated category of ${doc.originalName} to "${doc.category}"`);
+                    const docsToMigrate = await Document.find({ status: "active", category: "campus_navigation_campus" });
+                    if (docsToMigrate.length > 0) {
+                        console.log(`[Startup Migration] Found ${docsToMigrate.length} building documents in old category.`);
+                        for (const doc of docsToMigrate) {
+                            const fileNumMatch = doc.originalName.match(/(?:Building|Buliding)\s+([IVX0-9]+)/i);
+                            if (fileNumMatch) {
+                                const rawNum = fileNumMatch[1].toLowerCase();
+                                const num = ROMAN_MAP[rawNum] || fileNumMatch[1];
+                                doc.category = `campus_navigation_building_${num}`;
+                                await doc.save();
+                                console.log(`[Startup Migration] Migrated category of ${doc.originalName} to "${doc.category}"`);
+                            }
+                        }
                     }
+                    campusNavigationReady = true;
+                } catch (migErr) {
+                    console.error("⚠️ Failed running Campus Navigation startup migration:", migErr.message);
                 }
-            }
 
-            // Check if any building chunks need new metadata fields
-            const count = await Chunk.countDocuments({ "metadata.sourceType": "campus_navigation" });
-            const campusDocs = await Document.find({ status: "active", category: /^campus_navigation/ });
-            
-            if (count === 0 && campusDocs.length > 0) {
-                console.log(`[Startup Reindexing] Chunks missing sourceType metadata. Triggering auto-reindexing for ${campusDocs.length} campus building documents...`);
-                for (const doc of campusDocs) {
-                    console.log(`[Startup Reindexing] Queueing document for background indexing: ${doc.originalName} (${doc._id})`);
-                    await indexingService.indexDocumentBackground(doc._id);
+                // RAG Indexing startup check
+                try {
+                    const count = await Chunk.countDocuments({ "metadata.sourceType": "campus_navigation" });
+                    const campusDocs = await Document.find({ status: "active", category: /^campus_navigation/ });
+                    
+                    if (count === 0 && campusDocs.length > 0) {
+                        console.log(`[Startup Reindexing] Chunks missing sourceType metadata. Triggering auto-reindexing for ${campusDocs.length} campus building documents...`);
+                        for (const doc of campusDocs) {
+                            console.log(`[Startup Reindexing] Queueing document for background indexing: ${doc.originalName} (${doc._id})`);
+                            await indexingService.indexDocumentBackground(doc._id);
+                        }
+
+                        // Wait until the indexing worker queue has finished
+                        console.log("[Startup Reindexing] Awaiting completion of all RAG indexing jobs...");
+                        while (true) {
+                            const pendingOrProcessingExists = await Document.exists({
+                                status: { $ne: "deleted" },
+                                embeddingStatus: { $in: ["pending", "processing"] }
+                            });
+                            if (!pendingOrProcessingExists) {
+                                break;
+                            }
+                            await new Promise((resolve) => setTimeout(resolve, 500));
+                        }
+                        console.log("[Startup Reindexing] All startup RAG indexing jobs completed.");
+                    }
+                    ragIndexingReady = true;
+                } catch (ragErr) {
+                    console.error("⚠️ Failed running RAG Indexing startup check:", ragErr.message);
                 }
-            }
-        } catch (migErr) {
-            console.error("⚠️ Failed running Campus Navigation startup migration:", migErr.message);
-        }
 
-        app.listen(PORT, () => {
+                // Parallel checks for other services
+                const [supabaseConnected, aiCheck, mapCheck] = await Promise.all([
+                    // Supabase check
+                    (async () => {
+                        try {
+                            const supabase = require("./config/supabase");
+                            const { error } = await supabase.storage.listBuckets();
+                            return !error;
+                        } catch (e) {
+                            return false;
+                        }
+                    })(),
+                    // AI services check
+                    (async () => {
+                        try {
+                            const groqProviders = await require("./services/groqProviderManager").getConfiguredProviders().catch(() => []);
+                            const groqConfigured = groqProviders.length > 0;
+                            const geminiConfigured = !!process.env.GEMINI_API_KEY;
+                            return { groqConfigured, llmAvailable: groqConfigured || geminiConfigured };
+                        } catch (e) {
+                            return { groqConfigured: false, llmAvailable: false };
+                        }
+                    })(),
+                    // Map services check
+                    (async () => {
+                        try {
+                            const keysSetting = await require("./services/settingsService").getApiKeys().catch(() => ({}));
+                            const rawApiKey = keysSetting.openRouteServiceApiKey || process.env.OPENROUTE_SERVICE_API_KEY;
+                            const openRouteServiceConfigured = !!(rawApiKey && rawApiKey !== "YOUR_KEY_HERE" && rawApiKey.trim() !== "");
+                            return { openRouteServiceConfigured, routingAvailable: openRouteServiceConfigured };
+                        } catch (e) {
+                            return { openRouteServiceConfigured: false, routingAvailable: false };
+                        }
+                    })()
+                ]);
 
-            console.log(`
-+==========================================================+
-|             ✓ Server Started Successfully                |
-|                                                          |
-| Environment : ${process.env.NODE_ENV || "development"}
-| Port        : ${PORT}
-| API         : http://localhost:${PORT}
-| Started     : ${new Date().toLocaleString()}
-|                                                          |
-| Ready to accept requests                                 |
-+==========================================================+
+                // MongoDB dynamic status info
+                const mongoose = require("mongoose");
+                const mongoConnected = mongoose.connection && mongoose.connection.readyState === 1;
+                const mongoDbName = mongoConnected ? mongoose.connection.name : "EduMate";
+                const uri = process.env.MONGODB_URI || "";
+                const isAtlas = uri.includes(".mongodb.net") || uri.includes("mongodb+srv");
+                const mongoProvider = isAtlas ? "MongoDB Atlas" : "Local MongoDB";
 
-============================================================
-`);
+                // Format elements for terminal dashboard
+                const colors = require("./scripts/colors");
+                const borderDouble = colors.cyan(`+${"=".repeat(58)}+`);
+                const borderSingle = colors.cyan(`+${"-".repeat(58)}+`);
 
-        });
+                const padLine = (label, value, labelWidth = 12, totalWidth = 60, valueColorFn = null) => {
+                    const paddedLabel = label.padEnd(labelWidth, " ");
+                    const prefixUnstyled = `| ${paddedLabel}: ${value}`;
+                    const paddingLength = totalWidth - prefixUnstyled.length - 2;
+                    const padding = paddingLength > 0 ? " ".repeat(paddingLength) : "";
+                    
+                    const styledValue = valueColorFn ? valueColorFn(value) : value;
+                    return `${colors.cyan("|")} ${paddedLabel}: ${styledValue}${padding} ${colors.cyan("|")}`;
+                };
 
+                const padSimpleLine = (content, totalWidth = 60) => {
+                    const prefixUnstyled = `| ${content}`;
+                    const paddingLength = totalWidth - prefixUnstyled.length - 2;
+                    const padding = paddingLength > 0 ? " ".repeat(paddingLength) : "";
+                    return `${colors.cyan("|")} ${content}${padding} ${colors.cyan("|")}`;
+                };
+
+                const padCenteredLine = (content, totalWidth = 60, colorFn = null) => {
+                    const innerWidth = totalWidth - 2;
+                    const contentLen = content.length;
+                    const totalSpaces = innerWidth - contentLen;
+                    const leftSpaces = Math.floor(totalSpaces / 2);
+                    const rightSpaces = totalSpaces - leftSpaces;
+                    const styledContent = colorFn ? colorFn(content) : content;
+                    return `${colors.cyan("|")}${" ".repeat(leftSpaces)}${styledContent}${" ".repeat(rightSpaces)}${colors.cyan("|")}`;
+                };
+
+                const makeSectionHeader = (title, totalWidth = 60) => {
+                    const prefix = "+------------------- ";
+                    const label = `${title} `;
+                    const remaining = totalWidth - prefix.length - label.length - 1;
+                    const dashes = remaining > 0 ? "-".repeat(remaining) : "";
+                    return colors.cyan(`${prefix}${label}${dashes}+`);
+                };
+
+                const getFormattedStartedDate = () => {
+                    const d = new Date();
+                    const day = String(d.getDate()).padStart(2, "0");
+                    const month = String(d.getMonth() + 1).padStart(2, "0");
+                    const year = d.getFullYear();
+                    
+                    let hours = d.getHours();
+                    const minutes = String(d.getMinutes()).padStart(2, "0");
+                    const seconds = String(d.getSeconds()).padStart(2, "0");
+                    const ampm = hours >= 12 ? "PM" : "AM";
+                    hours = hours % 12;
+                    hours = hours ? hours : 12;
+                    const formattedHours = String(hours);
+                    
+                    return `${day}/${month}/${year}, ${formattedHours}:${minutes}:${seconds} ${ampm}`;
+                };
+
+                // Build full dashboard
+                const dashboard = [];
+                
+                dashboard.push(borderDouble);
+                dashboard.push(padCenteredLine("✓ EDUMATE SERVER STARTED", 60, (t) => colors.bold(colors.green(t))));
+                dashboard.push(borderDouble);
+                dashboard.push(padSimpleLine(""));
+                dashboard.push(padLine("Environment", process.env.NODE_ENV || "development", 12));
+                dashboard.push(padLine("Port", String(PORT), 12));
+                dashboard.push(padLine("API", `http://localhost:${PORT}`, 12));
+                dashboard.push(padLine("Started", getFormattedStartedDate(), 12));
+                dashboard.push(padSimpleLine(""));
+                dashboard.push(borderDouble);
+                
+                dashboard.push("");
+                
+                dashboard.push(borderDouble);
+                dashboard.push(padCenteredLine("DATABASE CONNECTION STATUS", 60, (t) => colors.bold(colors.cyan(t))));
+                dashboard.push(borderDouble);
+                
+                dashboard.push("");
+                
+                dashboard.push(makeSectionHeader("MONGODB"));
+                dashboard.push(padLine("Status", mongoConnected ? "✓ Connected" : "❌ Disconnected", 12, 60, mongoConnected ? colors.green : colors.red));
+                dashboard.push(padLine("Database", mongoDbName, 12));
+                dashboard.push(padLine("Provider", mongoProvider, 12));
+                dashboard.push(borderSingle);
+                
+                dashboard.push("");
+                
+                const qdrantStatusText = qdrantConnected ? "✓ Connected" : "❌ Disconnected";
+                const qdrantCollText = qdrantCollectionVerified ? "✓ Verified" : "⚠️ Unverified";
+                dashboard.push(makeSectionHeader("QDRANT"));
+                dashboard.push(padLine("Status", qdrantStatusText, 12, 60, qdrantConnected ? colors.green : colors.red));
+                dashboard.push(padLine("Service", "Qdrant Vector Database", 12));
+                dashboard.push(padLine("Collection", qdrantCollText, 12, 60, qdrantCollectionVerified ? colors.green : colors.yellow));
+                dashboard.push(borderSingle);
+                
+                dashboard.push("");
+                
+                const supabaseStatusText = supabaseConnected ? "✓ Connected" : "❌ Disconnected";
+                const supabaseStorageText = supabaseConnected ? "✓ Available" : "⚠️ Unavailable";
+                dashboard.push(makeSectionHeader("SUPABASE"));
+                dashboard.push(padLine("Status", supabaseStatusText, 12, 60, supabaseConnected ? colors.green : colors.red));
+                dashboard.push(padLine("Service", "Supabase Storage", 12));
+                dashboard.push(padLine("Storage", supabaseStorageText, 12, 60, supabaseConnected ? colors.green : colors.red));
+                dashboard.push(borderSingle);
+                
+                dashboard.push("");
+                
+                const groqApiText = aiCheck.groqConfigured ? "✓ Configured" : "⚠️ Not Configured";
+                const llmText = aiCheck.llmAvailable ? "✓ Available" : "⚠️ Unavailable";
+                dashboard.push(makeSectionHeader("AI SERVICES"));
+                dashboard.push(padLine("Groq API", groqApiText, 12, 60, aiCheck.groqConfigured ? colors.green : colors.yellow));
+                dashboard.push(padLine("LLM", llmText, 12, 60, aiCheck.llmAvailable ? colors.green : colors.red));
+                dashboard.push(borderSingle);
+                
+                dashboard.push("");
+                
+                const mapApiText = mapCheck.openRouteServiceConfigured ? "✓ Configured" : "⚠️ Not Configured";
+                const routingText = mapCheck.routingAvailable ? "✓ Available" : "⚠️ Unavailable";
+                dashboard.push(makeSectionHeader("MAP SERVICES"));
+                dashboard.push(padLine("OpenRouteService", mapApiText, 17, 60, mapCheck.openRouteServiceConfigured ? colors.green : colors.yellow));
+                dashboard.push(padLine("Routing", routingText, 17, 60, mapCheck.routingAvailable ? colors.green : colors.red));
+                dashboard.push(borderSingle);
+                
+                dashboard.push("");
+                
+                dashboard.push(borderDouble);
+                dashboard.push(padCenteredLine("BACKGROUND SERVICES", 60, (t) => colors.bold(colors.cyan(t))));
+                dashboard.push(borderDouble);
+                dashboard.push(padSimpleLine(""));
+                dashboard.push(padLine("Campus Locations", campusLocationsReady ? "✓ Ready" : "⚠️ Error", 18, 60, campusLocationsReady ? colors.green : colors.red));
+                dashboard.push(padLine("Crawler Scheduler", crawlerSchedulerRunning ? "✓ Running" : "⚠️ Error", 18, 60, crawlerSchedulerRunning ? colors.green : colors.red));
+                dashboard.push(padLine("Campus Navigation", campusNavigationReady ? "✓ Ready" : "⚠️ Error", 18, 60, campusNavigationReady ? colors.green : colors.red));
+                dashboard.push(padLine("RAG Indexing", ragIndexingReady ? "✓ Ready" : "⚠️ Error", 18, 60, ragIndexingReady ? colors.green : colors.red));
+                dashboard.push(padSimpleLine(""));
+                dashboard.push(borderDouble);
+                
+                dashboard.push("");
+                
+                dashboard.push(borderDouble);
+                dashboard.push(
+                    padCenteredLine(
+                        "✓ EDUMATE READY",
+                        60,
+                        (t) => colors.bold(colors.green(t))
+                    )
+                );
+                dashboard.push(borderDouble);
+                dashboard.push(
+                    padLine(
+                        "Backend",
+                        `http://localhost:${PORT}`,
+                        8
+                    )
+                );
+                dashboard.push(
+                    padLine(
+                        "Qdrant",
+                        "http://localhost:6333",
+                        8
+                    )
+                );
+                dashboard.push(
+                    padLine(
+                        "Frontend",
+                        "http://localhost:5173",
+                        8
+                    )
+                );
+                dashboard.push(borderDouble);
+                
+                console.log("\n" + dashboard.join("\n") + "\n");
+            });
     } catch (error) {
         console.error(error);
         process.exit(1);

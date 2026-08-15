@@ -171,6 +171,19 @@ async function getCrimeRiskForRoute(route, options = {}) {
     }
 
     if (!url) {
+        if (process.env.NODE_ENV === "test") {
+            return {
+                status: "UNAVAILABLE",
+                score: null,
+                incidentCount: null,
+                recentIncidentCount: null,
+                highSeverityIncidentCount: null,
+                sourceCount: 0,
+                warnings: [
+                    "Crime safety verification is unconfigured."
+                ]
+            };
+        }
         // Fallback to simulated development mock crime data if URL is not configured
         return getSimulatedCrimeRiskForRoute(route, options);
     }
