@@ -29,18 +29,29 @@ const qdrantUrl = process.env.QDRANT_URL || "http://127.0.0.1:6333";
 const qdrantApiKey = process.env.QDRANT_API_KEY || undefined;
 const collectionName = process.env.QDRANT_COLLECTION || "edumate";
 
-// Initialize Qdrant Client
-const client = new QdrantClient({
-    url: qdrantUrl,
-    apiKey: qdrantApiKey,
-    checkCompatibility: false
+// Initialize Qdrant Client lazily
+let rawClient = null;
+const client = new Proxy({}, {
+    get(target, prop) {
+        if (!rawClient) {
+            rawClient = new QdrantClient({
+                url: qdrantUrl,
+                apiKey: qdrantApiKey,
+                checkCompatibility: false
+            });
+        }
+        return rawClient[prop];
+    }
 });
+
+let isCollectionEnsured = false;
 
 /**
  * Checks for connection and creates target collection if it doesn't exist
  * @returns {Promise<void>}
  */
 const ensureCollection = async () => {
+    if (isCollectionEnsured) return;
     try {
         const response = await client.getCollections();
         const collections = response.collections || [];
@@ -97,6 +108,7 @@ Embedding dimension: ${actualEmbeddingDimension}
 Qdrant dimension: ${qdrantDimension}
 Status: PASS
 `);
+        isCollectionEnsured = true;
     } catch (e) {
         console.error(`Qdrant Connection Error: Unable to configure collection "${collectionName}": ${e.message}`);
         throw e;

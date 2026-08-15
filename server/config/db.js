@@ -15,7 +15,9 @@ const configureDNSFallback = () => {
 
 const connectDB = async () => {
     const options = {
-        serverSelectionTimeoutMS: 5000 // Timeout fast for diagnostic retries
+        serverSelectionTimeoutMS: 5000,
+        connectTimeoutMS: 5000,
+        socketTimeoutMS: 10000
     };
 
     let retries = 3;
@@ -53,16 +55,15 @@ const connectDB = async () => {
             }
 
             if (retries === 0) {
-                console.log(`
+                console.warn(`
 +==========================================================_+
-|                ✗ MongoDB Connection Failed               |
+|                [STARTUP WARNING]                         |
+|                MongoDB unavailable.                      |
 +==========================================================_+
 
 ${error.message}
-
 `);
-
-                process.exit(1);
+                throw error;
             }
 
             // Wait 2 seconds before retrying

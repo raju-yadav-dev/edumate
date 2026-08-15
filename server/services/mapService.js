@@ -452,7 +452,8 @@ async function calculateAndCacheRoutes(start, dest) {
                 throw orsError;
             }
         } else {
-            throw new Error("OpenRouteService API Key is not configured.");
+            console.warn("[Map Service] OpenRouteService API Key is not configured. Falling back to mock routes.");
+            options = generateMockRoutes(start, dest, airDistance);
         }
 
         if (options.length === 0) {
@@ -892,6 +893,94 @@ function mockGeometry(start, dest) {
         [(start.lat + dest.lat) / 2, (start.lng + dest.lng) / 2],
         [dest.lat, dest.lng]
     ];
+}
+
+/**
+ * Generates mock routes when OpenRouteService is not configured
+ */
+function generateMockRoutes(start, dest, airDistance) {
+    const startLat = start.lat;
+    const startLng = start.lng;
+    const destLat = dest.lat;
+    const destLng = dest.lng;
+
+    // Generate a simple polyline with intermediate points to make it look realistic
+    const intermediatePoints = [];
+    const stepsCount = 5;
+    for (let i = 0; i <= stepsCount; i++) {
+        const t = i / stepsCount;
+        // Add a slight curve to the line
+        const lat = startLat + (destLat - startLat) * t + Math.sin(t * Math.PI) * 0.002;
+        const lng = startLng + (destLng - startLng) * t + Math.cos(t * Math.PI) * 0.002;
+        intermediatePoints.push([lat, lng]);
+    }
+
+    const distanceKm = airDistance * 1.25 || 1.5;
+    const durationMin = distanceKm * 3.5 || 5;
+
+    const carRoute = {
+        mode: "car",
+        routeNumber: 1,
+        label: "Primary Car Route (Mock)",
+        distance: `${distanceKm.toFixed(1)} km`,
+        distanceVal: distanceKm,
+        time: `${Math.round(durationMin)} min`,
+        timeVal: Math.round(durationMin),
+        cost: `Rs. ${Math.round(distanceKm * 8)}`,
+        advantages: "Recommended safest route.",
+        eta: new Date(Date.now() + durationMin * 60 * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        recommended: true,
+        geometry: intermediatePoints,
+        instructions: [
+            { text: `Head out from starting point: ${start.name || "Start Location"}`, distance: "100 m", duration: "1 min" },
+            { text: "Turn right onto the main link road", distance: `${(distanceKm * 0.4).toFixed(1)} km`, duration: `${Math.round(durationMin * 0.4)} min` },
+            { text: "Keep straight through the campus gateway intersection", distance: `${(distanceKm * 0.5).toFixed(1)} km`, duration: `${Math.round(durationMin * 0.5)} min` },
+            { text: `Arrive at destination: ${dest.name || "Destination"}`, distance: "0 m", duration: "0 min" }
+        ]
+    };
+
+    const bikeRoute = {
+        mode: "bike",
+        routeNumber: 2,
+        label: "Alternative Bike Route (Mock)",
+        distance: `${(distanceKm * 0.95).toFixed(1)} km`,
+        distanceVal: distanceKm * 0.95,
+        time: `${Math.round(durationMin * 0.8)} min`,
+        timeVal: Math.round(durationMin * 0.8),
+        cost: `Rs. ${Math.round(distanceKm * 3)}`,
+        advantages: "Faster in heavy traffic.",
+        eta: new Date(Date.now() + durationMin * 0.8 * 60 * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        recommended: false,
+        geometry: intermediatePoints,
+        instructions: [
+            { text: `Depart from starting point: ${start.name || "Start Location"}`, distance: "50 m", duration: "1 min" },
+            { text: "Take the narrow lane shortcut", distance: `${(distanceKm * 0.9).toFixed(1)} km`, duration: `${Math.round(durationMin * 0.7)} min` },
+            { text: `Arrive at destination: ${dest.name || "Destination"}`, distance: "0 m", duration: "0 min" }
+        ]
+    };
+
+    // Third route that will be simulated as high-risk and excluded
+    const transitRoute = {
+        mode: "car",
+        routeNumber: 3,
+        label: "Risky Bypass Route (Mock)",
+        distance: `${(distanceKm * 1.3).toFixed(1)} km`,
+        distanceVal: distanceKm * 1.3,
+        time: `${Math.round(durationMin * 1.2)} min`,
+        timeVal: Math.round(durationMin * 1.2),
+        cost: `Rs. ${Math.round(distanceKm * 10)}`,
+        advantages: "Bypasses standard entry routes.",
+        eta: new Date(Date.now() + durationMin * 1.2 * 60 * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        recommended: false,
+        geometry: intermediatePoints,
+        instructions: [
+            { text: `Depart from starting point: ${start.name || "Start Location"}`, distance: "100 m", duration: "1 min" },
+            { text: "Proceed along the outer boundary bypass", distance: `${(distanceKm * 1.2).toFixed(1)} km`, duration: `${Math.round(durationMin * 1.1)} min` },
+            { text: `Arrive at destination: ${dest.name || "Destination"}`, distance: "0 m", duration: "0 min" }
+        ]
+    };
+
+    return [carRoute, bikeRoute, transitRoute];
 }
 
 /**

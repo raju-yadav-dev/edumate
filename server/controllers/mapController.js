@@ -1,4 +1,4 @@
-const mapService = require("../services/mapService");
+const getMapService = () => require("../services/mapService");
 const Location = require("../models/Location");
 const locationHelper = require("../utils/locationHelper");
 const asyncHandler = require("../utils/asyncHandler");
@@ -46,7 +46,7 @@ const getRoute = asyncHandler(async (req, res) => {
         startCoords = { lat: CAMPUS_DEFAULT_LAT, lng: CAMPUS_DEFAULT_LNG, name: "Campus Gate" };
     }
 
-    const routes = await mapService.calculateAndCacheRoutes(startCoords, destCoords);
+    const routes = await getMapService().calculateAndCacheRoutes(startCoords, destCoords);
     return sendSuccess(res, 200, "Routes calculated successfully.", {
         startLocation: startCoords,
         destination: destCoords,
@@ -64,7 +64,7 @@ const getNearby = asyncHandler(async (req, res) => {
     const type = req.query.type || "restaurants";
     const radius = Number(req.query.radius) || 2000;
 
-    const places = await mapService.findNearbyPlaces(lat, lng, type, radius);
+    const places = await getMapService().findNearbyPlaces(lat, lng, type, radius);
     return sendSuccess(res, 200, "Nearby places fetched successfully.", {
         center: { lat, lng },
         type,

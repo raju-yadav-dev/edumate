@@ -1,3 +1,4 @@
+const expressInitStart = Date.now();
 const express = require("express");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
@@ -77,6 +78,11 @@ app.use(express.urlencoded({
 
 app.use(cookieParser());
 
+if (global.startupTimer) {
+    global.startupTimer.log("Express initialised", Date.now() - expressInitStart);
+}
+const routesInitStart = Date.now();
+
 app.use("/api/v1", apiRoutes);
 
 // Backward compatible route aliases while the frontend migrates to /api/v1.
@@ -92,6 +98,10 @@ const crawlerRoutes = require("./crawler/routes/crawlerRoutes");
 app.use("/api/crawler", crawlerRoutes);
 const knowledgeRoutes = require("./knowledge/knowledgeRoutes");
 app.use("/api/knowledge", knowledgeRoutes);
+
+if (global.startupTimer) {
+    global.startupTimer.log("Routes registered", Date.now() - routesInitStart);
+}
 
 // ==============================
 // Test Route

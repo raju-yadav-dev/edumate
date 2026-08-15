@@ -1,9 +1,9 @@
-const crawlerService = require("../services/crawlerService");
+const getCrawlerService = () => require("../services/crawlerService");
 const asyncHandler = require("../../utils/asyncHandler");
 const { sendSuccess } = require("../../utils/response");
 
 const startCrawl = asyncHandler(async (req, res) => {
-    const job = await crawlerService.startCrawl({
+    const job = await getCrawlerService().startCrawl({
         url: req.body.url,
         maxPages: req.body.maxPages,
         category: req.body.category,
@@ -15,7 +15,7 @@ const startCrawl = asyncHandler(async (req, res) => {
 });
 
 const getCrawlJobs = asyncHandler(async (req, res) => {
-    const jobs = await crawlerService.listCrawlJobs({
+    const jobs = await getCrawlerService().listCrawlJobs({
         user: req.user,
         query: req.query
     });
@@ -24,13 +24,13 @@ const getCrawlJobs = asyncHandler(async (req, res) => {
 });
 
 const getCrawlJobDetails = asyncHandler(async (req, res) => {
-    const job = await crawlerService.getCrawlJobDetails(req.params.jobId);
+    const job = await getCrawlerService().getCrawlJobDetails(req.params.jobId);
 
     return sendSuccess(res, 200, "Crawl job details retrieved successfully.", job);
 });
 
 const cancelCrawl = asyncHandler(async (req, res) => {
-    const job = await crawlerService.cancelCrawl({
+    const job = await getCrawlerService().cancelCrawl({
         jobId: req.params.jobId,
         user: req.user
     });
@@ -39,7 +39,7 @@ const cancelCrawl = asyncHandler(async (req, res) => {
 });
 
 const recrawlCrawlJob = asyncHandler(async (req, res) => {
-    const job = await crawlerService.recrawlCrawlJob({
+    const job = await getCrawlerService().recrawlCrawlJob({
         jobId: req.params.jobId,
         user: req.user
     });
@@ -48,7 +48,7 @@ const recrawlCrawlJob = asyncHandler(async (req, res) => {
 });
 
 const deleteCrawlJob = asyncHandler(async (req, res) => {
-    const result = await crawlerService.deleteCrawlJob({
+    const result = await getCrawlerService().deleteCrawlJob({
         jobId: req.params.jobId,
         user: req.user
     });
@@ -57,7 +57,7 @@ const deleteCrawlJob = asyncHandler(async (req, res) => {
 });
 
 const recrawlAllJobs = asyncHandler(async (req, res) => {
-    const result = await crawlerService.recrawlAllJobs({
+    const result = await getCrawlerService().recrawlAllJobs({
         user: req.user
     });
 

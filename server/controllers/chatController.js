@@ -1,4 +1,4 @@
-const chatService = require("../services/chatService"); // reload nodemon - ollama integration
+const getChatService = () => require("../services/chatService");
 const asyncHandler = require("../utils/asyncHandler");
 const { sendSuccess } = require("../utils/response");
 
@@ -20,7 +20,7 @@ const askQuestion = asyncHandler(async (req, res) => {
         });
 
         try {
-            const result = await chatService.askQuestion({
+            const result = await getChatService().askQuestion({
                 user: req.user,
                 question: req.body.question,
                 conversationId: req.body.conversationId,
@@ -58,7 +58,7 @@ const askQuestion = asyncHandler(async (req, res) => {
         return;
     }
 
-    const result = await chatService.askQuestion({
+    const result = await getChatService().askQuestion({
         user: req.user,
         question: req.body.question,
         conversationId: req.body.conversationId,
@@ -74,7 +74,7 @@ const askQuestion = asyncHandler(async (req, res) => {
 });
 
 const listChats = asyncHandler(async (req, res) => {
-    const chats = await chatService.listChats({
+    const chats = await getChatService().listChats({
         user: req.user
     });
 
@@ -82,7 +82,7 @@ const listChats = asyncHandler(async (req, res) => {
 });
 
 const getChatDetails = asyncHandler(async (req, res) => {
-    const chat = await chatService.getChatDetails({
+    const chat = await getChatService().getChatDetails({
         user: req.user,
         conversationId: req.params.id
     });
@@ -91,7 +91,7 @@ const getChatDetails = asyncHandler(async (req, res) => {
 });
 
 const renameChat = asyncHandler(async (req, res) => {
-    const chat = await chatService.renameChat({
+    const chat = await getChatService().renameChat({
         user: req.user,
         conversationId: req.params.id,
         title: req.body.title
@@ -101,7 +101,7 @@ const renameChat = asyncHandler(async (req, res) => {
 });
 
 const deleteChat = asyncHandler(async (req, res) => {
-    await chatService.deleteChat({
+    await getChatService().deleteChat({
         user: req.user,
         conversationId: req.params.id
     });
@@ -110,7 +110,7 @@ const deleteChat = asyncHandler(async (req, res) => {
 });
 
 const regenerateResponse = asyncHandler(async (req, res) => {
-    const result = await chatService.regenerateResponse({
+    const result = await getChatService().regenerateResponse({
         user: req.user,
         conversationId: req.params.id
     });
@@ -119,7 +119,7 @@ const regenerateResponse = asyncHandler(async (req, res) => {
 });
 
 const getSuggestedQuestions = asyncHandler(async (req, res) => {
-    const suggestions = await chatService.getSuggestedQuestions({
+    const suggestions = await getChatService().getSuggestedQuestions({
         user: req.user,
         conversationId: req.params.id
     });

@@ -1,9 +1,9 @@
-const documentService = require("../services/documentService");
+const getDocumentService = () => require("../services/documentService");
 const asyncHandler = require("../utils/asyncHandler");
 const { sendSuccess } = require("../utils/response");
 
 const uploadDocument = asyncHandler(async (req, res) => {
-    const document = await documentService.uploadDocument({
+    const document = await getDocumentService().uploadDocument({
         file: req.file,
         body: req.body,
         user: req.user
@@ -13,7 +13,7 @@ const uploadDocument = asyncHandler(async (req, res) => {
 });
 
 const listDocuments = asyncHandler(async (req, res) => {
-    const result = await documentService.listDocuments({
+    const result = await getDocumentService().listDocuments({
         query: req.query,
         user: req.user
     });
@@ -29,7 +29,7 @@ const listDocuments = asyncHandler(async (req, res) => {
 });
 
 const deleteDocument = asyncHandler(async (req, res) => {
-    await documentService.archiveDocument({
+    await getDocumentService().archiveDocument({
         documentId: req.params.documentId,
         user: req.user
     });
@@ -38,7 +38,7 @@ const deleteDocument = asyncHandler(async (req, res) => {
 });
 
 const replaceDocument = asyncHandler(async (req, res) => {
-    const document = await documentService.replaceDocument({
+    const document = await getDocumentService().replaceDocument({
         documentId: req.params.documentId,
         file: req.file,
         body: req.body,
@@ -49,7 +49,7 @@ const replaceDocument = asyncHandler(async (req, res) => {
 });
 
 const renameDocument = asyncHandler(async (req, res) => {
-    const document = await documentService.renameDocument({
+    const document = await getDocumentService().renameDocument({
         documentId: req.params.documentId,
         originalName: req.body.originalName,
         user: req.user
@@ -59,7 +59,7 @@ const renameDocument = asyncHandler(async (req, res) => {
 });
 
 const moveDocument = asyncHandler(async (req, res) => {
-    const document = await documentService.moveDocument({
+    const document = await getDocumentService().moveDocument({
         documentId: req.params.documentId,
         category: req.body.category,
         user: req.user
@@ -69,7 +69,7 @@ const moveDocument = asyncHandler(async (req, res) => {
 });
 
 const reindexDocument = asyncHandler(async (req, res) => {
-    const document = await documentService.reindexDocument({
+    const document = await getDocumentService().reindexDocument({
         documentId: req.params.documentId,
         user: req.user
     });
@@ -78,7 +78,7 @@ const reindexDocument = asyncHandler(async (req, res) => {
 });
 
 const copyDocument = asyncHandler(async (req, res) => {
-    const document = await documentService.copyDocument({
+    const document = await getDocumentService().copyDocument({
         documentId: req.params.documentId,
         category: req.body.category,
         user: req.user
@@ -88,63 +88,63 @@ const copyDocument = asyncHandler(async (req, res) => {
 });
 
 const rebuildAllEmbeddings = asyncHandler(async (req, res) => {
-    const result = await documentService.rebuildAllEmbeddings();
+    const result = await getDocumentService().rebuildAllEmbeddings();
 
     return sendSuccess(res, 200, `Rebuilding initiated for ${result.count} documents.`, result);
 });
 
 const bulkReindexDocuments = asyncHandler(async (req, res) => {
     const { category, ids } = req.body;
-    const result = await documentService.bulkReindex({ category, ids, user: req.user });
+    const result = await getDocumentService().bulkReindex({ category, ids, user: req.user });
     return sendSuccess(res, 200, "Bulk reindexing initiated.", result);
 });
 
 const getJobsStatus = asyncHandler(async (req, res) => {
-    const result = await documentService.getJobsStatus();
+    const result = await getDocumentService().getJobsStatus();
     return sendSuccess(res, 200, "Jobs status retrieved.", result);
 });
 
 const retryFailedDocuments = asyncHandler(async (req, res) => {
-    const result = await documentService.retryFailed({ user: req.user });
+    const result = await getDocumentService().retryFailed({ user: req.user });
     return sendSuccess(res, 200, "Retrying failed indexing documents.", result);
 });
 
 const ignoreFailedDocument = asyncHandler(async (req, res) => {
-    const document = await documentService.ignoreFailed({ documentId: req.params.documentId, user: req.user });
+    const document = await getDocumentService().ignoreFailed({ documentId: req.params.documentId, user: req.user });
     return sendSuccess(res, 200, "Document index status set to ignored.", document);
 });
 
 const restoreDocument = asyncHandler(async (req, res) => {
-    const document = await documentService.restoreDocument({ documentId: req.params.documentId, user: req.user });
+    const document = await getDocumentService().restoreDocument({ documentId: req.params.documentId, user: req.user });
     return sendSuccess(res, 200, "Document restored from recycle bin.", document);
 });
 
 const permanentDeleteDocument = asyncHandler(async (req, res) => {
-    const document = await documentService.permanentDeleteDocument({ documentId: req.params.documentId, user: req.user });
+    const document = await getDocumentService().permanentDeleteDocument({ documentId: req.params.documentId, user: req.user });
     return sendSuccess(res, 200, "Document permanently deleted.", document);
 });
 
 const duplicateDocument = asyncHandler(async (req, res) => {
-    const document = await documentService.duplicateDocument({ documentId: req.params.documentId, user: req.user });
+    const document = await getDocumentService().duplicateDocument({ documentId: req.params.documentId, user: req.user });
 
     return sendSuccess(res, 201, "Document duplicated successfully.", document);
 });
 
 const bulkMoveDocuments = asyncHandler(async (req, res) => {
     const { ids, category } = req.body;
-    const result = await documentService.bulkMove({ ids, category, user: req.user });
+    const result = await getDocumentService().bulkMove({ ids, category, user: req.user });
     return sendSuccess(res, 200, "Documents moved successfully.", result);
 });
 
 const bulkCopyDocuments = asyncHandler(async (req, res) => {
     const { ids, category } = req.body;
-    const result = await documentService.bulkCopy({ ids, category, user: req.user });
+    const result = await getDocumentService().bulkCopy({ ids, category, user: req.user });
     return sendSuccess(res, 201, "Documents copied successfully.", result);
 });
 
 const bulkDeleteDocuments = asyncHandler(async (req, res) => {
     const { ids } = req.body;
-    const result = await documentService.bulkDelete({ ids, user: req.user });
+    const result = await getDocumentService().bulkDelete({ ids, user: req.user });
     return sendSuccess(res, 200, "Documents deleted successfully.", result);
 });
 

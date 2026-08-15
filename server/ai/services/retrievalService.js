@@ -41,6 +41,11 @@ const retrieveRelevantChunks = async ({
     isRawFilter = false
 }) => {
     try {
+        const { ensureCollection } = require("../config/qdrant");
+        await ensureCollection().catch(err => {
+            console.error("⚠️ Lazy Qdrant collection initialization failed:", err.message);
+        });
+
         const qdrantFilter = isRawFilter ? filter : buildQdrantFilter(filter);
 
         const results = await client.search(collectionName, {

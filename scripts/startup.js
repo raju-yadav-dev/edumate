@@ -41,11 +41,11 @@ const startDev = async () => {
     verifyDependencies();
     console.log();
 
-    // 4. Start Qdrant if needed
+    // 4. Start Qdrant and other services (bypassed in startup for fast boot, verified via npm run doctor)
+    /*
     const qdrantTriggered = await startQdrantContainer();
     console.log();
 
-    // Poll Qdrant (retrying up to 15 attempts while Docker initializes)
     const qdrantOk = await verifyQdrant(15);
     if (!qdrantOk) {
         logger.error("❌ Startup blocked: Unable to verify Qdrant database state.");
@@ -53,7 +53,6 @@ const startDev = async () => {
     }
     console.log();
 
-    // 5. Check MongoDB
     const mongoOk = await verifyMongo();
     if (!mongoOk) {
         logger.error("❌ Startup blocked: MongoDB connection check failed.");
@@ -61,7 +60,6 @@ const startDev = async () => {
     }
     console.log();
 
-    // 6. Check Supabase
     const supabaseOk = await verifySupabase();
     if (!supabaseOk) {
         logger.error("❌ Startup blocked: Supabase connection check failed.");
@@ -69,9 +67,6 @@ const startDev = async () => {
     }
     console.log();
 
-
-
-    // 7. Check Configured AI API
     const provider = process.env.LLM_PROVIDER || "groq";
     let aiOk = true;
     if (provider === "groq") {
@@ -86,6 +81,8 @@ const startDev = async () => {
         }
     }
     console.log();
+    */
+
 
     // 8. Print Dashboard
     printDashboard({
