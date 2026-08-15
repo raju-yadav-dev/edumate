@@ -2,6 +2,8 @@ const RouteCache = require("../models/RouteCache");
 const Location = require("../models/Location");
 const locationHelper = require("../utils/locationHelper");
 const llmService = require("../ai/services/llmService");
+const {filterSafeRoutes} = require("./routeSafetyService");
+const settingsService = require("./settingsService");
 
 // Configurable constants for travel cost estimates
 const FUEL_PRICE = Number(process.env.FUEL_PRICE || 103.5); // per liter
@@ -329,84 +331,186 @@ function formatNearbyPoisResponse(pois, type) {
 }
 
 /**
+ * Calls OpenRouteService alternatives API for driving-car.
+ */
+async function fetchOrsRouteAlternatives(start, dest, apiKey) {
+    const baseUrl = process.env.OPENROUTE_SERVICE_URL || "https://api.openrouteservice.org";
+    const url = `${baseUrl}/v2/directions/driving-car/geojson`;
+
+    const response = await fetch(url, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": apiKey
+        },
+        body: JSON.stringify({
+            coordinates: [
+                [start.lng, start.lat],
+                [dest.lng, dest.lat]
+            ],
+            alternative_routes: {
+                target_count: 3,
+                share_factor: 0.8,
+                weight_factor: 1.4
+            },
+            instructions: true
+        })
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`ORS API Error (${response.status}): ${errorText}`);
+    }
+
+    return await response.json();
+}
+
+/**
+ * Transforms an individual ORS alternative feature to standard route format.
+ */
+function processOrsFeature(feature, idx, airDistance) {
+    const coordinates = feature.geometry.coordinates.map(c => [c[1], c[0]]); // Swap to [lat, lng] for Leaflet
+    const properties = feature.properties.segments[0];
+
+    const distanceKm = properties.distance / 1000;
+    const durationMin = properties.duration / 60;
+
+    const costDetails = calculateCostForMode("car", distanceKm);
+    const costText = costDetails.costRange;
+
+    // Compile turn-by-turn directions
+    const instructions = properties.steps.map(step => ({
+        text: step.instruction,
+        distance: step.distance >= 1000 ? `${(step.distance / 1000).toFixed(1)} km` : `${Math.round(step.distance)} m`,
+        duration: `${Math.round(step.duration / 60)} min`
+    }));
+
+    const eta = new Date(Date.now() + properties.duration * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    return {
+        mode: "car",
+        routeNumber: idx + 1,
+        label: `Car Route ${idx + 1}`,
+        distance: `${distanceKm.toFixed(1)} km`,
+        distanceVal: distanceKm,
+        time: `${Math.round(durationMin)} min`,
+        timeVal: Math.round(durationMin),
+        cost: costText,
+        advantages: idx === 0 ? "Safest recommended route." : `Alternative car route ${idx + 1}.`,
+        eta,
+        recommended: false,
+        geometry: coordinates,
+        instructions
+    };
+}
+
+/**
  * Calculates, caches, and compiles the three travel options.
  */
 async function calculateAndCacheRoutes(start, dest) {
-    const cacheKeyStart = `${start.lat.toFixed(4)},${start.lng.toFixed(4)}`;
-    const cacheKeyEnd = `${dest.lat.toFixed(4)},${dest.lng.toFixed(4)}`;
+    const cacheKeyStart = `${start.lat.toFixed(4)},${start.lng.toFixed(4)}_car_alt`;
+    const cacheKeyEnd = `${dest.lat.toFixed(4)},${dest.lng.toFixed(4)}_car_alt`;
 
-    // 1. Check cache first
+    let options = [];
+
+    // ============================================
+    // 1. CHECK ROUTE CACHE
+    // ============================================
     try {
-        const cached = await RouteCache.findOne({ startKey: cacheKeyStart, endKey: cacheKeyEnd });
+        const cached = await RouteCache.findOne({
+            startKey: cacheKeyStart,
+            endKey: cacheKeyEnd
+        });
+
         if (cached && cached.options && cached.options.length > 0) {
             console.log("[Map Service] Serving routes from RouteCache");
-            return cached.options;
+            options = cached.options;
         }
     } catch (cacheErr) {
         console.warn("[Map Service] Cache lookup failure:", cacheErr.message);
     }
 
-    // 2. Fetch routes from OpenRouteService or fallback simulation
-    const options = [];
-    const airDistance = locationHelper.haversineDistance(start.lat, start.lng, dest.lat, dest.lng);
-
-    const apiKey = process.env.OPENROUTE_SERVICE_API_KEY;
-
-    if (apiKey) {
-        try {
-            // Option 1: Car (driving-car profile)
-            const carRoute = await fetchOrsRoute(start, dest, "driving-car", apiKey);
-            options.push(processOrsRoute(carRoute, "car", airDistance));
-
-            // Option 2: Bike (cycling-regular profile)
-            const bikeRoute = await fetchOrsRoute(start, dest, "cycling-regular", apiKey);
-            options.push(processOrsRoute(bikeRoute, "bike", airDistance));
-
-            // Option 3: Public Transport / Walking (if distance < 3km, cycle/walk)
-            if (airDistance < 3.0) {
-                const walkRoute = await fetchOrsRoute(start, dest, "foot-walking", apiKey);
-                options.push(processOrsRoute(walkRoute, "walking", airDistance));
-            } else {
-                // Public transport option (simulated using car geometry + transit markers)
-                options.push(generateTransitRouteOption(carRoute || mockGeometry(start, dest), airDistance, start, dest));
-            }
-        } catch (orsError) {
-            console.error("[Map Service] ORS call failed, resorting to route simulation:", orsError.message);
-        }
-    }
-
-    // 3. Fallback: If options array is empty (no key or ORS error), simulate the 3 options
+    // ============================================
+    // 2. GENERATE ROUTES IF NOT CACHED
+    // ============================================
     if (options.length === 0) {
-        console.log("[Map Service] Simulating 3 options...");
-        const simulatedGeometry = simulateRouteGeometry(start, dest);
-        
-        // Option 1: Car
-        options.push(generateSimulatedOption(start, dest, "car", airDistance, simulatedGeometry));
-        // Option 2: Bike
-        options.push(generateSimulatedOption(start, dest, "bike", airDistance, simulatedGeometry));
-        // Option 3: Public Transit or Walking
-        if (airDistance < 2.0) {
-            options.push(generateSimulatedOption(start, dest, "walking", airDistance, simulatedGeometry));
+        const airDistance = locationHelper.haversineDistance(start.lat, start.lng, dest.lat, dest.lng);
+
+        const keysSetting = await settingsService.getApiKeys().catch(() => ({}));
+        const apiKey = keysSetting.openRouteServiceApiKey || process.env.OPENROUTE_SERVICE_API_KEY;
+
+        if (apiKey) {
+            try {
+                const geoJson = await fetchOrsRouteAlternatives(start, dest, apiKey);
+                if (geoJson && Array.isArray(geoJson.features)) {
+                    options = geoJson.features.map((feat, idx) =>
+                        processOrsFeature(feat, idx, airDistance)
+                    );
+                }
+            } catch (orsError) {
+                console.error("[Map Service] ORS call failed:", orsError.message);
+                throw orsError;
+            }
         } else {
-            options.push(generateSimulatedOption(start, dest, "public_transport", airDistance, simulatedGeometry));
+            throw new Error("OpenRouteService API Key is not configured.");
+        }
+
+        if (options.length === 0) {
+            throw new Error("No routes could be fetched from routing provider.");
+        }
+
+        // ========================================
+        // 4. CACHE ORIGINAL ROUTES
+        // ========================================
+        try {
+            await RouteCache.findOneAndUpdate(
+                { startKey: cacheKeyStart, endKey: cacheKeyEnd },
+                { startKey: cacheKeyStart, endKey: cacheKeyEnd, options },
+                { upsert: true, new: true, setDefaultsOnInsert: true }
+            );
+        } catch (saveErr) {
+            console.warn("[Map Service] Failed to save RouteCache:", saveErr.message);
         }
     }
 
-    // 4. Set recommended option (Option 1 is recommended unless distance is tiny)
-    if (options[0]) options[0].recommended = true;
-
-    // 5. Cache result
+    // ============================================
+    // 5. ROUTE SAFETY CHECK
+    // ============================================
+    let safeResult;
     try {
-        await RouteCache.create({
-            startKey: cacheKeyStart,
-            endKey: cacheKeyEnd,
-            options
+        safeResult = await filterSafeRoutes(options, {
+            maxSamplePoints: 20,
+            radiusMeters: Number(process.env.ROUTE_SAFETY_RADIUS_METERS || 60)
         });
-    } catch (saveErr) {
-        console.warn("[Map Service] Failed to save to RouteCache:", saveErr.message);
+
+        console.log(
+            `[Route Safety] Checked ${options.length} routes. ` +
+            `${safeResult.safeRoutes.length} safe, ` +
+            `${safeResult.excludedRoutes.length} excluded.`
+        );
+    } catch (safetyError) {
+        console.warn("[Map Safety] Safety check failed:", safetyError.message);
+        safeResult = {
+            safeRoutes: options.map(route => ({
+                ...route,
+                safety: {
+                    status: "UNKNOWN",
+                    riskLevel: "UNKNOWN",
+                    riskScore: null,
+                    crimeRisk: { status: "UNAVAILABLE" },
+                    physicalHazards: { flood: 0, construction: 0, roadClosure: 0, other: 0 },
+                    warnings: ["Route safety information is currently unavailable."]
+                }
+            })),
+            excludedRoutes: [],
+            safetyChecked: false
+        };
     }
 
-    return options;
+    // Return safeRoutes but attach excludedRoutes as a property on the array
+    const routesArray = safeResult.safeRoutes;
+    routesArray.excludedRoutes = safeResult.excludedRoutes;
+    return routesArray;
 }
 
 /**

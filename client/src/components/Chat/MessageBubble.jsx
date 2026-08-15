@@ -71,6 +71,7 @@ function MapBlock({ mapData, onLocationAction }) {
     const [manualLocation, setManualLocation] = useState("");
     const [requestingGeo, setRequestingGeo] = useState(false);
     const [geoError, setGeoError] = useState("");
+    const [showExcluded, setShowExcluded] = useState(false);
 
     if (mapData.type === "permission_request") {
         const handleRequestGeo = () => {
@@ -217,6 +218,8 @@ function MapBlock({ mapData, onLocationAction }) {
                         activeRouteIndex={activeRouteIndex}
                         setActiveRouteIndex={setActiveRouteIndex}
                         type="routing"
+                        excludedRoutes={mapData.excludedRoutes || []}
+                        showExcluded={showExcluded}
                     />
                     <RouteCard
                         routes={mapData.routes}
@@ -224,6 +227,9 @@ function MapBlock({ mapData, onLocationAction }) {
                         setActiveRouteIndex={setActiveRouteIndex}
                         startLocation={mapData.startLocation}
                         destination={mapData.destination}
+                        excludedRoutes={mapData.excludedRoutes || []}
+                        showExcluded={showExcluded}
+                        setShowExcluded={setShowExcluded}
                     />
                     <DirectionsPanel
                         instructions={mapData.routes[activeRouteIndex]?.instructions}

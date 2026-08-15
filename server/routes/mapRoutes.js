@@ -1,6 +1,13 @@
 const express = require("express");
+
+const router = express.Router();
+
 const authenticate = require("../middleware/authMiddleware");
-const { optionalAuthenticate } = authenticate;
+
+const {
+    optionalAuthenticate
+} = authenticate;
+
 const {
     getRoute,
     getNearby,
@@ -8,14 +15,30 @@ const {
     seedLocations
 } = require("../controllers/mapController");
 
-const router = express.Router();
-
 // Direct API routes
-router.post("/route", optionalAuthenticate, getRoute);
-router.get("/nearby", optionalAuthenticate, getNearby);
-router.get("/locations", optionalAuthenticate, getLocations);
 
-// Admin-level seed trigger (or general bootstrap)
-router.post("/locations/seed", seedLocations);
+router.post(
+    "/route",
+    optionalAuthenticate,
+    getRoute
+);
+
+router.get(
+    "/nearby",
+    optionalAuthenticate,
+    getNearby
+);
+
+router.get(
+    "/locations",
+    optionalAuthenticate,
+    getLocations
+);
+
+// Admin/bootstrap route
+router.post(
+    "/locations/seed",
+    seedLocations
+);
 
 module.exports = router;
