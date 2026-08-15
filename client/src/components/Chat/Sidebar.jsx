@@ -131,8 +131,8 @@ function Sidebar({
                 }
                 break;
             case "navigation":
-                setInput("How do I navigate the campus?");
-                void sendMessage("How do I navigate the campus?");
+                setInput("Campus Navigation");
+                void sendMessage("Campus Navigation");
                 break;
             case "routes":
                 setInput("Show me route information between academic blocks.");

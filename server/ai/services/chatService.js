@@ -24,6 +24,76 @@ const knowledgeManager = require("../../knowledge/KnowledgeManager");
 const SearchManager = require("../../knowledge/SearchManager");
 const RankingEngine = require("../../knowledge/RankingEngine");
 
+const isCampusNavigationQuery = (question) => {
+    const q = String(question || "").toLowerCase();
+    
+    const locationKeywords = [
+        "where is", "where is the", "where can i find", "where to find", "how to find",
+        "location of", "which building", "which floor", "room number", "room no", "room",
+        "where is room", "office of", "where is the office", "where can i get", "find the",
+        "where to go for", "where is located", "how do i find"
+    ];
+    
+    const campusTargets = [
+        "hod", "head of department", "head of the department", "dean", "principal", "registrar",
+        "counselor", "professor", "teacher", "staff", "faculty", "office", "cell", "lab", "canteen",
+        "library", "seminar hall", "gym", "gymnasium", "auditorium", "counseling", "counselling",
+        "admission", "admissions", "accounts", "examination", "exam", "sick room", "board room",
+        "cash counter", "psychology", "cyber", "media", "nursing", "pharmaceutical", "pharmacy",
+        "machine room", "boot camp", "languages", "language lab", "skills hub", "it support",
+        "it office", "cisco", "red hat", "cyber security", "troubleshooting", "moot court",
+        "digital logic", "computational science", "analytics", "management", "commerce",
+        "applied mechanics", "fluid mechanics", "strength of materials", "soil science",
+        "dynamic of machines", "x-ray", "plant science", "thermal power", "welding",
+        "applied thermodynamics", "heat transfer", "ic engine", "pattern shop",
+        "transportation engineering", "geology", "concrete", "retail", "racw", "health care",
+        "ftcp", "f&b", "service lab", "veg items", "yoga", "building"
+    ];
+
+    if (/(?:building|buliding)\s*(?:[ivx0-9]+|\b[a-z]+\b)/i.test(q)) {
+        return true;
+    }
+    if (/\b(?:room|office|lab)\s*[0-9]+/i.test(q)) {
+        return true;
+    }
+
+    const hasLocationWord = locationKeywords.some(kw => q.includes(kw));
+    const hasTarget = campusTargets.some(target => {
+        const regex = new RegExp(`\\b${target}s?\\b`, "i");
+        return regex.test(q);
+    });
+
+    return hasLocationWord && hasTarget;
+};
+
+const normalizeLocationQuery = (query) => {
+    let q = String(query || "").toLowerCase();
+    
+    // Normalize B.Tech / BTECT / BTech
+    if (/\b(?:b\.?tech|b\.?tect|b\s*tech|b\s*tect)\b/i.test(q)) {
+        q += " btech b.tech btect b.tect b tech b tect";
+    }
+    
+    // Normalize Maths / Mathematics
+    if (/\bmaths?\b/i.test(q)) {
+        q = q.replace(/\bmaths?\b/gi, "mathematics");
+        q += " mathematics maths math";
+    }
+    
+    // Normalize CS / Computer Science / CSE
+    if (/\bcs\b/i.test(q)) {
+        q = q.replace(/\bcs\b/gi, "computer science");
+        q += " cs computer science cse c.s";
+    }
+    
+    // Normalize BCA
+    if (/\bbca\b/i.test(q)) {
+        q += " bca b.c.a";
+    }
+
+    return q;
+};
+
 const deterministicGreeting = (user, language) => {
     let answer = `Hello ${user?.fullName || "there"}. I can help with institutional questions, documents, campus services, routes, and academic support.`;
     if (language === "hi") {
@@ -142,6 +212,248 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
     const { rewrittenQuery, intent, entities, isRepeat, subqueries = [] } = analysisResult;
     const activeSubqueries = (Array.isArray(subqueries) && subqueries.length > 0) ? subqueries : [rewrittenQuery];
     const resolvedActiveTopic = analysisResult.activeTopic || activeTopic || "";
+
+    // ==========================================
+    // CAMPUS NAVIGATION SPECIAL ROUTING
+    // ==========================================
+    const isNavigationGreeting = normalizedQuestion.toLowerCase().trim() === "campus navigation";
+    const isDirectionRequest = 
+        normalizedQuestion.toLowerCase().trim() === "yes, show directions" ||
+        normalizedQuestion.toLowerCase().trim() === "yes show directions" ||
+        /^(?:how do i reach there|show directions|get directions|how to get there|how to reach there)/i.test(normalizedQuestion);
+
+    if (isDirectionRequest) {
+        // Look up the last location discussed in this conversation history
+        const lastTurns = await conversationService.getRecentMemory({
+            userId: activeUser._id,
+            conversationId,
+            parentId
+        });
+        
+        // Find the last assistant message containing building details
+        let targetLocation = "";
+        if (lastTurns && lastTurns.rawHistory) {
+            for (let i = lastTurns.rawHistory.length - 1; i >= 0; i--) {
+                const msg = lastTurns.rawHistory[i];
+                if (msg.role === "assistant" && msg.content) {
+                    const text = msg.content;
+                    const matches = text.match(/(?:Building|Buliding)\s*:\s*(Building\s+[0-9ivx]+|[0-9ivx]+|\b[a-z]+\b)/i) || text.match(/(?:Building\s+[0-9ivx]+)/i);
+                    if (matches) {
+                        targetLocation = matches[0];
+                    }
+                    const nameMatches = text.match(/🏷️\s*([a-zA-Z0-9\s&()]+)/i) || text.match(/Name:\s*([a-zA-Z0-9\s&()]+)/i);
+                    if (nameMatches) {
+                        targetLocation += " " + nameMatches[1].trim().split("\n")[0];
+                    }
+                    if (targetLocation) {
+                        break;
+                    }
+                }
+            }
+        }
+        
+        if (targetLocation) {
+            const mapQuery = `route to ${targetLocation}`;
+            console.log(`[CAMPUS NAV] Routing direction request: "${normalizedQuestion}" -> "${mapQuery}"`);
+            
+            const mapResult = await mapService.resolveLocationRequest({
+                question: mapQuery,
+                user: activeUser,
+                userCoordinates: (latitude && longitude) ? { lat: Number(latitude), lng: Number(longitude) } : null
+            });
+            
+            const formatted = mapResult.found
+                ? responseFormattingService.formatAnswer({
+                    answer: mapResult.answer,
+                    confidence: "high",
+                    sources: mapResult.sources,
+                    sourceLabel: SOURCE_LABELS.UNIVERSITY
+                })
+                : responseFormattingService.formatUnavailable({ reason: mapResult.answer });
+                
+            if (mapResult.mapData) {
+                formatted.mapData = mapResult.mapData;
+            }
+            if (mapResult.requiresLocationPermission) {
+                formatted.requiresLocationPermission = true;
+            }
+            
+            const responseTimeMs = Date.now() - startedAt;
+            const chat = await conversationService.saveMessageTurn({
+                user: activeUser,
+                conversationId,
+                question: normalizedQuestion,
+                response: { answer: formatted.answer, confidence: "high" },
+                intent: "travel_route",
+                confidence: 0.9,
+                provider: "system",
+                responseTimeMs,
+                userMessageId,
+                assistantMessageId,
+                parentId,
+                topic: "campus_navigation",
+                entities
+            });
+            
+            return {
+                conversationId: chat?._id || conversationId || null,
+                mode: activeUser._id ? "authenticated" : "guest",
+                message: formatted.answer,
+                intent: "travel_route",
+                intentConfidence: 0.9,
+                confidence: "high",
+                sources: formatted.sources || [],
+                sourceLabel: "📍 Campus Navigation",
+                provider: "system",
+                responseTimeMs,
+                suggestions: ["No, thanks"],
+                mapData: formatted.mapData || null,
+                requiresLocationPermission: formatted.requiresLocationPermission || false
+            };
+        }
+    }
+
+    const isCampusNav = isNavigationGreeting || intent === "location" || isCampusNavigationQuery(rewrittenQuery);
+    
+    if (isCampusNav) {
+        console.log(`[CAMPUS NAV] Detected campus navigation query: "${rewrittenQuery}"`);
+        
+        let textResponse = "";
+        let filteredCampusChunks = [];
+        
+        if (isNavigationGreeting) {
+            textResponse = `📍 Campus Navigation\n\nSure! Tell me where you want to go in the campus.`;
+        } else {
+            // Expand spelling variations internally for search
+            const normalizedSearchQuery = normalizeLocationQuery(rewrittenQuery);
+            
+            // Retrieve ONLY campus navigation chunks
+            const campusChunks = await SearchManager.searchLocalPdfs(normalizedSearchQuery, activeUser, 15, false, { sourceType: "campus_navigation" });
+            filteredCampusChunks = campusChunks.filter(c => 
+                c.metadata?.sourceType === "campus_navigation" || 
+                (c.metadata?.category && c.metadata.category.startsWith("campus_navigation"))
+            );
+            
+            console.log(`[CAMPUS NAV] Found ${filteredCampusChunks.length} relevant campus navigation chunks.`);
+            
+            // Debugging console logs requested by requirement 14
+            console.log(`[CAMPUS NAV]\nQuery: ${rewrittenQuery}`);
+            console.log(`[CAMPUS NAV]\nNormalized query: ${normalizedSearchQuery}`);
+            console.log(`[CAMPUS NAV]\nIntent: campus_navigation`);
+            console.log(`[CAMPUS NAV]\nSearching buildings: 1-9`);
+            if (filteredCampusChunks.length > 0) {
+                const firstMatch = filteredCampusChunks[0];
+                console.log(`[CAMPUS NAV]\nMatched source: ${firstMatch.metadata?.originalName || firstMatch.metadata?.filename || "Unknown"}`);
+                console.log(`[CAMPUS NAV]\nBuilding: ${firstMatch.metadata?.buildingNumber || "N/A"}`);
+                console.log(`[CAMPUS NAV]\nFloor: ${firstMatch.metadata?.floor || "N/A"}`);
+                console.log(`[CAMPUS NAV]\nRoom: ${firstMatch.metadata?.roomNumber || "N/A"}`);
+            }
+
+            const chunksText = filteredCampusChunks.map((c, idx) => {
+                return `[Source: ${c.metadata?.filename || c.metadata?.originalName || "Unknown"}]\n${c.content}`;
+            }).join("\n\n");
+            
+            const systemPrompt = `You are a precise university campus navigation assistant.
+Your job is to answer the user's campus location question using ONLY the retrieved campus navigation chunks.
+
+Retrieved Chunks:
+${chunksText || "No campus navigation data found."}
+
+Rules:
+1. Answer ONLY from the retrieved chunks. Do NOT assume, infer, guess, or hallucinate.
+2. The response for a successful location query must follow this exact format:
+   Building [Number] ([Building Name] - e.g. "Ravindra Bhavan" instead of "Ravindra Bhavan Ground 001". Remove any floor/room location suffixes from the building name itself)
+   [Floor]
+   Room [Room Number]
+
+   [requested room/person/department details, e.g. HOD of CSS:\nDr. ABC, or Room details:\nHOD of CSS\nDr. ABC]
+
+   Make sure there is exactly one blank line before the requested details.
+   Do NOT add any extra text or pleasantries like "Sure!", "Here is the location:", "I found the following:", or "Would you like directions to this location?". Only output the structured location format directly.
+3. If multiple distinct locations, departments, or HODs are found in the chunks that could match the query (e.g. user asks "Where is the HOD?" and there are HODs for LAW, CSE, Computational Science), you MUST ask the user to clarify:
+   "Which department are you looking for? Which HOD do you mean — [List the matching departments/roles]?"
+   Do not guess or randomly select one.
+4. If the exact location is NOT found in the retrieved chunks, you MUST say:
+   "I couldn't find the exact location in the Campus Navigation data."
+   Do NOT invent or guess a room number.
+5. Never expose internal database IDs, embeddings, vector scores, or file paths.
+
+User Question: "${rewrittenQuery}"`;
+
+            const promptMessages = [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: `Question: ${rewrittenQuery}` }
+            ];
+
+            if (onChunk) {
+                textResponse = await llmService.generateStream(promptMessages, onChunk, { signal });
+            } else {
+                textResponse = await llmService.generateCompletion(promptMessages);
+            }
+
+            // Clean up building name format to remove suffixes like "Ground 001", "Ground Floor", etc.
+            textResponse = textResponse.replace(/(Building\s+[0-9ivx]+)\s*\(([^)]+)\)/ig, (match, bNum, bName) => {
+                let cleanName = bName.replace(/\b(?:ground|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|floor|flour|level)\s*[0-9a-zA-Z]*\b/ig, "").trim();
+                cleanName = cleanName.replace(/\b[0-9]{3,}\b/g, "").trim(); // Remove room numbers or codes like "001"
+                return `${bNum} (${cleanName})`;
+            });
+
+            // Ensure double newlines for line breaks to prevent React Markdown from collapsing them in the UI
+            const lines = textResponse.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+            if (lines.length >= 3 && lines[0].toLowerCase().startsWith("building ") && lines[2].toLowerCase().startsWith("room ")) {
+                const bLine = lines[0];
+                const fLine = lines[1];
+                const rLine = lines[2];
+                const details = lines.slice(3).join("\n\n");
+                textResponse = `${bLine}\n\n${fLine}\n\n${rLine}\n\n${details}`;
+            }
+
+            // Append directions prompt programmatically for successful queries
+            if (textResponse.toLowerCase().includes("building ") && textResponse.toLowerCase().includes("room ")) {
+                textResponse += "\n\nWould you like directions to this location?";
+            }
+        }
+
+        const suggestions = await suggestionsService.generateSuggestions({
+            question: rewrittenQuery,
+            answer: textResponse
+        });
+
+        const responseTimeMs = Date.now() - startedAt;
+        const chat = await conversationService.saveMessageTurn({
+            user: activeUser,
+            conversationId,
+            question: normalizedQuestion,
+            response: { answer: textResponse, confidence: "high" },
+            intent: "location",
+            confidence: 0.9,
+            provider: "system",
+            responseTimeMs,
+            userMessageId,
+            assistantMessageId,
+            parentId,
+            topic: "campus_navigation",
+            entities
+        });
+
+        return {
+            conversationId: chat?._id || conversationId || null,
+            mode: activeUser._id ? "authenticated" : "guest",
+            message: textResponse,
+            intent: "location",
+            intentConfidence: 0.9,
+            confidence: "high",
+            sources: filteredCampusChunks.map(c => ({
+                type: "document",
+                title: c.metadata?.filename || c.metadata?.originalName || "Campus Navigation",
+                reference: c.metadata?.documentId || "campus-nav"
+            })),
+            sourceLabel: "📍 Campus Navigation",
+            provider: "system",
+            responseTimeMs,
+            suggestions
+        };
+    }
 
     const intentResult = { intent, confidence: 0.9 };
     const decision = decide({ intent, question: rewrittenQuery });

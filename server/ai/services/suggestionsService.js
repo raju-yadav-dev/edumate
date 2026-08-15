@@ -8,6 +8,25 @@
  */
 const generateSuggestions = async ({ question, answer }) => {
     const lowerQuestion = String(question || "").toLowerCase();
+    const lowerAnswer = String(answer || "").toLowerCase();
+
+    if (lowerAnswer.includes("would you like directions to this location")) {
+        return [
+            "Show Directions",
+            "No, thanks"
+        ];
+    }
+
+    if (lowerQuestion.includes("navigation") || lowerQuestion.includes("location") || lowerQuestion.includes("where is") || lowerQuestion.includes("room") || lowerQuestion.includes("building") || lowerQuestion.includes("hod")) {
+        return [
+            "HOD Office",
+            "Mathematics Department",
+            "Physics Department",
+            "Library",
+            "Admission Office",
+            "Examination Cell"
+        ];
+    }
 
     if (lowerQuestion.includes("fee") || lowerQuestion.includes("cost") || lowerQuestion.includes("pay")) {
         return [

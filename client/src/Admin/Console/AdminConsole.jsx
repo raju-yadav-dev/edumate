@@ -10,7 +10,7 @@ function AdminConsole() {
     const { isAdminAuthenticated } = useAdminAuth();
 
     if (!isAdminAuthenticated) {
-        return <Navigate to="/admin" replace />;
+        return <Navigate to={`/admin${window.location.search}`} replace />;
     }
 
     return (

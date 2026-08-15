@@ -27,7 +27,20 @@ function haversineDistance(lat1, lon1, lat2, lon2) {
  */
 async function lookupCampusLocation(name) {
     if (!name) return null;
-    const cleanName = name.trim().toLowerCase();
+    let cleanName = name.trim().toLowerCase();
+
+    // Map building terms to campus database nodes
+    if (cleanName.includes("building 2") || cleanName.includes("vidyasagar")) {
+        cleanName = "admission office";
+    } else if (cleanName.includes("library")) {
+        cleanName = "library";
+    } else if (cleanName.includes("examination")) {
+        cleanName = "examination cell";
+    } else if (cleanName.includes("accounts")) {
+        cleanName = "accounts office";
+    } else if (cleanName.includes("building") || cleanName.includes("bhavan") || cleanName.includes("bhawan")) {
+        cleanName = "departments block";
+    }
 
     // Try an exact match first
     let loc = await Location.findOne({ name: { $regex: new RegExp(`^${cleanName}$`, "i") } });

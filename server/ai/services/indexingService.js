@@ -11,6 +11,126 @@ const UniversalExtractor = require("../../crawler/extractors/UniversalExtractor"
 
 const BUCKET = process.env.SUPABASE_STORAGE_BUCKET || process.env.SUPABASE_BUCKET || "documents";
 
+const ROMAN_MAP = {
+    "i": "1", "ii": "2", "iii": "3", "iv": "4", "v": "5", "vi": "6", "vii": "7", "viii": "8", "ix": "9",
+    "1": "1", "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7", "8": "8", "9": "9"
+};
+
+function parseBuildingContent(text, filename) {
+    const lines = text.split(/\r?\n/);
+    const results = [];
+    
+    let buildingNumber = "";
+    let buildingName = "";
+    
+    for (let i = 0; i < Math.min(10, lines.length); i++) {
+        const line = lines[i].trim();
+        const numMatch = line.match(/(?:Building|Buliding)\s+([IVX0-9]+)/i);
+        if (numMatch) {
+            const rawNum = numMatch[1].toLowerCase();
+            buildingNumber = ROMAN_MAP[rawNum] || numMatch[1];
+        }
+    }
+    
+    if (!buildingNumber) {
+        const fileNumMatch = filename.match(/(?:Building|Buliding)\s+([IVX0-9]+)/i);
+        if (fileNumMatch) {
+            const rawNum = fileNumMatch[1].toLowerCase();
+            buildingNumber = ROMAN_MAP[rawNum] || fileNumMatch[1];
+        }
+    }
+    
+    const nameMatch = text.match(/(?:Building|Buliding)\s+[IVX0-9]+\s*(?:\r?\n\s*)?\(?([a-zA-Z0-9\s&]+)\)?/i) ||
+                      text.match(/(?:Building|Buliding)\s+[0-9]+\s*(?:\r?\n\s*)?([a-zA-Z0-9\s&]+)/i);
+    if (nameMatch) {
+        buildingName = nameMatch[1].trim();
+    }
+    if (buildingName) {
+        buildingName = buildingName.replace(/\s+/g, " ").trim();
+    }
+    
+    let currentFloor = "";
+    
+    for (let line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        
+        const floorMatch = trimmed.match(/^(?:Ground|1st|2nd|3rd|4th|5th|6th|7th|8th|9th|Frist|Second|Third|Fourth|Fifth|Sixth|Seventh|Eighth|Ninth|Basement)\s*floor/i);
+        if (floorMatch) {
+            currentFloor = trimmed;
+            continue;
+        }
+        
+        if (!currentFloor) continue;
+        
+        const roomMatch = trimmed.match(/^([0-9a-zA-Z()\-,\s]+?)(?:\s{2,}|\t+)(.+)$/);
+        
+        if (roomMatch) {
+            const roomPart = roomMatch[1].trim();
+            const descPart = roomMatch[2].trim();
+            
+            const isRoomNumber = /^[0-9a-zA-Z()\-,\s/]+$/.test(roomPart) && roomPart.length < 20;
+            
+            if (isRoomNumber) {
+                const rooms = roomPart.split(/,\s*/);
+                for (const r of rooms) {
+                    results.push({
+                        buildingNumber,
+                        buildingName,
+                        floor: currentFloor,
+                        roomNumber: r,
+                        description: descPart
+                    });
+                }
+            } else {
+                results.push({
+                    buildingNumber,
+                    buildingName,
+                    floor: currentFloor,
+                    roomNumber: "",
+                    description: trimmed
+                });
+            }
+        } else {
+            const colonRoomMatch = trimmed.match(/^([0-9a-zA-Z()\-,\s]+?)\s*:\s*(.+)$/);
+            if (colonRoomMatch && colonRoomMatch[1].trim().length < 15) {
+                const roomPart = colonRoomMatch[1].trim();
+                const descPart = colonRoomMatch[2].trim();
+                const rooms = roomPart.split(/,\s*/);
+                for (const r of rooms) {
+                    results.push({
+                        buildingNumber,
+                        buildingName,
+                        floor: currentFloor,
+                        roomNumber: r,
+                        description: descPart
+                    });
+                }
+            } else {
+                results.push({
+                    buildingNumber,
+                    buildingName,
+                    floor: currentFloor,
+                    roomNumber: "",
+                    description: trimmed
+                });
+            }
+        }
+    }
+    
+    if (results.length === 0) {
+        results.push({
+            buildingNumber,
+            buildingName,
+            floor: "",
+            roomNumber: "",
+            description: text
+        });
+    }
+    
+    return results;
+}
+
 /**
  * Uses Gemini API to transcribe scanned PDF page-by-page.
  */
@@ -316,6 +436,25 @@ const runIndexingJob = async (documentId) => {
                     rawChunks.push({ content: chunk, pageNumber: page.pageNumber });
                 });
             }
+        } else if (document.category && document.category.startsWith("campus_navigation")) {
+            console.log(`[INDEX] Custom Campus Navigation parser activated for ${document.originalName}`);
+            const textContent = buffer.toString("utf-8");
+            const parsedRooms = parseBuildingContent(textContent, document.originalName);
+            
+            rawChunks = parsedRooms.map(item => {
+                const chunkContent = `📍 Campus Location
+Building: Building ${item.buildingNumber} (${item.buildingName})
+Floor: ${item.floor}
+Room: ${item.roomNumber || "N/A"}
+Details: ${item.description}`;
+
+                return {
+                    content: chunkContent,
+                    pageNumber: 1,
+                    campusMeta: item
+                };
+            });
+            text = textContent;
         } else {
             const extracted = await withTimeout(UniversalExtractor.extract(buffer, document.originalName), 45000, "Document extraction timed out (45s)");
             text = extracted.text || "";
@@ -375,6 +514,7 @@ const runIndexingJob = async (documentId) => {
             // Deterministic point ID based on documentId + chunkIndex
             const sha = crypto.createHash("sha256").update(`${documentId}:${index}`).digest("hex");
             const pointId = `${sha.slice(0, 8)}-${sha.slice(8, 12)}-4${sha.slice(13, 16)}-a${sha.slice(17, 20)}-${sha.slice(20, 32)}`;
+            const isCampusNav = document.category && document.category.startsWith("campus_navigation");
             const meta = metadataBuilder.buildMetadata({
                 documentId: String(documentId),
                 originalName: document.originalName,
@@ -384,6 +524,16 @@ const runIndexingJob = async (documentId) => {
                 institution: document.institution,
                 uploadedBy: String(document.createdBy || "")
             });
+            
+            if (isCampusNav && chunk.campusMeta) {
+                meta.sourceType = "campus_navigation";
+                meta.buildingNumber = chunk.campusMeta.buildingNumber || "";
+                meta.buildingName = chunk.campusMeta.buildingName || "";
+                meta.floor = chunk.campusMeta.floor || "";
+                meta.roomNumber = chunk.campusMeta.roomNumber || "";
+                meta.department = chunk.campusMeta.description || "";
+            }
+
             points.push({
                 id: pointId,
                 vector,
@@ -394,12 +544,17 @@ const runIndexingJob = async (documentId) => {
                     originalName: meta.originalName,
                     pageNumber: meta.pageNumber,
                     category: meta.category,
-                    department: meta.department,
+                    department: isCampusNav ? (chunk.campusMeta?.description || "") : meta.department,
                     institution: meta.institution,
                     uploadedBy: meta.uploadedBy,
                     chunkIndex: index,
                     createdAt: timestamp,
-                    contentHash: document.contentHash || document.checksum
+                    contentHash: document.contentHash || document.checksum,
+                    sourceType: isCampusNav ? "campus_navigation" : undefined,
+                    buildingNumber: isCampusNav ? (chunk.campusMeta?.buildingNumber || "") : undefined,
+                    buildingName: isCampusNav ? (chunk.campusMeta?.buildingName || "") : undefined,
+                    floor: isCampusNav ? (chunk.campusMeta?.floor || "") : undefined,
+                    roomNumber: isCampusNav ? (chunk.campusMeta?.roomNumber || "") : undefined
                 }
             });
         });
@@ -432,18 +587,26 @@ const runIndexingJob = async (documentId) => {
         try {
             const Chunk = require("../../models/Chunk");
             await Chunk.deleteMany({ document: documentId });
-            const chunkDocs = rawChunks.map((chunk, index) => ({
-                document: documentId,
-                content: chunk.content,
-                embedding: embeddings[index] || [],
-                metadata: {
-                    pageNumber: chunk.pageNumber || 1,
-                    originalName: document.originalName || "",
-                    category: document.category || "",
-                    institution: document.institution || "",
-                    department: document.department || ""
-                }
-            }));
+            const chunkDocs = rawChunks.map((chunk, index) => {
+                const isCampusNav = document.category && document.category.startsWith("campus_navigation");
+                return {
+                    document: documentId,
+                    content: chunk.content,
+                    embedding: embeddings[index] || [],
+                    metadata: {
+                        pageNumber: chunk.pageNumber || 1,
+                        originalName: document.originalName || "",
+                        category: document.category || "",
+                        institution: document.institution || "",
+                        department: isCampusNav ? (chunk.campusMeta?.description || "") : (document.department || ""),
+                        sourceType: isCampusNav ? "campus_navigation" : undefined,
+                        buildingNumber: isCampusNav ? (chunk.campusMeta?.buildingNumber || "") : undefined,
+                        buildingName: isCampusNav ? (chunk.campusMeta?.buildingName || "") : undefined,
+                        floor: isCampusNav ? (chunk.campusMeta?.floor || "") : undefined,
+                        roomNumber: isCampusNav ? (chunk.campusMeta?.roomNumber || "") : undefined
+                    }
+                };
+            });
             if (chunkDocs.length > 0) {
                 await Chunk.insertMany(chunkDocs);
             }

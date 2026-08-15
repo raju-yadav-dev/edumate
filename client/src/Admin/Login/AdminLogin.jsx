@@ -10,7 +10,7 @@ function AdminLogin() {
     const { isAdminAuthenticated } = useAdminAuth();
 
     if (isAdminAuthenticated) {
-        return <Navigate to="/admin/panel" replace />;
+        return <Navigate to={`/admin/panel${window.location.search}`} replace />;
     }
 
     return <Admin mode="login" />;
