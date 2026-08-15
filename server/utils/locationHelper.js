@@ -27,7 +27,20 @@ function haversineDistance(lat1, lon1, lat2, lon2) {
  */
 async function lookupCampusLocation(name) {
     if (!name) return null;
-    const cleanName = name.trim().toLowerCase();
+    let cleanName = name.trim().toLowerCase();
+
+    // Map building terms to campus database nodes
+    if (cleanName.includes("building 2") || cleanName.includes("vidyasagar")) {
+        cleanName = "admission office";
+    } else if (cleanName.includes("library")) {
+        cleanName = "library";
+    } else if (cleanName.includes("examination")) {
+        cleanName = "examination cell";
+    } else if (cleanName.includes("accounts")) {
+        cleanName = "accounts office";
+    } else if (cleanName.includes("building") || cleanName.includes("bhavan") || cleanName.includes("bhawan")) {
+        cleanName = "departments block";
+    }
 
     // Try an exact match first
     let loc = await Location.findOne({ name: { $regex: new RegExp(`^${cleanName}$`, "i") } });
@@ -48,6 +61,10 @@ async function geocode(query) {
 
     // Clean up query
     let searchQuery = query.trim();
+
+    // Map spelling variations
+    searchQuery = searchQuery.replace(/shyamnager/gi, "Shyamnagar");
+
 
     // To prevent getting results from other parts of the world for common local place names,
     // we append "Kolkata, West Bengal, India" if there is no mention of "kolkata" or "india" or "bengal" in the query.

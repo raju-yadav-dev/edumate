@@ -174,9 +174,13 @@ Query: "${question}"`;
             };
         } catch (error) {
             console.error("[Map Service] Routing Error:", error);
+            let errorMessage = "Unable to calculate the route right now. Please check the location names and try again.";
+            if (error.message && error.message.includes("API Key is not configured")) {
+                errorMessage = "Map routing is not configured. Please configure the OpenRouteService API key.";
+            }
             return {
                 found: false,
-                answer: `I couldn't compute the navigation routes due to an error: ${error.message}. Please verify your coordinates or try again.`,
+                answer: errorMessage,
                 sources: []
             };
         }
@@ -437,7 +441,10 @@ async function calculateAndCacheRoutes(start, dest) {
         const airDistance = locationHelper.haversineDistance(start.lat, start.lng, dest.lat, dest.lng);
 
         const keysSetting = await settingsService.getApiKeys().catch(() => ({}));
-        const apiKey = keysSetting.openRouteServiceApiKey || process.env.OPENROUTE_SERVICE_API_KEY;
+        const rawApiKey = keysSetting.openRouteServiceApiKey || process.env.OPENROUTE_SERVICE_API_KEY;
+        const apiKey = (rawApiKey && rawApiKey !== "YOUR_KEY_HERE") ? rawApiKey : null;
+
+        console.log(`[MAP] OpenRouteService API key configured: ${!!apiKey}`);
 
         if (apiKey) {
             try {

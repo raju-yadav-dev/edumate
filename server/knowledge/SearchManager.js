@@ -7,13 +7,14 @@ const Document = require("../models/Document");
 /**
  * Retrieves chunks from Qdrant and enriches them with MongoDB Document metadata.
  */
-const retrieveAndEnrichChunks = async (query, user, limit, ignoreInstitution = false) => {
+const retrieveAndEnrichChunks = async (query, user, limit, ignoreInstitution = false, filter = null) => {
     // Retrieve a larger candidate pool to ensure enough results after filtering
     const candidates = await retrievalService.retrieve({
         question: query,
         user,
         limit: Math.max(limit * 3, 50),
-        ignoreInstitution
+        ignoreInstitution,
+        filter
     });
     if (candidates.length === 0) return [];
 
@@ -119,8 +120,8 @@ const expandChunkContext = async (chunk) => {
 /**
  * Searches only uploaded local documents in the vector database
  */
-const searchLocalPdfs = async (query, user, limit, ignoreInstitution = false) => {
-    const enriched = await retrieveAndEnrichChunks(query, user, limit, ignoreInstitution);
+const searchLocalPdfs = async (query, user, limit, ignoreInstitution = false, filter = null) => {
+    const enriched = await retrieveAndEnrichChunks(query, user, limit, ignoreInstitution, filter);
     
     // Filter to only include local admin-uploaded documents (uploadedFrom is not "crawler")
     const filtered = enriched.filter(chunk => chunk.metadata?.uploadedFrom !== "crawler");

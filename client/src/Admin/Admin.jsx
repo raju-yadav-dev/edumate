@@ -65,7 +65,17 @@ const DEFAULT_FOLDERS = [
     { label: "Scholarships", value: "scholarships" },
     { label: "Transport", value: "transport" },
     { label: "Policies", value: "policies" },
-    { label: "Notices", value: "notices" }
+    { label: "Notices", value: "notices" },
+    { label: "Campus Navigation", value: "campus_navigation" },
+    { label: "Building 1", value: "campus_navigation_building_1", parent: "campus_navigation" },
+    { label: "Building 2", value: "campus_navigation_building_2", parent: "campus_navigation" },
+    { label: "Building 3", value: "campus_navigation_building_3", parent: "campus_navigation" },
+    { label: "Building 4", value: "campus_navigation_building_4", parent: "campus_navigation" },
+    { label: "Building 5", value: "campus_navigation_building_5", parent: "campus_navigation" },
+    { label: "Building 6", value: "campus_navigation_building_6", parent: "campus_navigation" },
+    { label: "Building 7", value: "campus_navigation_building_7", parent: "campus_navigation" },
+    { label: "Building 8", value: "campus_navigation_building_8", parent: "campus_navigation" },
+    { label: "Building 9", value: "campus_navigation_building_9", parent: "campus_navigation" }
 ];
 
 const MB = 1024 * 1024;
@@ -259,7 +269,12 @@ function Admin({ mode = "auto" }) {
         }
     })();
 
-    const initialActive = initialFolders[0]?.value || "admissions";
+    const getQueryParam = (name) => {
+        const match = window.location.search.match(new RegExp('[?&]' + name + '=([^&]+)'));
+        return match ? decodeURIComponent(match[1]) : null;
+    };
+    const urlFolder = getQueryParam("folder");
+    const initialActive = urlFolder || initialFolders[0]?.value || "admissions";
 
     const [activeSection, setActiveSection] = useState("files");
     const [activeFolder, setActiveFolder] = useState(initialActive);

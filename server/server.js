@@ -81,17 +81,82 @@ const startServer = async () => {
                     console.error("⚠️ Failed to auto-seed campus locations:", e.message);
                 }
 
-                // Start background crawler sync scheduler
-                try {
-                    const syncScheduler = require("./crawler/SyncScheduler");
-                    syncScheduler.start();
-                } catch (e) {
-                    console.error("⚠️ Failed to initialize background scheduler:", e.message);
+        // Start background crawler sync scheduler
+        try {
+            const syncScheduler = require("./crawler/SyncScheduler");
+            syncScheduler.start();
+        } catch (e) {
+            console.error("⚠️ Failed to initialize background scheduler:", e.message);
+        }
+
+        // Verify Qdrant connection during startup
+        try {
+            const { ensureCollection } = require("./ai/config/qdrant");
+            await ensureCollection();
+            console.log("✓ Qdrant collection verified successfully on startup.");
+        } catch (e) {
+            console.error("⚠️ WARNING: Qdrant connection failed during startup:", e.message);
+        }
+
+        // Campus Navigation startup migration and reindexing
+        try {
+            const Document = require("./models/Document");
+            const Chunk = require("./models/Chunk");
+            const indexingService = require("./ai/services/indexingService");
+
+            const ROMAN_MAP = {
+                "i": "1", "ii": "2", "iii": "3", "iv": "4", "v": "5", "vi": "6", "vii": "7", "viii": "8", "ix": "9",
+                "1": "1", "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7", "8": "8", "9": "9"
+            };
+
+            const docsToMigrate = await Document.find({ status: "active", category: "campus_navigation_campus" });
+            if (docsToMigrate.length > 0) {
+                console.log(`[Startup Migration] Found ${docsToMigrate.length} building documents in old category.`);
+                for (const doc of docsToMigrate) {
+                    const fileNumMatch = doc.originalName.match(/(?:Building|Buliding)\s+([IVX0-9]+)/i);
+                    if (fileNumMatch) {
+                        const rawNum = fileNumMatch[1].toLowerCase();
+                        const num = ROMAN_MAP[rawNum] || fileNumMatch[1];
+                        doc.category = `campus_navigation_building_${num}`;
+                        await doc.save();
+                        console.log(`[Startup Migration] Migrated category of ${doc.originalName} to "${doc.category}"`);
+                    }
                 }
-            })
-            .catch((err) => {
-                console.warn("[STARTUP WARNING] MongoDB unavailable.");
-            });
+            }
+
+            // Check if any building chunks need new metadata fields
+            const count = await Chunk.countDocuments({ "metadata.sourceType": "campus_navigation" });
+            const campusDocs = await Document.find({ status: "active", category: /^campus_navigation/ });
+            
+            if (count === 0 && campusDocs.length > 0) {
+                console.log(`[Startup Reindexing] Chunks missing sourceType metadata. Triggering auto-reindexing for ${campusDocs.length} campus building documents...`);
+                for (const doc of campusDocs) {
+                    console.log(`[Startup Reindexing] Queueing document for background indexing: ${doc.originalName} (${doc._id})`);
+                    await indexingService.indexDocumentBackground(doc._id);
+                }
+            }
+        } catch (migErr) {
+            console.error("⚠️ Failed running Campus Navigation startup migration:", migErr.message);
+        }
+
+        app.listen(PORT, () => {
+
+            console.log(`
++==========================================================+
+|             ✓ Server Started Successfully                |
+|                                                          |
+| Environment : ${process.env.NODE_ENV || "development"}
+| Port        : ${PORT}
+| API         : http://localhost:${PORT}
+| Started     : ${new Date().toLocaleString()}
+|                                                          |
+| Ready to accept requests                                 |
++==========================================================+
+
+============================================================
+`);
+
+        });
 
     } catch (error) {
         console.error(error);

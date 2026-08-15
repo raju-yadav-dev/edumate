@@ -120,7 +120,7 @@ const Chunk = require("../../models/Chunk");
  * @param {number} [params.limit=AI_CONSTANTS.DEFAULT_RETRIEVAL_LIMIT]
  * @returns {Promise<Array<Object>>}
  */
-const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL_LIMIT, ignoreInstitution = false }) => {
+const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL_LIMIT, ignoreInstitution = false, filter = null }) => {
     let semanticCandidates = [];
     let keywordCandidates = [];
 
@@ -150,6 +150,9 @@ const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL
                     { key: "institution", match: { value: "" } }
                 ]
             });
+        }
+        if (filter && filter.sourceType) {
+            must.push({ key: "sourceType", match: { value: filter.sourceType } });
         }
 
         const qdrantFilter = must.length > 0 ? { must } : undefined;
@@ -201,6 +204,12 @@ const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL
             if (user?.institution && !ignoreInstitution) {
                 mustConditions.push({
                     "metadata.institution": { $in: [user.institution, "all", "general", "", null] }
+                });
+            }
+
+            if (filter && filter.sourceType) {
+                mustConditions.push({
+                    "metadata.sourceType": filter.sourceType
                 });
             }
 
