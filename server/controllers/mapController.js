@@ -50,7 +50,8 @@ const getRoute = asyncHandler(async (req, res) => {
     return sendSuccess(res, 200, "Routes calculated successfully.", {
         startLocation: startCoords,
         destination: destCoords,
-        routes
+        routes,
+        excludedRoutes: routes.excludedRoutes || []
     });
 });
 

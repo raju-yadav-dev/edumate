@@ -53,7 +53,9 @@ export default function MapView({
     setActiveRouteIndex,
     type = "routing", // 'routing' | 'nearby'
     center,
-    places = []
+    places = [],
+    excludedRoutes = [],
+    showExcluded = false
 }) {
     const mapContainerRef = useRef(null);
     const mapInstanceRef = useRef(null);
@@ -64,8 +66,8 @@ export default function MapView({
 
         // Initialize Map if it doesn't exist
         if (!mapInstanceRef.current) {
-            const initialLat = center?.lat || startLocation?.lat || 22.7212;
-            const initialLng = center?.lng || startLocation?.lng || 88.4848;
+            const initialLat = center?.lat || startLocation?.lat || CAMPUS_DEFAULT_LAT;
+            const initialLng = center?.lng || startLocation?.lng || CAMPUS_DEFAULT_LNG;
 
             mapInstanceRef.current = L.map(mapContainerRef.current, {
                 center: [initialLat, initialLng],
@@ -107,36 +109,80 @@ export default function MapView({
                 bounds.extend([destination.lat, destination.lng]);
             }
 
-            // Colors for different travel options
-            const colors = {
-                car: "#8b5cf6", // Purple
-                bike: "#3b82f6", // Blue
-                public_transport: "#10b981", // Green
-                walking: "#f59e0b", // Amber
-                cycling: "#06b6d4" // Teal
-            };
-
-            // Plot all route geometries
+            // Plot all safe route geometries
             routes.forEach((route, idx) => {
                 if (!route.geometry || route.geometry.length === 0) return;
 
                 const isActive = idx === activeRouteIndex;
-                const pathColor = colors[route.mode] || "#6b7280";
+                const isRecommended = route.recommended;
+
+                // Configure weights & opacity based on selection state
+                let weight = 4;
+                let opacity = 0.45;
+                if (isActive) {
+                    weight = 7;
+                    opacity = 0.95;
+                } else if (isRecommended) {
+                    weight = 5;
+                    opacity = 0.65;
+                }
+
+                // Determine routing safety line colors
+                let pathColor = "#3b82f6"; // Default blue
+                if (route.safety?.riskLevel === "LOW") {
+                    pathColor = isRecommended ? "#10b981" : "#3b82f6"; // green if recommended
+                } else if (route.safety?.riskLevel === "MEDIUM") {
+                    pathColor = "#f59e0b"; // amber for moderate
+                } else if (route.safety?.riskLevel === "HIGH") {
+                    pathColor = "#ef4444"; // red for high risk
+                } else if (route.safety?.status === "UNKNOWN") {
+                    pathColor = "#64748b"; // slate gray for safety unavailable
+                }
 
                 const polyline = L.polyline(route.geometry, {
                     color: pathColor,
-                    weight: isActive ? 6 : 3,
-                    opacity: isActive ? 0.9 : 0.35,
-                    dashArray: route.mode === "walking" || route.mode === "public_transport" ? "5, 7" : null
+                    weight,
+                    opacity
                 });
 
-                // Set up popup listing details
+                // Set up popup details
+                const safetyText = route.safety
+                    ? route.safety.riskLevel === "LOW"
+                        ? "🟢 Safer route"
+                        : route.safety.riskLevel === "MEDIUM"
+                            ? "🟡 Moderate risk"
+                            : route.safety.riskLevel === "HIGH"
+                                ? "🔴 High risk"
+                                : "⚪ Safety unavailable"
+                    : "Safety information unavailable";
+
+                const crimeText = route.safety?.crimeRisk?.status === "AVAILABLE"
+                    ? `Crime risk: ${route.safety.crimeRisk.score}/100`
+                    : "Crime verification: Unavailable";
+
+                const hazardText = route.safety?.physicalHazards
+                    ? `Physical hazards: ${
+                        (route.safety.physicalHazards.flood || 0) +
+                        (route.safety.physicalHazards.construction || 0) +
+                        (route.safety.physicalHazards.roadClosure || 0) +
+                        (route.safety.physicalHazards.other || 0)
+                      } detected`
+                    : "Physical hazards: Unchecked";
+
+                const safetyWarnings = route.safety?.warnings?.length
+                    ? `<br/><span style="color: #b45309;">⚠️ <b>Alert:</b> ${route.safety.warnings.join(" ")}</span>`
+                    : "";
+
                 polyline.bindPopup(`
-                    <div style="font-family: sans-serif; font-size: 13px;">
-                        <b>Option ${idx + 1}: ${route.label}</b><br/>
+                    <div style="font-family: sans-serif; font-size: 13px; line-height: 1.4; padding: 4px;">
+                        <b>${route.label || "Route"}</b><br/>
                         ⏱️ Time: ${route.time}<br/>
                         📏 Distance: ${route.distance}<br/>
-                        💰 Cost: ${route.cost}
+                        💵 Estimated Fuel: ${route.cost}<br/>
+                        🛡️ ${safetyText}<br/>
+                        📊 ${crimeText}<br/>
+                        🚧 ${hazardText}
+                        ${safetyWarnings}
                     </div>
                 `);
 
@@ -150,11 +196,52 @@ export default function MapView({
 
                 layersGroup.addLayer(polyline);
 
+                // Add crime hotspots for the active route
+                if (isActive && route.safety?.crimeRisk?.hotspots) {
+                    route.safety.crimeRisk.hotspots.forEach(hotspot => {
+                        const circle = L.circle([hotspot.lat, hotspot.lng], {
+                            color: "#ef4444",
+                            fillColor: "#ef4444",
+                            fillOpacity: 0.15,
+                            radius: hotspot.radiusMeters || 150
+                        }).bindPopup(`
+                            <div style="font-family: sans-serif; font-size: 13px; line-height: 1.4;">
+                                ⚠️ <b>Elevated recent incident activity</b><br/>
+                                Risk score: <b>${hotspot.score}</b><br/>
+                                Based on verified incident data within ${hotspot.radiusMeters || 150}m.
+                            </div>
+                        `);
+                        layersGroup.addLayer(circle);
+                    });
+                }
+
                 if (isActive) {
                     // Extend bounds with the active route geometry
                     route.geometry.forEach(pt => bounds.extend(pt));
                 }
             });
+
+            // Plot excluded routes if user explicitly requests
+            if (showExcluded && Array.isArray(excludedRoutes)) {
+                excludedRoutes.forEach((route) => {
+                    if (!route.geometry || route.geometry.length === 0) return;
+
+                    const polyline = L.polyline(route.geometry, {
+                        color: "#991b1b",
+                        weight: 3,
+                        opacity: 0.5,
+                        dashArray: "5, 10"
+                    }).bindPopup(`
+                        <div style="font-family: sans-serif; font-size: 13px; line-height: 1.4;">
+                            🚫 <b>${route.label || "Route"} (Excluded)</b><br/>
+                            Reason: <b style="color: #ef4444;">${route.reason || "Elevated incident risk"}</b><br/>
+                            ⏱️ Time: ${route.time || "N/A"}<br/>
+                            📏 Distance: ${route.distance || "N/A"}
+                        </div>
+                    `);
+                    layersGroup.addLayer(polyline);
+                });
+            }
 
             // Adjust zoom to fit start, destination, and path
             if (bounds.isValid()) {
@@ -171,12 +258,12 @@ export default function MapView({
             layersGroup.addLayer(centerMarker);
             bounds.extend([centerLat, centerLng]);
 
-            // Draw a subtle 1km radius circle
+            // Draw a subtle 1.5km radius circle
             const circle = L.circle([centerLat, centerLng], {
                 color: "#3b82f6",
                 fillColor: "#3b82f6",
                 fillOpacity: 0.08,
-                radius: 1500 // 1.5km circle
+                radius: 1500
             });
             layersGroup.addLayer(circle);
 
@@ -210,7 +297,7 @@ export default function MapView({
 
         return () => clearTimeout(timer);
 
-    }, [startLocation, destination, routes, activeRouteIndex, type, center, places]);
+    }, [startLocation, destination, routes, activeRouteIndex, type, center, places, excludedRoutes, showExcluded]);
 
     // Clean up map instance on unmount
     useEffect(() => {
