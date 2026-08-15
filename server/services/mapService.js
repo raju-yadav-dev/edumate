@@ -125,8 +125,16 @@ Query: "${question}"`;
         let startCoords = null;
         let destCoords = null;
 
+        const isValidCoordinate = (coords) => {
+            return coords && 
+                   typeof coords.lat === "number" && isFinite(coords.lat) && 
+                   typeof coords.lng === "number" && isFinite(coords.lng);
+        };
+
         // Fallback to conversationContext route start/destination if names match or is a follow-up
-        if (conversationContext && conversationContext.routeStart && conversationContext.routeDestination) {
+        if (conversationContext && 
+            isValidCoordinate(conversationContext.routeStart) && 
+            isValidCoordinate(conversationContext.routeDestination)) {
             const isContextMatch = (name, contextLoc) => {
                 if (!name || !contextLoc) return false;
                 const n = name.toLowerCase();
@@ -192,12 +200,6 @@ Query: "${question}"`;
             }
         }
 
-        // Validate coordinates strictly before passing to route calculation
-        const isValidCoordinate = (coords) => {
-            return coords && 
-                   typeof coords.lat === "number" && isFinite(coords.lat) && 
-                   typeof coords.lng === "number" && isFinite(coords.lng);
-        };
 
         if (!isValidCoordinate(startCoords)) {
             return {
