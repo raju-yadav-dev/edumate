@@ -23,6 +23,9 @@ const suggestionsService = require("./suggestionsService");
 const knowledgeManager = require("../../knowledge/KnowledgeManager");
 const SearchManager = require("../../knowledge/SearchManager");
 const RankingEngine = require("../../knowledge/RankingEngine");
+const cacheService = require("../../services/cacheService");
+const webCrawlerService = require("./webCrawlerService");
+const { detectTypeAndDepartment } = require("../utils/queryParser");
 
 const isCampusNavigationQuery = (question) => {
     const q = String(question || "").toLowerCase();
@@ -122,11 +125,42 @@ const buildGuestUser = () => ({
     department: ""
 });
 
+const buildRecommendationSearchQuery = (profile, institution = "Brainware University") => {
+    let query = `Courses offered by ${institution}`;
+    const parts = [];
+    if (profile.stream) {
+        parts.push(`${profile.stream} stream`);
+    }
+    if (profile.class) {
+        parts.push(`Class ${profile.class}`);
+    }
+    if (profile.overall_percentage) {
+        parts.push(`with ${profile.overall_percentage}% overall`);
+    }
+    if (profile.subject && profile.subject_percentage) {
+        parts.push(`and ${profile.subject_percentage}% in ${profile.subject}`);
+    } else if (profile.subject) {
+        parts.push(`and ${profile.subject}`);
+    }
+    
+    if (parts.length > 0) {
+        query += ` suitable for a ${parts.join(" ")}`;
+    }
+    query += `, including eligibility requirements, stream eligibility, minimum marks, subject requirements, course focus, and admission criteria.`;
+    return query;
+};
+
 /**
  * Handles chatbot queries with RAG matching using Gemini 2.5 Flash and Qdrant
  */
 const askQuestion = async ({ user, question, conversationId, onChunk, signal, latitude, longitude, userMessageId, assistantMessageId, parentId, language }) => {
     const startedAt = Date.now();
+    let llmStart = 0;
+    let llmDuration = 0;
+    let resolvedType = "all";
+    let resolvedDept = "all";
+    let qdrantDuration = 0;
+    let retrievalTelemetry = null;
     const normalizedQuestion = String(question || "").trim();
     const activeUser = user || buildGuestUser();
 
@@ -134,6 +168,58 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
         const error = new Error("Question is required.");
         error.statusCode = 422;
         throw error;
+    }
+
+    // Parse lightweight metadata type and department
+    const { documentType: detectedType, department: detectedDept } = detectTypeAndDepartment(normalizedQuestion);
+    const { detectQueryMode } = require("../utils/queryParser");
+    const queryMode = detectQueryMode(normalizedQuestion);
+
+    // Check Cache first
+    const cachedResponse = await cacheService.get(normalizedQuestion, detectedType, detectedDept, queryMode);
+    if (cachedResponse) {
+        const responseTimeMs = Date.now() - startedAt;
+        console.log(`[Cache HIT] Found cached response for query: "${normalizedQuestion}" (Type: ${detectedType || 'none'}, Dept: ${detectedDept || 'none'})`);
+        console.log(`[Observability] Cache HIT | Duration: ${responseTimeMs}ms | LLM Calls Avoided: 1`);
+        if (onChunk && cachedResponse.answer) {
+            onChunk(cachedResponse.answer);
+        }
+        const chat = await conversationService.saveMessageTurn({
+            user: activeUser,
+            conversationId,
+            question: normalizedQuestion,
+            response: cachedResponse,
+            intent: cachedResponse.intent || "cached",
+            confidence: 1.0,
+            provider: cachedResponse.provider || "cache",
+            responseTimeMs,
+            userMessageId,
+            assistantMessageId,
+            parentId,
+            topic: cachedResponse.topic || "",
+            entities: { conversationContext }
+        });
+
+        const suggestions = await suggestionsService.generateSuggestions({
+            question: normalizedQuestion,
+            answer: cachedResponse.answer
+        });
+
+        return {
+            conversationId: chat?._id || conversationId || null,
+            mode: activeUser._id ? "authenticated" : "guest",
+            message: cachedResponse.answer,
+            intent: cachedResponse.intent || "cached",
+            intentConfidence: 1.0,
+            confidence: cachedResponse.confidence,
+            sources: cachedResponse.sources,
+            sourceLabel: cachedResponse.sourceLabel || "Cached Q&A",
+            provider: cachedResponse.provider || "cache",
+            responseTimeMs,
+            suggestions,
+            mapData: cachedResponse.mapData || null,
+            requiresLocationPermission: cachedResponse.requiresLocationPermission || false
+        };
     }
 
     // Expand "CSS" or "css" (Computational Sciences) and department abbreviations for better matching
@@ -261,10 +347,23 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
     const analysisResult = await queryRewriterService.analyzeQuery({
         question: expandedQuestion,
         historyText,
-        conversationContext
+        conversationContext,
+        user: activeUser
     });
-    const { rewrittenQuery, intent, entities, isRepeat, subqueries = [], conversationContext: updatedContext, clarificationPrompt } = analysisResult;
-    const activeSubqueries = (Array.isArray(subqueries) && subqueries.length > 0) ? subqueries : [rewrittenQuery];
+    let { rewrittenQuery, intent, entities, isRepeat, subqueries = [], conversationContext: updatedContext, clarificationPrompt } = analysisResult;
+    let activeSubqueries = (Array.isArray(subqueries) && subqueries.length > 0) ? subqueries : [rewrittenQuery];
+
+    let studentProfile = null;
+    const { INTENTS } = require("../../constants/intents");
+    const recPrimaryIntent = Array.isArray(intent) ? intent[0] : intent;
+    
+    if (recPrimaryIntent === INTENTS.COURSE_RECOMMENDATION) {
+        studentProfile = await entityExtractionService.extractStudentProfile(normalizedQuestion, historyText);
+        const recQuery = buildRecommendationSearchQuery(studentProfile, activeUser.institution || process.env.PRIMARY_UNIVERSITY_NAME || "Brainware University");
+        console.log(`[COURSE_RECOMMENDATION] Formulated query: "${recQuery}"`);
+        rewrittenQuery = recQuery;
+        activeSubqueries = [recQuery];
+    }
     const resolvedActiveTopic = analysisResult.activeTopic || activeTopic || "";
 
     // Debug logging for development
@@ -562,7 +661,8 @@ User Question: "${rewrittenQuery}"`;
     }
 
     const intentResult = { intent, confidence: 0.9 };
-    const decision = decide({ intent, question: rewrittenQuery });
+    const primaryIntent = Array.isArray(intent) ? intent[0] : intent;
+    const decision = decide({ intent: primaryIntent, question: rewrittenQuery });
 
     // 3. Clarification Handling
     const clarification = clarificationService.checkClarification({
@@ -667,6 +767,8 @@ User Question: "${rewrittenQuery}"`;
         // Perform 3-Tier Sequential Fallback Search Pipeline with Query Decomposition
         const isUniversityRelated = classifyQuestionType(rewrittenQuery, intent) !== QUESTION_TYPES.GENERAL_KNOWLEDGE;
 
+        let qdrantStart = 0;
+
         if (isUniversityRelated) {
             console.log(`[CHAT] Subquery RAG Search with ${activeSubqueries.length} subqueries:`, activeSubqueries);
 
@@ -697,6 +799,18 @@ User Question: "${rewrittenQuery}"`;
             if (/\b(duration|length|period|time|years|semesters|long)\b/i.test(qCombined)) {
                 targetIntents.push("duration");
             }
+            if (/\b(scholarship|scholarships|financial aid)\b/i.test(qCombined)) {
+                targetIntents.push("scholarship");
+            }
+            if (/\b(admission|admissions|apply|application|enroll|enrollment|required documents)\b/i.test(qCombined)) {
+                targetIntents.push("admission");
+            }
+            if (/\b(hostel|accommodation|residence|mess)\b/i.test(qCombined)) {
+                targetIntents.push("hostel");
+            }
+            if (/\b(placement|placements|career|recruitment)\b/i.test(qCombined)) {
+                targetIntents.push("placement");
+            }
             
             if (targetIntents.length === 0) {
                 if (intent === "fees") targetIntents.push("fee");
@@ -709,7 +823,11 @@ User Question: "${rewrittenQuery}"`;
                 faculty: ["faculty details", "faculty members", "professors", "teachers", "teaching staff", "faculty list"],
                 eligibility: ["eligibility criteria", "admission criteria", "eligibility requirements", "admission requirements", "qualification"],
                 HOD: ["HOD", "head of department", "head of computational sciences", "department head", "HOD qualification", "HOD details"],
-                duration: ["duration", "course duration", "duration of course", "course length", "how many years", "semesters"]
+                duration: ["duration", "course duration", "duration of course", "course length", "how many years", "semesters"],
+                scholarship: ["scholarship", "financial aid", "scholarships"],
+                admission: ["admission process", "application", "required documents", "eligibility", "enrollment"],
+                hostel: ["hostel", "accommodation", "residence", "mess"],
+                placement: ["placements", "career", "recruitment", "job opportunities"]
             };
 
             const retrievedResultsByIntent = {};
@@ -717,65 +835,31 @@ User Question: "${rewrittenQuery}"`;
             const docSeenIds = new Set();
             const adminDocumentsSearched = [];
 
-            const validateEvidenceWithLLM = async (tgtIntent, chunks, courseTopic) => {
-                if (!chunks || chunks.length === 0) return [];
-                const candidates = chunks.slice(0, 5);
-                const chunksText = candidates.map((c, idx) => {
-                    return `[Chunk Index: ${idx}]\nDocument: ${c.metadata?.filename || c.metadata?.originalName || "Unknown"}\nContent: ${c.content}`;
-                }).join("\n\n");
-                
-                const systemPrompt = `You are a precise academic data auditor.
-Analyze the provided text chunks and determine if they contain concrete, explicit, and factual evidence for the requested intent: "${tgtIntent}" for the course/subject: "${courseTopic || "general"}".
-
-Validation Rules for Intent "fee":
-- The text must contain actual fee, tuition, payment, or cost details (e.g. monetary amounts in INR/₹, payment rules, fee structures).
-- Do NOT classify general course benefits/features (like "access to modern computer labs", "expert mentorship", "industry projects", "placement assistance") as fees.
-- If a chunk mentions "fee structure" but contains no actual figures, payment details, or rules, it is NOT relevant.
-- Do NOT infer or invent a fee.
-
-Validation Rules for Intent "faculty":
-- The text must contain information about faculty members, professors, teachers, lecturers, teaching staff (e.g., names, profiles, credentials).
-- Do NOT accept general statements about "expert faculty" without names or specific details.
-
-Validation Rules for Intent "eligibility":
-- The text must contain admission criteria, eligibility requirements, minimum marks, or qualifications.
-
-Validation Rules for Intent "HOD":
-- The text must contain details about the HOD (Head of Department), department head, or director (e.g., name, qualification, role).
-
-Validation Rules for Intent "duration":
-- The text must contain the course duration or length (e.g., years, semesters).
-
-For other intents:
-- The text must contain direct, relevant answers to the intent.
-
-Return a JSON array of objects, one for each chunk index, indicating if it is relevant. Format:
-[
-  { "index": 0, "relevant": true, "reason": "Contains actual fee figures." },
-  { "index": 1, "relevant": false, "reason": "Only mentions labs and mentorship, which are benefits, not fees." }
-]
-Return ONLY a valid JSON block, without markdown formatting or backticks.`;
-
-                const userPrompt = `Chunks to audit:\n\n${chunksText}`;
-                
-                try {
-                    const response = await llmService.generateCompletion([
-                        { role: "system", content: "You are a precise JSON evidence auditor." },
-                        { role: "user", content: systemPrompt + "\n\n" + userPrompt }
-                    ], { temperature: 0.1, maxOutputTokens: 300 });
-                    
-                    const cleaned = String(response)
-                        .replace(/```json/g, "")
-                        .replace(/```/g, "")
-                        .trim();
-                    const parsed = JSON.parse(cleaned);
-                    if (Array.isArray(parsed)) {
-                        return parsed;
-                    }
-                } catch (e) {
-                    console.error(`[RAG EVIDENCE AUDIT] Audit failed for intent ${tgtIntent}:`, e.message);
-                }
-                return candidates.map((_, idx) => ({ index: idx, relevant: true, reason: "Fallback (audit failed)" }));
+            // Deterministic evidence validation: avoids an extra LLM request per intent.
+            const validateEvidenceDeterministically = (tgtIntent, chunks) => {
+                if (!Array.isArray(chunks) || chunks.length === 0) return [];
+                const candidates = chunks.slice(0, Number(process.env.RAG_CANDIDATES_TO_VALIDATE) || 6);
+                const patterns = {
+                    fee: /(?:₹|rs\.?|inr|fee|fees|tuition|semester|annual|payment|amount|cost|charge)/i,
+                    faculty: /(?:professor|prof\.?|teacher|lecturer|faculty|staff|designation|qualification)/i,
+                    HOD: /(?:\bhod\b|head of department|department head|director|dean|chairperson)/i,
+                    eligibility: /(?:eligib|criteria|requirement|qualification|minimum marks|admission)/i,
+                    duration: /(?:duration|years?|semesters?|months?)/i,
+                    scholarship: /(?:scholarship|financial aid|grant|stipend)/i,
+                    admission: /(?:admission|application|enroll|enrollment|required documents|apply)/i,
+                    hostel: /(?:hostel|accommodation|residence|mess)/i,
+                    placement: /(?:placement|career|recruitment|job)/i
+                };
+                const pattern = patterns[tgtIntent] || null;
+                return candidates.map((chunk, index) => {
+                    const content = String(chunk.content || "");
+                    const relevant = pattern ? pattern.test(content) : true;
+                    return {
+                        index,
+                        relevant,
+                        reason: relevant ? "Contains relevant evidence keywords." : "No direct evidence for this intent."
+                    };
+                });
             };
 
             for (const targetIntent of targetIntents) {
@@ -787,14 +871,20 @@ Return ONLY a valid JSON block, without markdown formatting or backticks.`;
 
                 console.log(`[RAG INTENT RETRIEVAL] Searching for intent: "${targetIntent}" with expanded query: "${searchQuery}"`);
 
-                let chunks = await SearchManager.searchLocalPdfs(searchQuery, activeUser, 10);
+                qdrantStart = Date.now();
+                let chunks = await SearchManager.searchLocalPdfs(searchQuery, activeUser, Number(process.env.RAG_MAX_CHUNKS_PER_INTENT) || 3);
+                qdrantDuration += Date.now() - qdrantStart;
+                resolvedType = chunks.resolvedType || resolvedType;
+                resolvedDept = chunks.resolvedDept || resolvedDept;
+                retrievalTelemetry = chunks.retrievalTelemetry || retrievalTelemetry;
+
                 let ranked = await RankingEngine.rerankCandidates(searchQuery, chunks, activeUser);
 
                 let validatedChunks = [];
                 let validationDetails = [];
 
                 if (ranked.length > 0) {
-                    const validationResult = await validateEvidenceWithLLM(targetIntent, ranked, entities?.course || resolvedActiveTopic);
+                    const validationResult = validateEvidenceDeterministically(targetIntent, ranked);
                     validationDetails = validationResult;
                     
                     for (const item of validationResult) {
@@ -810,11 +900,17 @@ Return ONLY a valid JSON block, without markdown formatting or backticks.`;
                 if (validatedChunks.length === 0) {
                     console.log(`[RAG INTENT RETRIEVAL] No relevant evidence found for intent "${targetIntent}" in primary search. Searching again...`);
                     const broaderQuery = `${activeUser.institution || ""} ${targetIntent} ${entities?.course || resolvedActiveTopic || ""}`.trim();
-                    let fallbackChunks = await SearchManager.searchLocalPdfs(broaderQuery, activeUser, 10);
+                    qdrantStart = Date.now();
+                    let fallbackChunks = await SearchManager.searchLocalPdfs(broaderQuery, activeUser, Number(process.env.RAG_MAX_CHUNKS_PER_INTENT) || 3);
+                    qdrantDuration += Date.now() - qdrantStart;
+                    resolvedType = fallbackChunks.resolvedType || resolvedType;
+                    resolvedDept = fallbackChunks.resolvedDept || resolvedDept;
+                    retrievalTelemetry = fallbackChunks.retrievalTelemetry || retrievalTelemetry;
+
                     let fallbackRanked = await RankingEngine.rerankCandidates(broaderQuery, fallbackChunks, activeUser);
                     
                     if (fallbackRanked.length > 0) {
-                        const fallbackValidationResult = await validateEvidenceWithLLM(targetIntent, fallbackRanked, entities?.course || resolvedActiveTopic);
+                        const fallbackValidationResult = validateEvidenceDeterministically(targetIntent, fallbackRanked);
                         validationDetails = fallbackValidationResult;
                         
                         for (const item of fallbackValidationResult) {
@@ -841,8 +937,8 @@ Return ONLY a valid JSON block, without markdown formatting or backticks.`;
                     }
                 });
 
-                for (const chunk of validatedChunks) {
-                    if (!docSeenIds.has(chunk.id)) {
+                for (const chunk of validatedChunks.slice(0, Number(process.env.RAG_MAX_CHUNKS_PER_INTENT) || 3)) {
+                    if (!docSeenIds.has(chunk.id) && combinedDocChunks.length < (Number(process.env.RAG_MAX_CHUNKS) || 4)) {
                         docSeenIds.add(chunk.id);
                         combinedDocChunks.push(chunk);
                     }
@@ -867,8 +963,12 @@ Return ONLY a valid JSON block, without markdown formatting or backticks.`;
                 }
             }
 
-            if (combinedDocChunks.length > 0 || groundingInstructions !== "") {
-                console.log(`[CHAT] Tier 1 verified as SUFFICIENT with ${combinedDocChunks.length} chunks.`);
+            const webCrawlingEnabled = process.env.WEB_CRAWLING_ENABLED !== "false";
+            const hasStrongContext = combinedDocChunks.length > 0 && RankingEngine.isConfident(combinedDocChunks);
+
+            if (hasStrongContext || !webCrawlingEnabled) {
+                console.log(`[CHAT] Running RAG search pipeline (Strong context: ${hasStrongContext}, Web crawling enabled: ${webCrawlingEnabled})`);
+                console.log(`[CHAT] Strong institutional context verified with ${combinedDocChunks.length} chunks.`);
 
                 const tempMessages = promptService.buildPromptMessages({
                     question: rewrittenQuery,
@@ -881,7 +981,8 @@ Return ONLY a valid JSON block, without markdown formatting or backticks.`;
                     questionType: QUESTION_TYPES.UNIVERSITY_SPECIFIC,
                     isRepeat,
                     activeTopic: resolvedActiveTopic,
-                    language
+                    language,
+                    studentProfile
                 });
 
                 if (tempMessages.length > 0 && tempMessages[0].role === "system") {
@@ -921,227 +1022,143 @@ Return ONLY a valid JSON block, without markdown formatting or backticks.`;
                     retrievedChunks = combinedDocChunks;
                     activeQuestionType = QUESTION_TYPES.UNIVERSITY_SPECIFIC;
                     sourceLabel = SOURCE_LABELS.UNIVERSITY;
-                    provider = "groq";
+                    provider = process.env.LLM_PROVIDER || "groq";
                     finalMessages = tempMessages;
                 } else {
+                    llmStart = Date.now();
                     let attemptResponse = await llmService.generateCompletion(tempMessages);
-
-                    const performGroundingCheck = async (genAnswer, valChunks) => {
-                        if (!genAnswer || genAnswer.trim() === "") return genAnswer;
-                        if (valChunks.length === 0) return genAnswer;
-                        const chunksText = valChunks.map((c, idx) => {
-                            return `[Source: ${c.metadata?.filename || c.metadata?.originalName}, ChunkId: ${c.id}, DocumentId: ${c.metadata?.documentId}]\nContent: ${c.content}`;
-                        }).join("\n\n");
-                        
-                        const gSystemPrompt = `You are a strict academic verification assistant.
-Your task is to perform an evidence-grounding check on a generated chatbot answer.
-Verify that every factual claim (names, numbers, criteria, etc.) in the answer is directly and explicitly supported by the provided source chunks.
-
-Constraints:
-1. Every factual claim MUST be traceable to a source chunk.
-2. If a sentence in the answer contains any claim that is NOT found in the source chunks (e.g. general knowledge, external information, or inferred facts), you MUST rewrite or edit the answer to remove that ungrounded claim.
-3. If the answer contains a statement like "The fee/faculty/HOD/eligibility information was not found in the Admin documents", that is a valid controlled response and is grounded.
-4. Keep the same structure, tone, and formatting of the answer where possible, only removing or modifying ungrounded parts.
-5. You MUST output the verified answer in the exact same language as the generated answer (e.g. if the answer is in Hindi, output in Hindi; if in Bengali, output in Bengali; if in English, output in English). Do NOT translate the answer to another language.
-
-Output ONLY the verified, grounded answer text. Do not add any introduction, explanation, backticks, or markdown wrappers.`;
-
-                        const gUserPrompt = `Source Chunks:\n${chunksText}\n\nGenerated Answer to verify:\n${genAnswer}`;
-                        try {
-                            const verified = await llmService.generateCompletion([
-                                { role: "system", content: "You are a strict grounding verification assistant." },
-                                { role: "user", content: gSystemPrompt + "\n\n" + gUserPrompt }
-                            ], { temperature: 0.1 });
-                            return String(verified).trim();
-                        } catch (e) {
-                            console.error("[RAG GROUNDING CHECK] Grounding check failed:", e.message);
-                            return genAnswer;
-                        }
-                    };
-
-                    attemptResponse = await performGroundingCheck(attemptResponse, combinedDocChunks);
-
+                    llmDuration += Date.now() - llmStart;
                     textResponse = attemptResponse;
                     retrievedChunks = combinedDocChunks;
                     activeQuestionType = QUESTION_TYPES.UNIVERSITY_SPECIFIC;
                     sourceLabel = SOURCE_LABELS.UNIVERSITY;
-                    provider = "groq";
+                    provider = process.env.LLM_PROVIDER || "groq";
                     finalMessages = tempMessages;
                 }
-            }
+            } else {
+                console.log("[CHAT] Weak institutional context or missing documentation. Falling back to Web Crawler...");
+                const crawledResults = await webCrawlerService.searchAndScrape(rewrittenQuery);
+                internetCount = crawledResults.length;
 
-            // ==========================================
-            // TIER 2: ADMIN-APPROVED WEBSITE URLS (Bypassed for Phase 1 Focus on Admin Documents)
-            // ==========================================
-            if (!textResponse && false) {
-                console.log("[CHAT] Tier 1 insufficient. Evaluating Tier 2 (Crawled Website URLs)...");
-                const combinedSiteChunks = [];
-                const siteSeenIds = new Set();
+                const formattedWeb = crawledResults.map(r => ({
+                    title: r.title,
+                    url: r.url,
+                    snippet: r.extractedContent || r.relevantSnippets || ""
+                }));
 
-                for (const subq of activeSubqueries) {
-                    const subCandidates = await SearchManager.searchApprovedUrls(subq, activeUser, 6);
-                    const subRanked = await RankingEngine.rerankCandidates(subq, subCandidates, activeUser);
-
-                    console.log("\n==================================================");
-                    console.log(`QUERY: ${normalizedQuestion}`);
-                    console.log(`SUBQUERY: ${subq}`);
-                    console.log(`SOURCE: Crawled Website URLs (Tier 2)`);
-                    if (subRanked.length === 0) {
-                        console.log("DOCUMENT: None matched");
-                        console.log("SCORE: 0");
-                        console.log("RERANK SCORE: 0");
-                        console.log("SELECTED CHUNKS: 0");
-                    } else {
-                        subRanked.forEach((chunk, idx) => {
-                            console.log(`DOCUMENT: ${chunk.metadata?.originalName || chunk.metadata?.sourceUrl || "Webpage"}`);
-                            console.log(`SCORE: ${chunk.initialScore ?? chunk.score}`);
-                            console.log(`RERANK SCORE: ${chunk.rerankScore ?? chunk.score}`);
-                            console.log(`SELECTED CHUNKS [${idx + 1}]: ${chunk.content.slice(0, 150).replace(/\n/g, " ")}...`);
-                        });
-                    }
-                    console.log("==================================================\n");
-
-                    const topSubChunks = subRanked.filter(c => c.score >= RankingEngine.SIMILARITY_CONFIDENCE_THRESHOLD);
-                    const selectedForSub = topSubChunks.length > 0 ? topSubChunks.slice(0, 3) : subRanked.slice(0, 2);
-
-                    for (const chunk of selectedForSub) {
-                        if (!siteSeenIds.has(chunk.id)) {
-                            siteSeenIds.add(chunk.id);
-                            combinedSiteChunks.push(chunk);
-                        }
-                    }
-                }
-
-                adminUrlsCount = combinedSiteChunks.length;
-                const maxSiteScore = combinedSiteChunks.length > 0 ? Math.max(...combinedSiteChunks.map(c => c.score)) : 0;
-
-                if (maxSiteScore >= RankingEngine.SIMILARITY_CONFIDENCE_THRESHOLD && combinedSiteChunks.length > 0) {
-                    console.log(`[CHAT] Tier 2 verified as SUFFICIENT with ${combinedSiteChunks.length} chunks.`);
-
-                    const tempMessages = promptService.buildPromptMessages({
-                        question: rewrittenQuery,
-                        intent,
-                        retrievedChunks: [],
-                        universitySiteResults: combinedSiteChunks.map(c => ({
-                            title: c.metadata?.originalName || "Webpage",
-                            url: c.metadata?.sourceUrl || "",
-                            snippet: c.content
-                        })),
-                        webResults: [],
-                        historyText,
-                        user: activeUser,
-                        questionType: QUESTION_TYPES.UNIVERSITY_SPECIFIC,
-                        isRepeat,
-                        activeTopic: resolvedActiveTopic,
-                        language
-                    });
-
-                    if (onChunk) {
-                        textResponse = "STREAMING_PLACEHOLDER";
-                        retrievedChunks = combinedSiteChunks;
-                        activeQuestionType = QUESTION_TYPES.UNIVERSITY_SPECIFIC;
-                        sourceLabel = SOURCE_LABELS.UNIVERSITY;
-                        provider = "groq";
-                        finalMessages = tempMessages;
-                    } else {
-                        const attemptResponse = await llmService.generateCompletion(tempMessages);
-                        textResponse = attemptResponse;
-                        retrievedChunks = combinedSiteChunks;
-                        activeQuestionType = QUESTION_TYPES.UNIVERSITY_SPECIFIC;
-                        sourceLabel = SOURCE_LABELS.UNIVERSITY;
-                        provider = "groq";
-                        finalMessages = tempMessages;
-                    }
-                }
-            }
-
-            // ==========================================
-            // TIER 3: INTERNET SEARCH (Bypassed for Phase 1 Focus on Admin Documents)
-            // ==========================================
-            if (!textResponse && false) {
-                console.log("[CHAT] Tiers 1 & 2 insufficient. Evaluating Tier 3 (Internet Search)...");
-                const combinedWebResults = [];
-                const webSeenUrls = new Set();
-
-                for (const subq of activeSubqueries) {
-                    const internetResults = await SearchManager.searchInternet(subq);
-                    for (const res of internetResults) {
-                        if (res.url && !webSeenUrls.has(res.url)) {
-                            webSeenUrls.add(res.url);
-                            combinedWebResults.push(res);
-                        }
-                    }
-                }
-
-                internetCount = combinedWebResults.length;
-
-                if (combinedWebResults.length > 0) {
-                    const tempMessages = promptService.buildPromptMessages({
-                        question: rewrittenQuery,
-                        intent,
-                        retrievedChunks: [],
-                        universitySiteResults: [],
-                        webResults: combinedWebResults,
-                        historyText,
-                        user: activeUser,
-                        questionType: QUESTION_TYPES.GENERAL_KNOWLEDGE,
-                        isRepeat,
-                        activeTopic: resolvedActiveTopic,
-                        language
-                    });
-
-                    if (onChunk) {
-                        textResponse = "STREAMING_PLACEHOLDER";
-                        webResults = combinedWebResults;
-                        activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
-                        sourceLabel = SOURCE_LABELS.WEB;
-                        provider = "groq";
-                        finalMessages = tempMessages;
-                    } else {
-                        const attemptResponse = await llmService.generateCompletion(tempMessages);
-                        textResponse = attemptResponse;
-                        webResults = combinedWebResults;
-                        activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
-                        sourceLabel = SOURCE_LABELS.WEB;
-                        provider = "groq";
-                        finalMessages = tempMessages;
-                    }
-                }
-            }
-        } else {
-            console.log("[CHAT] General search: Skipping university context, going to Tier 3 directly...");
-            const internetResults = await SearchManager.searchInternet(rewrittenQuery);
-            internetCount = internetResults.length;
-
-            if (internetResults.length > 0) {
                 const tempMessages = promptService.buildPromptMessages({
                     question: rewrittenQuery,
                     intent,
                     retrievedChunks: [],
                     universitySiteResults: [],
-                    webResults: internetResults,
+                    webResults: formattedWeb,
                     historyText,
                     user: activeUser,
                     questionType: QUESTION_TYPES.GENERAL_KNOWLEDGE,
                     isRepeat,
                     activeTopic: resolvedActiveTopic,
-                    language
+                    language,
+                    studentProfile
                 });
 
                 if (onChunk) {
                     textResponse = "STREAMING_PLACEHOLDER";
-                    webResults = internetResults;
+                    webResults = crawledResults;
                     activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
                     sourceLabel = SOURCE_LABELS.WEB;
-                    provider = "groq";
+                    provider = process.env.LLM_PROVIDER || "groq";
                     finalMessages = tempMessages;
                 } else {
+                    llmStart = Date.now();
                     const attemptResponse = await llmService.generateCompletion(tempMessages);
+                    llmDuration += Date.now() - llmStart;
                     textResponse = attemptResponse;
-                    webResults = internetResults;
+                    webResults = crawledResults;
                     activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
                     sourceLabel = SOURCE_LABELS.WEB;
-                    provider = "groq";
+                    provider = process.env.LLM_PROVIDER || "groq";
+                    finalMessages = tempMessages;
+                }
+            }
+        } else {
+            const webCrawlingEnabled = process.env.WEB_CRAWLING_ENABLED !== "false";
+            if (webCrawlingEnabled) {
+                console.log("[CHAT] General search query. Routing directly to Web Crawler...");
+                const crawledResults = await webCrawlerService.searchAndScrape(rewrittenQuery);
+                internetCount = crawledResults.length;
+
+                const formattedWeb = crawledResults.map(r => ({
+                    title: r.title,
+                    url: r.url,
+                    snippet: r.extractedContent || r.relevantSnippets || ""
+                }));
+
+                const tempMessages = promptService.buildPromptMessages({
+                    question: rewrittenQuery,
+                    intent,
+                    retrievedChunks: [],
+                    universitySiteResults: [],
+                    webResults: formattedWeb,
+                    historyText,
+                    user: activeUser,
+                    questionType: QUESTION_TYPES.GENERAL_KNOWLEDGE,
+                    isRepeat,
+                    activeTopic: resolvedActiveTopic,
+                    language,
+                    studentProfile
+                });
+
+                if (onChunk) {
+                    textResponse = "STREAMING_PLACEHOLDER";
+                    webResults = crawledResults;
+                    activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
+                    sourceLabel = SOURCE_LABELS.WEB;
+                    provider = process.env.LLM_PROVIDER || "groq";
+                    finalMessages = tempMessages;
+                } else {
+                    llmStart = Date.now();
+                    const attemptResponse = await llmService.generateCompletion(tempMessages);
+                    llmDuration += Date.now() - llmStart;
+                    textResponse = attemptResponse;
+                    webResults = crawledResults;
+                    activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
+                    sourceLabel = SOURCE_LABELS.WEB;
+                    provider = process.env.LLM_PROVIDER || "groq";
+                    finalMessages = tempMessages;
+                }
+            } else {
+                console.log("[CHAT] General search query (Web Crawling Disabled). Querying LLM directly with empty context...");
+                const tempMessages = promptService.buildPromptMessages({
+                    question: rewrittenQuery,
+                    intent,
+                    retrievedChunks: [],
+                    universitySiteResults: [],
+                    webResults: [],
+                    historyText,
+                    user: activeUser,
+                    questionType: QUESTION_TYPES.GENERAL_KNOWLEDGE,
+                    isRepeat,
+                    activeTopic: resolvedActiveTopic,
+                    language,
+                    studentProfile
+                });
+
+                if (onChunk) {
+                    textResponse = "STREAMING_PLACEHOLDER";
+                    webResults = [];
+                    activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
+                    sourceLabel = SOURCE_LABELS.WEB;
+                    provider = process.env.LLM_PROVIDER || "groq";
+                    finalMessages = tempMessages;
+                } else {
+                    llmStart = Date.now();
+                    const attemptResponse = await llmService.generateCompletion(tempMessages);
+                    llmDuration += Date.now() - llmStart;
+                    textResponse = attemptResponse;
+                    webResults = [];
+                    activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
+                    sourceLabel = SOURCE_LABELS.WEB;
+                    provider = process.env.LLM_PROVIDER || "groq";
                     finalMessages = tempMessages;
                 }
             }
@@ -1203,10 +1220,12 @@ Output ONLY the verified, grounded answer text. Do not add any introduction, exp
         // Call Unified LLM Service if streaming is active
         if (onChunk && finalMessages.length > 0) {
             textResponse = "";
+            llmStart = Date.now();
             textResponse = await llmService.generateStream(finalMessages, (chunk) => {
                 onChunk(chunk);
             }, { signal });
-            provider = "groq";
+            llmDuration += Date.now() - llmStart;
+            provider = process.env.LLM_PROVIDER || "groq";
         }
 
         if (!textResponse) {
@@ -1234,11 +1253,44 @@ Output ONLY the verified, grounded answer text. Do not add any introduction, exp
         }
     }
 
+    // Save to Cache if appropriate
+    const shouldBypassCache = (decision.service === "map" || intent === "travel_route" || intent === "nearby");
+    if (!shouldBypassCache && formatted && formatted.answer) {
+        const cacheCategories = [];
+        if (retrievedChunks && retrievedChunks.length > 0) {
+            retrievedChunks.forEach(c => {
+                if (c.metadata?.category && !cacheCategories.includes(c.metadata.category)) {
+                    cacheCategories.push(c.metadata.category);
+                }
+            });
+        }
+        if (intent && typeof intent === "string") {
+            const cleanIntent = intent.trim().toLowerCase();
+            if (cleanIntent && cleanIntent !== "general_chat" && cleanIntent !== "unknown") {
+                if (!cacheCategories.includes(cleanIntent)) {
+                    cacheCategories.push(cleanIntent);
+                }
+            }
+        }
+        const isDynamic = (activeQuestionType === QUESTION_TYPES.GENERAL_KNOWLEDGE || String(normalizedQuestion).toLowerCase().includes("weather") || String(normalizedQuestion).toLowerCase().includes("today") || String(normalizedQuestion).toLowerCase().includes("current"));
+        const cacheType = resolvedType || detectedType || "all";
+        const cacheDept = resolvedDept || detectedDept || "all";
+        const resolvedQueryMode = (retrievalTelemetry && retrievalTelemetry.queryMode) || queryMode || "targeted";
+        await cacheService.set(normalizedQuestion, formatted, cacheCategories, isDynamic, cacheType, cacheDept, resolvedQueryMode);
+    }
+
+    const responseTimeMs = Date.now() - startedAt;
+    console.log(`[Observability] Cache MISS | Qdrant Search Duration: ${qdrantDuration}ms | Chunks Retrieved: ${adminDocsCount} | LLM Generation Duration: ${llmDuration}ms | Total Response Duration: ${responseTimeMs}ms`);
+    if (retrievalTelemetry) {
+        console.log(`[Retrieval] Mode: ${retrievalTelemetry.queryMode} | Initial K: ${retrievalTelemetry.initialK} | Final K: ${retrievalTelemetry.finalK} | Candidates Before Dedup: ${retrievalTelemetry.candidatesBeforeDedup} | Candidates After Dedup: ${retrievalTelemetry.candidatesAfterDedup} | Final Chunks: ${retrievalTelemetry.finalCandidatesCount} | Tokens: ${retrievalTelemetry.finalTokens}`);
+    }
+
     // DEVELOPMENT DEBUG LOGGING
     if (process.env.NODE_ENV === "development") {
         const totalResults = (retrievedChunks ? retrievedChunks.length : 0) + (webResults ? webResults.length : 0);
         const promptText = finalMessages.map(m => m.content).join("\n");
         const contextLength = promptText ? promptText.length : 0;
+        const estimatedInputTokens = Math.ceil(contextLength / 4);
         
         console.log("\n[CHAT]");
         console.log(normalizedQuestion);
@@ -1253,11 +1305,10 @@ Output ONLY the verified, grounded answer text. Do not add any introduction, exp
         console.log("\n[RERANK]");
         console.log(`Selected Results: ${totalResults}`);
         console.log("\n[LLM]");
-        console.log(`Context Length: ${contextLength}\n`);
+        console.log(`Context Length: ${contextLength} chars (~${estimatedInputTokens} input tokens)\n`);
     }
 
     // 6. Save conversation turn to database
-    const responseTimeMs = Date.now() - startedAt;
     const chat = await conversationService.saveMessageTurn({
         user: activeUser,
         conversationId,

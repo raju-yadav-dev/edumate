@@ -13,6 +13,8 @@ const rerank = async (query, chunks) => {
     }
     
     const lowerQuery = expandedQuery.toLowerCase();
+    const wantsBtech = /\b(b\.?\s*tech|btech|b\s+tech|bachelor of technology)\b/i.test(lowerQuery);
+    const wantsCse = /\b(cse|computer science|computer science and engineering|computer science & engineering)\b/i.test(lowerQuery);
     const queryWords = lowerQuery
         .replace(/[^\w\s]/g, "")
         .split(/\s+/)
@@ -27,6 +29,7 @@ const rerank = async (query, chunks) => {
         const filename = (chunk.metadata?.originalName || chunk.metadata?.filename || "").toLowerCase();
         const category = (chunk.metadata?.category || "").toLowerCase();
         const department = (chunk.metadata?.department || "").toLowerCase();
+        const course = (chunk.metadata?.course || "").toLowerCase();
 
         const initialScore = Number(chunk.score || 0);
         let keywordMatches = 0;
@@ -83,6 +86,15 @@ const rerank = async (query, chunks) => {
             if (content.includes("bca") || content.includes("bachelor of computer applications") || content.includes("eligibility") || content.includes("criteria") || content.includes("requirement")) {
                 domainBoost += 0.30;
             }
+        }
+
+        // 4. Canonical course/department alias boost (e.g. user says B.Tech, document says CSE).
+        if (wantsBtech) {
+            if (course.includes("b.tech") || course.includes("btech") || course.includes("technology")) domainBoost += 0.20;
+            if (department.includes("computer") || department.includes("cse") || content.includes("computer science and engineering") || content.includes("computer science & engineering") || content.includes("\bcse\b")) domainBoost += 0.20;
+        }
+        if (wantsCse && (department.includes("computer") || department.includes("cse") || content.includes("computer science"))) {
+            domainBoost += 0.20;
         }
 
         const rerankScore = initialScore + keywordScore + domainBoost;

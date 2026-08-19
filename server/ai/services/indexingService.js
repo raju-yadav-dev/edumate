@@ -471,6 +471,15 @@ Details: ${item.description}`;
             });
         }
 
+        let academicEntities = [];
+        try {
+            const entityExtractionService = require("./entityExtractionService");
+            academicEntities = await entityExtractionService.extractAcademicMetadata(text);
+            console.log(`[INDEX] Extracted ${academicEntities.length} academic entities/relationships from document text.`);
+        } catch (entityErr) {
+            console.error("[INDEX] Error extracting academic entities:", entityErr.message);
+        }
+
         const charCount = text.length;
         console.log(`[EXTRACT] Completed - characters: ${charCount}`);
         console.log(`[CHUNK] Completed - chunks: ${rawChunks.length}`);
@@ -542,10 +551,15 @@ Details: ${item.description}`;
                     documentId: meta.documentId,
                     content: chunk.content,
                     originalName: meta.originalName,
+                    documentName: meta.documentName,
                     pageNumber: meta.pageNumber,
+                    page: meta.page,
                     category: meta.category,
+                    documentType: meta.documentType,
                     department: isCampusNav ? (chunk.campusMeta?.description || "") : meta.department,
                     institution: meta.institution,
+                    source: meta.source,
+                    academicEntities: academicEntities,
                     uploadedBy: meta.uploadedBy,
                     chunkIndex: index,
                     createdAt: timestamp,
@@ -589,16 +603,39 @@ Details: ${item.description}`;
             await Chunk.deleteMany({ document: documentId });
             const chunkDocs = rawChunks.map((chunk, index) => {
                 const isCampusNav = document.category && document.category.startsWith("campus_navigation");
+                const meta = metadataBuilder.buildMetadata({
+                    documentId: String(documentId),
+                    originalName: document.originalName,
+                    pageNumber: chunk.pageNumber,
+                    category: document.category,
+                    department: document.department,
+                    institution: document.institution,
+                    uploadedBy: String(document.createdBy || "")
+                });
+                
+                if (isCampusNav && chunk.campusMeta) {
+                    meta.sourceType = "campus_navigation";
+                    meta.buildingNumber = chunk.campusMeta.buildingNumber || "";
+                    meta.buildingName = chunk.campusMeta.buildingName || "";
+                    meta.floor = chunk.campusMeta.floor || "";
+                    meta.roomNumber = chunk.campusMeta.roomNumber || "";
+                    meta.department = chunk.campusMeta.description || "";
+                }
                 return {
                     document: documentId,
                     content: chunk.content,
                     embedding: embeddings[index] || [],
                     metadata: {
                         pageNumber: chunk.pageNumber || 1,
+                        page: chunk.pageNumber || 1,
                         originalName: document.originalName || "",
+                        documentName: document.originalName || "",
                         category: document.category || "",
+                        documentType: meta.documentType,
                         institution: document.institution || "",
-                        department: isCampusNav ? (chunk.campusMeta?.description || "") : (document.department || ""),
+                        academicEntities: academicEntities,
+                        department: isCampusNav ? (chunk.campusMeta?.description || "") : meta.department,
+                        source: document.originalName || "",
                         sourceType: isCampusNav ? "campus_navigation" : undefined,
                         buildingNumber: isCampusNav ? (chunk.campusMeta?.buildingNumber || "") : undefined,
                         buildingName: isCampusNav ? (chunk.campusMeta?.buildingName || "") : undefined,
@@ -622,7 +659,8 @@ Details: ${item.description}`;
             pages: pageCount,
             extractedLength: text.length,
             qdrantPoints: pointCount,
-            indexedAt: new Date().toISOString()
+            indexedAt: new Date().toISOString(),
+            academicEntities: academicEntities
         };
         await document.save();
         console.log(`[INDEX] Document completed successfully with ${pointCount} Qdrant vectors`);

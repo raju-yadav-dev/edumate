@@ -21,7 +21,8 @@ const intentRules = [
     { intent: INTENTS.DISTANCE, score: 0.86, pattern: /\b(distance|how far|kilometer|km)\b/i },
     { intent: INTENTS.TRAVEL_COST, score: 0.84, pattern: /\b(fare|travel cost|taxi cost|cab cost)\b/i },
     { intent: INTENTS.ETA, score: 0.84, pattern: /\b(eta|arrival|time to reach|how long)\b/i },
-    { intent: INTENTS.EMERGENCY, score: 0.95, pattern: /\b(emergency|police|ambulance|hospital|urgent|help now)\b/i }
+    { intent: INTENTS.EMERGENCY, score: 0.95, pattern: /\b(emergency|police|ambulance|hospital|urgent|help now)\b/i },
+    { intent: INTENTS.COURSE_RECOMMENDATION, score: 0.96, pattern: /\b(better for me|best for me|should i choose|suits me|what should i study|which course is best|which course is better|which course should i|choose a course|recommend a course)\b|(?:\b(?:score|marks|percent|%|stream|arts|science|commerce|12th|class 12)\b.*\b(?:which|what|better|best|choose|study|suits?)\b)/i }
 ];
 
 const classifyIntent = (question) => {

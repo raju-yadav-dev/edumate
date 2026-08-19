@@ -39,7 +39,7 @@ export default function RouteCard({
                         <span>All routes excluded due to elevated safety risks</span>
                     </div>
                     <p style={{ margin: 0, fontSize: "13px", color: "var(--text-secondary, #475569)", lineHeight: "1.5" }}>
-                        EduMate evaluated the available driving routes and all exceeded the safety thresholds (e.g. active road closures, flood hazards, or high crime incident risks).
+                        EduMate evaluated the available driving routes and all exceeded the safety thresholds (e.g. active road closures, flood hazards, or higher reported incident risks).
                     </p>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "6px" }}>
                         <span style={{ fontSize: "12px", color: "var(--text-tertiary, #94a3b8)" }}>
@@ -329,7 +329,7 @@ export default function RouteCard({
 
                             {/* Aggregated Quick Metrics */}
                             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", fontSize: "12px", color: "var(--text-secondary, #64748b)" }}>
-                                <div>🚨 Crime Risk Level: <b>{getCrimeActivityText(activeRoute.safety.crimeRisk?.score)}</b></div>
+                                <div>🚨 Reported Incident Risk: <b>{getCrimeActivityText(activeRoute.safety.crimeRisk?.score)}</b></div>
                                 <div>🚧 Physical Hazards: <b>{
                                     (activeRoute.safety.physicalHazards?.flood || 0) +
                                     (activeRoute.safety.physicalHazards?.construction || 0) +
@@ -357,7 +357,7 @@ export default function RouteCard({
                                     
                                     {activeRoute.safety.crimeRisk?.status === "AVAILABLE" ? (
                                         <div style={{ paddingLeft: "8px" }}>
-                                            • 📊 Crime incident activity near route: <b>{getCrimeActivityText(activeRoute.safety.crimeRisk.score)}</b> (Risk score: {activeRoute.safety.crimeRisk.score || 0}/100)
+                                            • 📊 Reported incident activity near route: <b>{getCrimeActivityText(activeRoute.safety.crimeRisk.score)}</b> (Risk score: {activeRoute.safety.crimeRisk.score || 0}/100)
                                             <br />
                                             • 📍 Verified incidents within safety radius: <b>{activeRoute.safety.crimeRisk.incidentCount || 0}</b>
                                             <br />
@@ -367,7 +367,7 @@ export default function RouteCard({
                                         </div>
                                     ) : (
                                         <div style={{ color: "#d97706", paddingLeft: "8px" }}>
-                                            • ⚠️ Crime data unavailable: <b>No verified geospatial crime data source is configured.</b>
+                                            • ⚠️ Incident data unavailable: <b>No verified geospatial incident data source is configured.</b>
                                         </div>
                                     )}
 

@@ -1,4 +1,5 @@
 const llmService = require("./llmService");
+const queryOptimizer = require("./queryOptimizationService");
 
 /**
  * Rewrite the user query based on conversational context to be standalone
@@ -188,10 +189,11 @@ const getAmbiguousClarification = (question, historyText) => {
  * @param {string} params.question
  * @param {string} params.historyText
  * @param {Object} params.conversationContext
+ * @param {Object} params.user
  * @returns {Promise<Object>} - { rewrittenQuery, activeTopic, intent, entities, isRepeat, subqueries, conversationContext, clarificationPrompt }
  */
-const analyzeQuery = async ({ question, historyText, conversationContext }) => {
-    let conversationContextRes = conversationContext || {
+const analyzeQuery = async ({ question, historyText, conversationContext, user }) => {
+    let context = conversationContext || {
         currentTopic: null,
         currentEntity: null,
         currentIntent: null,
@@ -201,171 +203,191 @@ const analyzeQuery = async ({ question, historyText, conversationContext }) => {
         lastRetrievedSources: []
     };
 
-    // Explicit Topic Overrides
-    const lowerQ = question.toLowerCase();
-    let explicitTopic = null;
-    if (/\b(bca|b\.c\.a)\b/i.test(lowerQ)) {
-        explicitTopic = "BCA";
-    } else if (/\b(b\.?tech|btech|b\s*tech)\b/i.test(lowerQ)) {
-        explicitTopic = "B.Tech";
-    } else if (/\b(bba|b\.b\.a)\b/i.test(lowerQ)) {
-        explicitTopic = "BBA";
-    } else if (/\b(b\.?sc|bsc|b\s*sc)\b/i.test(lowerQ)) {
-        explicitTopic = "B.Sc";
-    } else if (/\b(css|computational sciences)\b/i.test(lowerQ)) {
-        explicitTopic = "CSS department";
+    const originalQuestion = String(question || "").trim();
+    const heuristicRewritten = queryOptimizer.resolveReferences(originalQuestion, context);
+    const intents = queryOptimizer.detectIntents(originalQuestion);
+    const topic = queryOptimizer.canonicalTopic(originalQuestion, context) || context.currentTopic || "";
+
+    if (topic) {
+        context.currentTopic = topic;
+        context.currentEntity = topic;
     }
 
-    if (explicitTopic) {
-        conversationContextRes.currentTopic = explicitTopic;
-        conversationContextRes.currentEntity = explicitTopic;
+    // Keep department context stable for follow-up HOD/location questions.
+    const departmentMatch = originalQuestion.match(/\b(?:department of|dept of|department)\s+([A-Za-z][A-Za-z &-]{2,50})/i);
+    if (departmentMatch) context.mentionedDepartment = departmentMatch[1].trim();
+    if (/\bcse\b/i.test(originalQuestion)) context.mentionedDepartment = "CSE";
+
+    // 1. Fetch dynamic academic metadata from institutional documents database
+    let academicEntities = [];
+    try {
+        const Document = require("../../models/Document");
+        const queryFilter = {
+            status: "active",
+            embeddingStatus: "indexed"
+        };
+        if (user && user.institution) {
+            queryFilter.institution = user.institution;
+        }
+        const docs = await Document.find(queryFilter).lean();
+        docs.forEach(doc => {
+            if (doc.metadata && Array.isArray(doc.metadata.academicEntities)) {
+                doc.metadata.academicEntities.forEach(ent => {
+                    academicEntities.push(ent);
+                });
+            }
+        });
+    } catch (dbErr) {
+        console.error("[QueryRewriter] Failed to load academic entities:", dbErr.message);
     }
 
-    const activeTopic = conversationContextRes.currentTopic || "";
+    // 2. Check for degree query ambiguity (e.g. asking "What is the B.Tech fee?" when multiple programmes exist)
+    const queryLower = originalQuestion.toLowerCase();
+    let matchedDegree = null;
+    let matchedDegreeEntities = [];
+    
+    academicEntities.forEach(ent => {
+        const deg = ent.degree ? ent.degree.trim() : "";
+        if (!deg) return;
+        
+        const degLower = deg.toLowerCase();
+        const degAliases = Array.isArray(ent.aliases) ? ent.aliases.map(a => a.toLowerCase()) : [];
+        
+        const matchesDegree = new RegExp(`\\b${degLower.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}\\b`, "i").test(queryLower) ||
+                              degAliases.some(a => new RegExp(`\\b${a.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}\\b`, "i").test(queryLower));
+                              
+        if (matchesDegree) {
+            matchedDegree = deg;
+            matchedDegreeEntities.push(ent);
+        }
+    });
 
-    // 1. Ambiguity clarification check
-    let clarificationPromptRes = getAmbiguousClarification(question, historyText);
+    if (matchedDegreeEntities.length > 0) {
+        let queryMentionsSpecificProgramme = false;
+        const uniqueProgrammes = [];
+        const seenProgrammes = new Set();
+        
+        matchedDegreeEntities.forEach(ent => {
+            const prog = ent.programme || ent.department || ent.course;
+            if (prog && !seenProgrammes.has(prog.toLowerCase())) {
+                seenProgrammes.add(prog.toLowerCase());
+                uniqueProgrammes.push(prog);
+            }
+        });
 
-    // 2. Perform local heuristic rewriting
-    const heuristicRewritten = resolveHeuristicReferences(question, conversationContextRes);
+        // Check if query mentions any specific programme details or aliases
+        for (const ent of matchedDegreeEntities) {
+            const prog = ent.programme ? ent.programme.toLowerCase() : "";
+            const dept = ent.department ? ent.department.toLowerCase() : "";
+            const course = ent.course ? ent.course.toLowerCase() : "";
+            const aliases = Array.isArray(ent.aliases) ? ent.aliases.map(a => a.toLowerCase()) : [];
+            
+            const matches = (prog && queryLower.includes(prog)) ||
+                            (dept && queryLower.includes(dept)) ||
+                            (course && queryLower.includes(course)) ||
+                            aliases.some(a => queryLower.includes(a));
+                            
+            if (matches) {
+                queryMentionsSpecificProgramme = true;
+                break;
+            }
+        }
 
-    const systemPrompt = `You are a precise conversational analyzer for an academic assistant chatbot at a university.
-Analyze the user's question, the conversation history, and the previous conversation context.
-Identify the following and return ONLY a valid JSON object:
+        // If there are multiple programmes under this degree and user didn't specify one, ask a clarification question
+        if (uniqueProgrammes.length > 1 && !queryMentionsSpecificProgramme) {
+            const displayNames = uniqueProgrammes.map(progName => {
+                const ent = matchedDegreeEntities.find(e => e.programme === progName);
+                return ent.department || ent.course || ent.programme;
+            });
+            const uniqueDisplayNames = Array.from(new Set(displayNames)).filter(Boolean);
+            
+            if (uniqueDisplayNames.length > 1) {
+                const listStr = uniqueDisplayNames.slice(0, -1).join(", ") + " or " + uniqueDisplayNames.slice(-1);
+                const dynamicClarification = `Which ${matchedDegree} programme do you mean — ${listStr}?`;
+                
+                return {
+                    activeTopic: matchedDegree,
+                    rewrittenQuery: heuristicRewritten,
+                    intent: intents.length === 1 ? intents[0] : intents,
+                    entities: {
+                        course: matchedDegree,
+                        department: null
+                    },
+                    isRepeat: false,
+                    subqueries: [heuristicRewritten],
+                    conversationContext: context,
+                    clarificationPrompt: dynamicClarification
+                };
+            }
+        }
+    }
 
-1. "conversationContext": Update the conversation context object. Rules:
-   - "currentTopic": The current active topic (e.g. "BCA", "B.Tech", "hostel", "placement", "library"). If the user mentions a new course/subject/facility, switch to it. If the user asks a follow-up (e.g., "What is the fee?", "what about eligibility?"), retain the previous topic. If the topic switches to a non-academic topic (e.g. "library"), clear course/department to null.
-   - "currentEntity": Specific entity being discussed (e.g., "BCA course", "library building").
-   - "currentIntent": Active intent.
-   - "mentionedDepartment": Any department mentioned, or null.
-   - "mentionedCollege": Any college/university mentioned, or null.
-   - "lastRelevantDocument": Maintain or update based on conversation.
-   - "lastRetrievedSources": Keep or update.
-   - "selectedRouteNumber": If user specifies a route (e.g., "second route", "Route 2", "1st route"), set to that integer (e.g. 2, 1). Keep for follow-ups on same route. Set to null if a new routing request starts.
-   - "routeStart": Object { "lat": number, "lng": number, "name": string } of the origin coordinates, or null.
-   - "routeDestination": Object { "lat": number, "lng": number, "name": string } of the destination coordinates, or null.
-
-2. "clarificationPrompt": If there is ambiguity because multiple topics/courses are active in the context (e.g., user said "Tell me about BCA and B.Tech" and then asks "What is the fee?"), set this to a string asking the user for clarification (e.g., "Do you mean the BCA fee or B.Tech fee?"). If there is no ambiguity, set to null.
-
-3. "activeTopic": The current active topic string (value of conversationContext.currentTopic).
-
-4. "rewrittenQuery": Rewrite the user's question to be standalone, descriptive, and optimized for search. Explicitly resolve all pronouns/references ("it", "this", "the fee", "its eligibility", "the department", "the HOD", "second route", "how long will it take") using the conversationContext.
-   - Example 1: Context topic "BCA". Question: "What is the fee?" -> "What is the BCA course fee structure?"
-   - Example 2: Context topic "BCA department". Question: "Who is the HOD?" -> "Who is the HOD of the BCA department?"
-   - Example 3: Context route "Shyamnagar to Brainware University". Question: "Show the second route." -> "Show the second route from Shyamnagar to Brainware University"
-   - Example 4: Context route "Shyamnagar to Brainware University", selectedRouteNumber 2. Question: "How long does it take?" -> "What is the travel time of Route 2 from Shyamnagar to Brainware University?"
-
-5. "intent": Classify the intent into one of these exact lowercase values:
-   ["greeting", "admission", "fees", "scholarship", "hostel", "library", "faculty", "placement", "departments", "courses", "events", "academic_calendar", "document_question", "announcement", "nearby_places", "location", "travel_route", "transport", "distance", "travel_cost", "eta", "emergency", "general_chat"]
-
-6. "entities": Extract any key entities matching this structure:
-   {
-     "course": "e.g., B.Pharm, BCA, or null",
-     "department": "e.g., Computer Science, or null",
-     "location": "e.g., Boys Hostel, or null",
-     "institution": "e.g., Heritage, or null"
-   }
-
-7. "isRepeat": A boolean indicating if the user is asking the exact same question.
-
-8. "subqueries": If multi-part, decompose into 2 to 4 subqueries. Otherwise, return a 1-element array with rewrittenQuery.
-
-Return ONLY a valid JSON block, without markdown formatting or backticks.`;
-
-    const userPrompt = `Previous Conversation Context:
-${JSON.stringify(conversationContextRes, null, 2)}
-
-Conversation History:
-${historyText || "No prior history"}
-
-User Question: "${heuristicRewritten}"`;
-
-    let activeTopicRes = activeTopic || "";
-    let rewrittenQueryRes = heuristicRewritten;
-    let intentRes = "general_chat";
-    let entitiesRes = {};
-    let isRepeatRes = false;
-    let subqueriesRes = [];
-
-    // If clarification is already heuristically detected, we don't need to ask the LLM
-    if (clarificationPromptRes) {
+    // Resolve obvious ambiguity without an LLM.
+    const clarificationPrompt = getAmbiguousClarification(originalQuestion, historyText);
+    if (clarificationPrompt) {
         return {
-            activeTopic: activeTopicRes,
-            rewrittenQuery: rewrittenQueryRes,
-            intent: "general_chat",
-            entities: {},
+            activeTopic: topic,
+            rewrittenQuery: heuristicRewritten,
+            intent: intents.length === 1 ? intents[0] : intents,
+            entities: {
+                course: topic || null,
+                department: context.mentionedDepartment || null
+            },
             isRepeat: false,
-            subqueries: [rewrittenQueryRes],
-            conversationContext: conversationContextRes,
-            clarificationPrompt: clarificationPromptRes
+            subqueries: [heuristicRewritten],
+            conversationContext: context,
+            clarificationPrompt
         };
     }
 
-    try {
-        const response = await llmService.generateCompletion([
-            { role: "system", content: "You are a precise JSON query analyzer." },
-            { role: "user", content: systemPrompt + "\n\n" + userPrompt }
-        ], { temperature: 0.1, maxOutputTokens: 500 });
-
-        const cleaned = String(response)
-            .replace(/```json/g, "")
-            .replace(/```/g, "")
-            .trim();
-        const parsed = JSON.parse(cleaned);
-
-        activeTopicRes = parsed.activeTopic || parsed.conversationContext?.currentTopic || activeTopic || "";
-        rewrittenQueryRes = parsed.rewrittenQuery || heuristicRewritten;
-        intentRes = parsed.intent || "general_chat";
-        entitiesRes = parsed.entities || {};
-        isRepeatRes = !!parsed.isRepeat;
-        clarificationPromptRes = parsed.clarificationPrompt || null;
-        if (parsed.conversationContext) {
-            conversationContextRes = parsed.conversationContext;
-        }
-        if (Array.isArray(parsed.subqueries) && parsed.subqueries.length > 0) {
-            subqueriesRes = parsed.subqueries.map(s => String(s).trim()).filter(Boolean);
-        }
-    } catch (e) {
-        console.error("Query analysis failed, falling back:", e.message);
-        // Fallback to our heuristic rewriting
-        rewrittenQueryRes = heuristicRewritten;
-    }
-
-    // Heuristic Subquery Decomposition Fallback if subqueries array is empty
-    if (subqueriesRes.length === 0) {
-        const lowerRewritten = rewrittenQueryRes.toLowerCase();
-        const detectedTopic = entitiesRes.course || activeTopicRes || (lowerRewritten.includes("bca") ? "BCA" : "");
-        const fallbackSubs = [];
-
-        if (lowerRewritten.includes("course") || lowerRewritten.includes("overview") || lowerRewritten.includes("eligibility") || lowerRewritten.includes("programme")) {
-            fallbackSubs.push(`${detectedTopic} course details overview eligibility`.trim());
-        }
-        if (lowerRewritten.includes("fee") || lowerRewritten.includes("cost") || lowerRewritten.includes("tuition") || lowerRewritten.includes("charge")) {
-            fallbackSubs.push(`${detectedTopic} fee structure tuition fees`.trim());
-        }
-        if (lowerRewritten.includes("faculty") || lowerRewritten.includes("faculties") || lowerRewritten.includes("teacher") || lowerRewritten.includes("professor") || lowerRewritten.includes("staff") || lowerRewritten.includes("hod") || lowerRewritten.includes("head") || lowerRewritten.includes("dean") || lowerRewritten.includes("director") || lowerRewritten.includes("coordinator")) {
-            const deptExt = (detectedTopic.toUpperCase().includes("BCA") || lowerRewritten.includes("bca") || lowerRewritten.includes("css")) 
-                ? "Department of Computational Sciences faculty" 
-                : "faculty members";
-            fallbackSubs.push(`${detectedTopic} ${deptExt}`.trim());
-        }
-
-        if (fallbackSubs.length > 1) {
-            subqueriesRes = fallbackSubs;
-        } else {
-            subqueriesRes = [rewrittenQueryRes];
+    // Optional LLM reference resolution
+    if (process.env.ENABLE_LLM_QUERY_ANALYSIS === "true" && queryOptimizer.shouldUseLLMForReferenceResolution(originalQuestion, context)) {
+        try {
+            const response = await llmService.generateCompletion([
+                { role: "system", content: "Rewrite the user's follow-up into one short standalone search query. Output only the query." },
+                { role: "user", content: `Context topic: ${context.currentTopic || "none"}\nDepartment: ${context.mentionedDepartment || "none"}\nQuestion: ${originalQuestion}` }
+            ], { temperature: 0, maxOutputTokens: 60 });
+            if (response && response.trim()) {
+                const cleaned = response.trim().replace(/^"|"$/g, "");
+                context.currentTopic = topic || context.currentTopic;
+                return {
+                    activeTopic: context.currentTopic || "",
+                    rewrittenQuery: queryOptimizer.expandAliases(cleaned, { ...context, academicEntities }),
+                    intent: intents.length === 1 ? intents[0] : intents,
+                    entities: { course: topic || null, department: context.mentionedDepartment || null },
+                    isRepeat: false,
+                    subqueries: queryOptimizer.buildSubqueries(cleaned, intents, { ...context, academicEntities }),
+                    conversationContext: context,
+                    clarificationPrompt: null
+                };
+            }
+        } catch (error) {
+            console.warn("Optional LLM query analysis failed; using deterministic analysis:", error.message);
         }
     }
+
+    const rewrittenQuery = queryOptimizer.expandAliases(heuristicRewritten, { ...context, academicEntities });
+    const subqueries = queryOptimizer.buildSubqueries(rewrittenQuery, intents, { ...context, academicEntities });
+    const intent = intents.length === 1 ? intents[0] : intents;
+    const entities = {
+        course: /\b(bca|b\.c\.a)\b/i.test(originalQuestion) ? "BCA" : /\b(b\.?\s*tech|btech|b\s+tech)\b/i.test(originalQuestion) ? "B.Tech" : null,
+        department: context.mentionedDepartment || (/\b(cse|computer science)\b/i.test(originalQuestion) ? "CSE" : null),
+        location: null,
+        institution: null
+    };
+
+    context.currentIntent = intent;
+    context.lastRelevantSources = context.lastRelevantSources || [];
 
     return {
-        activeTopic: activeTopicRes,
-        rewrittenQuery: rewrittenQueryRes,
-        intent: intentRes,
-        entities: entitiesRes,
-        isRepeat: isRepeatRes,
-        subqueries: subqueriesRes,
-        conversationContext: conversationContextRes,
-        clarificationPrompt: clarificationPromptRes
+        activeTopic: context.currentTopic || "",
+        rewrittenQuery,
+        intent,
+        entities,
+        isRepeat: false,
+        subqueries,
+        conversationContext: context,
+        clarificationPrompt: null
     };
 };
 

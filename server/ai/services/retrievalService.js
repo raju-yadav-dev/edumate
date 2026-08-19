@@ -1,5 +1,6 @@
 const { client, collectionName } = require("../config/qdrant");
 const AI_CONSTANTS = require("../constants/aiConstants");
+const { detectTypeAndDepartment } = require("../utils/queryParser");
 
 /**
  * Builds Qdrant's nested filter format from flat metadata parameters
@@ -120,11 +121,106 @@ const Chunk = require("../../models/Chunk");
  * @param {number} [params.limit=AI_CONSTANTS.DEFAULT_RETRIEVAL_LIMIT]
  * @returns {Promise<Array<Object>>}
  */
+const evaluateRetrievalCoverage = ({ chunks, mode, currentK, maxK }) => {
+    if (currentK >= maxK) {
+        return { shouldExpand: false, reason: "Max K limit reached" };
+    }
+    if (chunks.length === 0) {
+        return { shouldExpand: false, reason: "No chunks found" };
+    }
+
+    const topScore = Math.max(...chunks.map(c => c.score));
+    
+    // If the top score is extremely low, do not expand further (no useful semantic signals)
+    if (topScore < 0.35) {
+        return { shouldExpand: false, reason: "Relevance score too low" };
+    }
+
+    // Filter chunks with reasonable similarity (relevance threshold)
+    const relevantChunks = chunks.filter(c => c.score >= 0.40);
+    if (relevantChunks.length === 0) {
+        return { shouldExpand: false, reason: "No relevant chunks above threshold" };
+    }
+
+    // 1. TARGETED queries
+    if (mode === "TARGETED") {
+        const strongMatches = chunks.filter(c => c.score >= 0.60);
+        if (strongMatches.length >= 1 || relevantChunks.length >= 3) {
+            return { shouldExpand: false, reason: "Targeted query sufficiently answered by strong matches" };
+        }
+    }
+
+    // 2. EXPLANATION / MULTI_PART queries
+    if (mode === "EXPLANATION" || mode === "MULTI_PART") {
+        if (relevantChunks.length >= currentK) {
+            const docIds = new Set(relevantChunks.map(c => c.metadata?.documentId));
+            if (docIds.size === 1 && relevantChunks.length >= 4) {
+                return { shouldExpand: false, reason: "Explanation query covered by a single document" };
+            }
+        }
+    }
+
+    // 3. COMPREHENSIVE_LIST / COMPLETE_DATASET
+    if (mode === "COMPREHENSIVE_LIST" || mode === "COMPLETE_DATASET") {
+        const lowestScore = chunks[chunks.length - 1]?.score || 0;
+        if (lowestScore < 0.45) {
+            return { shouldExpand: false, reason: "Comprehensive list coverage limit reached (relevance tail dropped)" };
+        }
+        return { shouldExpand: true, reason: "Comprehensive list requires maximum coverage" };
+    }
+
+    if (chunks.length < currentK) {
+        return { shouldExpand: false, reason: "No more matches available in database" };
+    }
+
+    return { shouldExpand: true, reason: "Default expansion criteria" };
+};
+
+const jaccardDeduplicate = (chunks) => {
+    const getWordSet = (text) => new Set(text.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(w => w.length > 2));
+    
+    const unique = [];
+    const wordSets = [];
+
+    for (const chunk of chunks) {
+        const wordSet = getWordSet(chunk.content);
+        let isDuplicate = false;
+
+        for (let i = 0; i < unique.length; i++) {
+            const existingSet = wordSets[i];
+            
+            let intersectionSize = 0;
+            for (const word of wordSet) {
+                if (existingSet.has(word)) {
+                    intersectionSize++;
+                }
+            }
+            const unionSize = wordSet.size + existingSet.size - intersectionSize;
+            const jaccard = unionSize > 0 ? intersectionSize / unionSize : 0;
+
+            if (jaccard >= 0.70) {
+                isDuplicate = true;
+                if (chunk.score > unique[i].score) {
+                    unique[i] = chunk;
+                    wordSets[i] = wordSet;
+                }
+                break;
+            }
+        }
+
+        if (!isDuplicate) {
+            unique.push(chunk);
+            wordSets.push(wordSet);
+        }
+    }
+
+    return unique;
+};
+
 const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL_LIMIT, ignoreInstitution = false, filter = null }) => {
     let semanticCandidates = [];
     let keywordCandidates = [];
 
-    // Expand abbreviations for better matching
     let expandedQuestion = question;
     if (/\bcss\b/i.test(expandedQuestion)) {
         expandedQuestion = expandedQuestion.replace(/\bcss\b/gi, "computational sciences");
@@ -135,14 +231,37 @@ const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL
         console.log(`[RAG DEBUG] Expanded query: "${expandedQuestion}"`);
     }
 
-    // 1. Vector/Semantic Search (fetch more candidates e.g. limit * 3 or 50)
+    const { documentType: detectedType, department: detectedDept } = detectTypeAndDepartment(expandedQuestion);
+    console.log(`[RAG DEBUG] Query Analysis - Detected Type: "${detectedType || 'none'}", Detected Dept: "${detectedDept || 'none'}"`);
+
+    const { detectQueryMode } = require("../utils/queryParser");
+    const queryMode = detectQueryMode(expandedQuestion);
+    console.log(`[RAG DEBUG] Query Analysis - Detected Retrieval Mode: "${queryMode}"`);
+
+    const initialKTargeted = Number(process.env.RAG_INITIAL_K_TARGETED) || 3;
+    const initialKExplanation = Number(process.env.RAG_INITIAL_K_EXPLANATION) || 5;
+    const initialKList = Number(process.env.RAG_INITIAL_K_LIST) || 8;
+    const maxK = Number(process.env.RAG_MAX_K) || 15;
+
+    let initialK = initialKTargeted;
+    if (queryMode === "EXPLANATION" || queryMode === "MULTI_PART") {
+        initialK = initialKExplanation;
+    } else if (queryMode === "COMPREHENSIVE_LIST" || queryMode === "COMPLETE_DATASET") {
+        initialK = initialKList;
+    }
+
+    let currentK = initialK;
+    let usedType = undefined;
+    let usedDept = undefined;
+    let usedFilter = undefined;
+    let attemptsCount = 0;
+
     try {
         const queryEmbedding = await embeddingService.getQueryEmbedding(expandedQuestion);
         
-        // Construct robust Qdrant nested filter (active university ONLY, no department)
-        const must = [];
+        const baseMust = [];
         if (user?.institution && !ignoreInstitution) {
-            must.push({
+            baseMust.push({
                 should: [
                     { key: "institution", match: { value: user.institution } },
                     { key: "institution", match: { value: "all" } },
@@ -152,26 +271,98 @@ const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL
             });
         }
         if (filter && filter.sourceType) {
-            must.push({ key: "sourceType", match: { value: filter.sourceType } });
+            baseMust.push({ key: "sourceType", match: { value: filter.sourceType } });
         }
 
-        const qdrantFilter = must.length > 0 ? { must } : undefined;
-        semanticCandidates = await retrieveRelevantChunks({ 
-            queryEmbedding, 
-            limit: Math.max(limit * 3, 50), 
-            filter: qdrantFilter, 
-            isRawFilter: true 
-        });
+        const buildLevelFilter = (type, dept) => {
+            const must = [...baseMust];
+            if (type) {
+                must.push({ key: "documentType", match: { value: type } });
+            }
+            if (dept) {
+                must.push({ key: "department", match: { value: dept } });
+            }
+            return must.length > 0 ? { must } : undefined;
+        };
+
+        const levels = [];
+        if (detectedType && detectedDept) {
+            levels.push({ name: "Level 1 (Type + Department)", filter: buildLevelFilter(detectedType, detectedDept), type: detectedType, dept: detectedDept });
+            levels.push({ name: "Level 2 (Type only)", filter: buildLevelFilter(detectedType, undefined), type: detectedType, dept: undefined });
+            levels.push({ name: "Level 3 (Broad Search)", filter: buildLevelFilter(undefined, undefined), type: undefined, dept: undefined });
+        } else if (detectedType) {
+            levels.push({ name: "Level 1 (Type only)", filter: buildLevelFilter(detectedType, undefined), type: detectedType, dept: undefined });
+            levels.push({ name: "Level 2 (Broad Search)", filter: buildLevelFilter(undefined, undefined), type: undefined, dept: undefined });
+        } else if (detectedDept) {
+            levels.push({ name: "Level 1 (Department only)", filter: buildLevelFilter(undefined, detectedDept), type: undefined, dept: detectedDept });
+            levels.push({ name: "Level 2 (Broad Search)", filter: buildLevelFilter(undefined, undefined), type: undefined, dept: undefined });
+        } else {
+            levels.push({ name: "Level 1 (Broad Search)", filter: buildLevelFilter(undefined, undefined), type: undefined, dept: undefined });
+        }
+
+        while (currentK <= maxK) {
+            attemptsCount++;
+            console.log(`[RAG DEBUG] Starting Adaptive Retrieval iteration ${attemptsCount} with K = ${currentK}`);
+
+            let foundSufficientLevel = false;
+            for (const lvl of levels) {
+                console.log(`[RAG DEBUG] Attempting vector search at level: "${lvl.name}" (Limit: ${currentK})`);
+                const qdrantFilter = lvl.filter;
+                semanticCandidates = await retrieveRelevantChunks({ 
+                    queryEmbedding, 
+                    limit: currentK, 
+                    filter: qdrantFilter, 
+                    isRawFilter: true 
+                });
+
+                const hasSufficient = semanticCandidates.length > 0 && Math.max(...semanticCandidates.map(c => c.score)) >= 0.35;
+                if (hasSufficient) {
+                    console.log(`[RAG DEBUG] Vector search succeeded at "${lvl.name}" with top score: ${Math.max(...semanticCandidates.map(c => c.score))}`);
+                    usedType = lvl.type;
+                    usedDept = lvl.dept;
+                    usedFilter = lvl.filter;
+                    foundSufficientLevel = true;
+                    break;
+                } else {
+                    console.log(`[RAG DEBUG] Insufficient results at "${lvl.name}". Scope broadening...`);
+                }
+            }
+
+            if (!foundSufficientLevel && levels.length > 1) {
+                console.log(`[RAG DEBUG] Standard fallback: running Broad Search as last resort (Limit: ${currentK})`);
+                const lastLvl = levels[levels.length - 1];
+                semanticCandidates = await retrieveRelevantChunks({ 
+                    queryEmbedding, 
+                    limit: currentK, 
+                    filter: lastLvl.filter, 
+                    isRawFilter: true 
+                });
+                usedType = lastLvl.type;
+                usedDept = lastLvl.dept;
+                usedFilter = lastLvl.filter;
+            }
+
+            const evaluation = evaluateRetrievalCoverage({ chunks: semanticCandidates, mode: queryMode, currentK, maxK });
+            console.log(`[RAG DEBUG] Adaptive Evaluation - Mode: ${queryMode}, Current K: ${currentK}, Action: ${evaluation.shouldExpand ? 'EXPAND' : 'STOP'}, Reason: ${evaluation.reason}`);
+
+            if (!evaluation.shouldExpand) {
+                break;
+            }
+
+            currentK = Math.min(currentK + 3, maxK + 1);
+            if (currentK > maxK) {
+                break;
+            }
+        }
+
     } catch (vectorErr) {
         console.error("[Retrieval Service] Semantic search failed:", vectorErr.message);
     }
 
-    // 2. Keyword/Lexical Search (fetch up to 50 candidates)
     try {
         const cleanQuery = question.toLowerCase().replace(/[^a-z0-9\s]/g, " ").trim();
         const words = cleanQuery.split(/\s+/).filter(w => w.length > 1);
         
-        // Define a comprehensive stop words list
         const stopWords = new Set([
             "give", "details", "about", "what", "is", "the", "for", "tell", "me", "show", 
             "how", "course", "program", "programme", "who", "where", "when", "why", "which",
@@ -181,7 +372,6 @@ const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL
         ]);
         let keywords = words.filter(w => !stopWords.has(w));
 
-        // Domain term expansion for faculty / departments
         if (cleanQuery.includes("faculty") || cleanQuery.includes("faculties") || cleanQuery.includes("teacher") || cleanQuery.includes("professor") || cleanQuery.includes("hod")) {
             if (cleanQuery.includes("bca") || cleanQuery.includes("computational") || cleanQuery.includes("computer") || cleanQuery.includes("css")) {
                 if (!keywords.includes("computational")) keywords.push("computational");
@@ -196,7 +386,6 @@ const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL
                 return new RegExp(`\\b${escaped}\\b`, "i");
             });
 
-            // Match chunks containing at least one keyword
             const mustConditions = [
                 { $or: regexes.map(r => ({ content: r })) }
             ];
@@ -213,11 +402,22 @@ const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL
                 });
             }
 
+            if (usedType) {
+                mustConditions.push({
+                    $or: [
+                        { "metadata.category": usedType },
+                        { "metadata.documentType": usedType }
+                    ]
+                });
+            }
+            if (usedDept) {
+                mustConditions.push({ "metadata.department": usedDept });
+            }
+
             const mongoQuery = { $and: mustConditions };
             const matchedChunks = await Chunk.find(mongoQuery).limit(50).lean();
 
             keywordCandidates = matchedChunks.map(c => {
-                // Calculate density overlap score (0 to 1)
                 let matches = 0;
                 const contentLower = c.content.toLowerCase();
                 keywords.forEach(kw => {
@@ -226,7 +426,7 @@ const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL
                     }
                 });
                 const densityScore = matches / keywords.length;
-                const score = 0.35 + (densityScore * 0.15); // Base score of 0.35 + density boost
+                const score = 0.35 + (densityScore * 0.15);
 
                 return {
                     id: c._id.toString(),
@@ -257,7 +457,6 @@ const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL
         console.error("[Retrieval Service] MongoDB keyword search failed:", mongoSearchError.message);
     }
 
-    // 3. Combine and Deduplicate
     const combined = [...semanticCandidates, ...keywordCandidates];
     const seen = new Set();
     const uniqueCandidates = [];
@@ -266,7 +465,6 @@ const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL
         const contentSig = `${cand.metadata?.documentId}_${cand.content.trim().slice(0, 100)}`;
         if (!seen.has(contentSig)) {
             seen.add(contentSig);
-            // Ensure both institution and university are set in metadata
             if (cand.metadata) {
                 cand.metadata.university = cand.metadata.institution || cand.metadata.university || "";
                 cand.metadata.filename = cand.metadata.filename || cand.metadata.originalName || "";
@@ -281,10 +479,45 @@ const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL
         }
     }
 
-    // Sort descending by final score
-    uniqueCandidates.sort((a, b) => b.score - a.score);
+    const deduplicated = jaccardDeduplicate(uniqueCandidates);
+    deduplicated.sort((a, b) => b.score - a.score);
 
-    return uniqueCandidates;
+    const { countTokens } = require("../utils/tokenizer");
+    let totalTokens = 0;
+    const finalCandidates = [];
+    const maxContextChunks = Number(process.env.RAG_MAX_CONTEXT_CHUNKS) || 15;
+    const maxContextTokens = Number(process.env.RAG_MAX_CONTEXT_TOKENS) || 4000;
+
+    for (const cand of deduplicated) {
+        const tokens = countTokens(cand.content);
+        if (totalTokens + tokens > maxContextTokens) {
+            console.log(`[Retrieval] Context budget limit reached (Tokens: ${totalTokens}, next chunk size: ${tokens} exceeds ${maxContextTokens})`);
+            break;
+        }
+        if (finalCandidates.length >= maxContextChunks) {
+            console.log(`[Retrieval] Context budget reached (Max chunks limit: ${maxContextChunks})`);
+            break;
+        }
+        finalCandidates.push(cand);
+        totalTokens += tokens;
+    }
+
+    finalCandidates.resolvedType = usedType;
+    finalCandidates.resolvedDept = usedDept;
+    finalCandidates.retrievalTelemetry = {
+        queryMode,
+        initialK,
+        finalK: currentK,
+        totalAttempts: attemptsCount,
+        candidatesBeforeDedup: combined.length,
+        candidatesAfterDedup: deduplicated.length,
+        finalCandidatesCount: finalCandidates.length,
+        finalTokens: totalTokens
+    };
+
+    console.log(`[Retrieval Telemetry] Mode: ${queryMode} | Initial K: ${initialK} | Final K: ${currentK} | Unique Chunks: ${finalCandidates.length} | Tokens: ${totalTokens}`);
+
+    return finalCandidates;
 };
 
 module.exports = {

@@ -11,7 +11,7 @@ const llmService = require("./llmService");
  * @param {number} [params.maxTokens=1500]
  * @returns {Promise<Object>} - { historyText: string, rawHistory: Array }
  */
-const getRecentMemory = async ({ userId, conversationId, maxTokens = 1500, parentId = null }) => {
+const getRecentMemory = async ({ userId, conversationId, maxTokens = 500, parentId = null }) => {
     if (!userId || !conversationId) {
         return {
             historyText: "",
@@ -96,7 +96,8 @@ const getRecentMemory = async ({ userId, conversationId, maxTokens = 1500, paren
     }
 
     // Trim history to stay within memory limits
-    const trimmed = tokenizer.trimToContextLimit(rawHistory, maxTokens);
+    const recentOnly = rawHistory.slice(-4);
+    const trimmed = tokenizer.trimToContextLimit(recentOnly, Math.min(maxTokens, Number(process.env.RAG_HISTORY_MAX_TOKENS) || 500));
 
     const historyText = trimmed
         .map((msg) => `${msg.role}: ${msg.content}`)

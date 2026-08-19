@@ -16,7 +16,8 @@
     "clean": "node scripts/clean.js",
     "format": "node scripts/format.js",
     "start": "node server/server.js",
-    "reset": "node scripts/reset.js"
+    "reset": "node scripts/reset.js",
+    "reindex": "node scripts/migrateToJina.js"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"

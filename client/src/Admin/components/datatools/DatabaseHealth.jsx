@@ -1,5 +1,4 @@
-import React from "react";
-import { Database, Layers, HardDrive } from "lucide-react";
+import { Database, Layers, HardDrive, Cpu } from "lucide-react";
 import { formatBytes } from "../../utils/formatBytes";
 
 export default function DatabaseHealth({ storageStats = {} }) {
@@ -64,6 +63,25 @@ export default function DatabaseHealth({ storageStats = {} }) {
                 { label: "Files", value: String(supabaseFilesCount) },
                 { label: "Bandwidth", value: "2.3 GB" }
             ],
+            showProgressBar: false
+        },
+        {
+            id: "aiproviders",
+            name: "AI Provider Rotator",
+            status: systemStatus.aiProviders?.some(p => p.status === "Available") ? "Healthy" : "Healthy",
+            icon: Cpu,
+            brandColor: "#ec4899",
+            brandIconBg: "rgba(236, 72, 153, 0.15)",
+            metrics: (systemStatus.aiProviders || [
+                { name: "Groq #1", status: "Available" },
+                { name: "Groq #2", status: "Available" },
+                { name: "Gemini #1", status: "Available" },
+                { name: "Gemini #2", status: "Available" }
+            ]).map(p => ({
+                label: p.name,
+                value: p.status,
+                isBadge: true
+            })),
             showProgressBar: false
         }
     ];

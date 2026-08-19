@@ -157,8 +157,8 @@ export default function MapView({
                     : "Safety information unavailable";
 
                 const crimeText = route.safety?.crimeRisk?.status === "AVAILABLE"
-                    ? `Crime risk: ${route.safety.crimeRisk.score}/100`
-                    : "Crime verification: Unavailable";
+                    ? `Incident Risk Score: ${route.safety.crimeRisk.score}/100`
+                    : "Incident density verification: Unavailable";
 
                 const hazardText = route.safety?.physicalHazards
                     ? `Physical hazards: ${

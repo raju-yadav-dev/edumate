@@ -4,6 +4,7 @@ const AdmZip = require("adm-zip");
 const Document = require("../models/Document");
 const supabase = require("../config/supabase");
 const indexingService = require("../ai/services/indexingService");
+const cacheService = require("./cacheService");
 
 const BUCKET = process.env.SUPABASE_STORAGE_BUCKET || process.env.SUPABASE_BUCKET;
 
@@ -163,6 +164,8 @@ const uploadDocument = async ({ file, body, user }) => {
         createdBy: user._id,
         updatedBy: user._id
     });
+
+    cacheService.invalidateCategory(category);
 
     // Run Supabase upload and indexing in the background asynchronously
     (async () => {
@@ -340,6 +343,7 @@ const archiveDocument = async ({ documentId, user }) => {
     document.status = "archived";
     document.updatedBy = user._id;
     await document.save();
+    cacheService.invalidateCategory(document.category);
 
     return document;
 };
@@ -428,6 +432,10 @@ const replaceDocument = async ({ documentId, file, body, user }) => {
     }
 
     await document.save();
+    cacheService.invalidateCategory(document.category);
+    if (category !== document.category) {
+        cacheService.invalidateCategory(category);
+    }
 
     // Rebuild index in Qdrant
     if (file) {
@@ -468,6 +476,7 @@ const renameDocument = async ({ documentId, originalName, user }) => {
     document.originalName = originalName.trim();
     document.updatedBy = user._id;
     await document.save();
+    cacheService.invalidateCategory(document.category);
 
     // Rebuild index in Qdrant to update originalName metadata
     await indexingService.deleteDocumentIndex(document._id);
@@ -519,6 +528,8 @@ const moveDocument = async ({ documentId, category, user }) => {
     document.storagePath = newStoragePath;
     document.updatedBy = user._id;
     await document.save();
+    cacheService.invalidateCategory(document.category);
+    cacheService.invalidateCategory(targetCategory);
 
     // Update metadata in Qdrant payloads without rebuilding index or generating new embeddings
     try {
@@ -605,6 +616,8 @@ const copyDocument = async ({ documentId, category, user }) => {
         updatedBy: user._id
     });
 
+    cacheService.invalidateCategory(targetCategory);
+
     // Rebuild index in Qdrant
     indexingService.indexDocumentBackground(newDocument._id).catch((err) => {
         console.error(`Failed to trigger background indexing for copied document ${newDocument._id}:`, err);
@@ -636,6 +649,20 @@ const bulkReindex = async ({ category, ids, user }) => {
     } else if (category && category !== "root") {
         const cleanCat = sanitizeCategory(category);
         filter.category = { $regex: new RegExp(`^${cleanCat}(_|\/|$)`, "i") };
+    }
+
+    if (category && category !== "root") {
+        cacheService.invalidateCategory(category);
+    }
+    if (ids && ids.length > 0) {
+        try {
+            const docs = await Document.find({ _id: { $in: ids } }).select("category").lean();
+            for (const d of docs) {
+                cacheService.invalidateCategory(d.category);
+            }
+        } catch (e) {
+            console.error("Bulk reindex cache invalidation failed:", e);
+        }
     }
 
     const documents = await Document.find(filter);
@@ -715,6 +742,7 @@ const restoreDocument = async ({ documentId, user }) => {
     document.status = "active";
     document.updatedBy = user._id;
     await document.save();
+    cacheService.invalidateCategory(document.category);
     return document;
 };
 
@@ -733,6 +761,7 @@ const permanentDeleteDocument = async ({ documentId, user }) => {
     document.status = "deleted";
     document.updatedBy = user._id;
     await document.save();
+    cacheService.invalidateCategory(document.category);
     await indexingService.deleteDocumentIndex(documentId);
     return document;
 };
@@ -773,6 +802,8 @@ const duplicateDocument = async ({ documentId, user }) => {
         createdBy: user._id,
         updatedBy: user._id
     });
+
+    cacheService.invalidateCategory(document.category);
 
     indexingService.indexDocumentBackground(newDocument._id).catch(() => {});
     return newDocument;

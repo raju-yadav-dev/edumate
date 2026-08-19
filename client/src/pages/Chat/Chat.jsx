@@ -1082,6 +1082,7 @@ function Chat() {
                                     <MessageBubble
                                         key={message.id}
                                         message={displayMsg}
+                                        isStreaming={message.id === streamingMessageId}
                                         prevMessage={index > 0 ? visibleMessages[index - 1] : null}
                                         onCopy={handleCopy}
                                         onRegenerate={() => {

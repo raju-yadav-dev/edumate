@@ -294,48 +294,89 @@ async function evaluateRoute(route, options = {}) {
     // ==================================================
     // 3. SCORE & RATING CALCULATION
     // ==================================================
-    // Calculate physical risk score (capped at 100)
-    let physicalRiskScore = 0;
-    if (safety.physicalHazards.flood > 0) {
-        physicalRiskScore = 100;
-        safety.warnings.push("Flood hazard detected along this route.");
-    } else if (safety.physicalHazards.roadClosure > 0) {
-        physicalRiskScore = 100;
-        safety.warnings.push("Road closure detected along this route.");
-    } else {
-        if (safety.physicalHazards.construction > 0) {
-            physicalRiskScore += 30;
-            safety.warnings.push("Road construction detected along this route.");
+    const ROUTE_INCIDENT_WEIGHT = Number(process.env.ROUTE_INCIDENT_WEIGHT || 0.45);
+    const ROUTE_FLOOD_WEIGHT = Number(process.env.ROUTE_FLOOD_WEIGHT || 0.35);
+    const ROUTE_CONSTRUCTION_WEIGHT = Number(process.env.ROUTE_CONSTRUCTION_WEIGHT || 0.20);
+
+    // Extract detailed physical hazard metrics from sets
+    let floodActiveCount = 0;
+    let floodProneCount = 0;
+    const floodSet = new Set();
+    const constructionSet = new Set();
+    const roadClosureSet = new Set();
+    const otherSet = new Set();
+
+    if (!queryFailed && cachedResults) {
+        for (const res of cachedResults) {
+            res.flood.forEach(h => floodSet.add(JSON.stringify(h.tags)));
+            res.construction.forEach(h => constructionSet.add(JSON.stringify(h.tags)));
+            res.roadClosure.forEach(h => roadClosureSet.add(JSON.stringify(h.tags)));
+            res.other.forEach(h => otherSet.add(JSON.stringify(h.tags)));
         }
-        if (safety.physicalHazards.other > 0) {
-            physicalRiskScore += 15;
-            safety.warnings.push("Other road hazard detected along this route.");
+
+        for (const tagStr of floodSet) {
+            try {
+                const tags = JSON.parse(tagStr);
+                if (tags.hazard === "flood" || tags.hazard === "flooding" || tags.flood === "yes" || tags.flooding === "yes") {
+                    floodActiveCount++;
+                } else {
+                    floodProneCount++;
+                }
+            } catch {
+                floodProneCount++;
+            }
         }
-        physicalRiskScore = Math.min(physicalRiskScore, 100);
     }
 
-    // Calculate crime risk score
-    let crimeRiskScore = 0;
-    const isCrimeAvailable = safety.crimeRisk.status === "AVAILABLE";
-    if (isCrimeAvailable) {
-        crimeRiskScore = safety.crimeRisk.score || 0;
+    // 3.1 Calculate Incident Risk
+    let incidentRisk = 0;
+    const isIncidentAvailable = safety.crimeRisk.status === "AVAILABLE";
+    if (isIncidentAvailable) {
+        incidentRisk = safety.crimeRisk.score || 0;
         if (safety.crimeRisk.warnings && safety.crimeRisk.warnings.length > 0) {
-            safety.warnings.push(...safety.crimeRisk.warnings);
+            const cleanWarnings = safety.crimeRisk.warnings.map(w =>
+                w.replace(/\bcrime\b/gi, "reported incident")
+                 .replace(/\bcrime risk\b/gi, "reported incident density")
+            );
+            safety.warnings.push(...cleanWarnings);
         }
-    }
-
-    // Compute composite safety score
-    const physicalWeight = Number(process.env.PHYSICAL_RISK_WEIGHT || 0.45);
-    const crimeWeight = Number(process.env.CRIME_RISK_WEIGHT || 0.55);
-
-    let overallRiskScore = 0;
-    if (isCrimeAvailable) {
-        overallRiskScore = (physicalRiskScore * physicalWeight) + (crimeRiskScore * crimeWeight);
     } else {
-        // If crime data is unavailable (disabled/unconfigured)
-        overallRiskScore = physicalRiskScore;
-        safety.warnings.push("Crime data unavailable");
+        safety.warnings.push("Historical incident density data unavailable.");
     }
+
+    // 3.2 Calculate Flood/Weather Risk
+    let floodRisk = 0;
+    if (roadClosureSet.size > 0 && floodActiveCount > 0) {
+        floodRisk = 100;
+        safety.warnings.push("Confirmed road closure due to reported flooding.");
+    } else if (floodActiveCount > 0) {
+        floodRisk = 80;
+        safety.warnings.push("Reported flooding/waterlogging detected along this route.");
+    } else if (floodProneCount > 0) {
+        floodRisk = 40;
+        safety.warnings.push("Route passes through a flood-prone area based on map records.");
+    }
+
+    // 3.3 Calculate Construction Risk
+    let constructionRisk = 0;
+    if (roadClosureSet.size > 0 && constructionSet.size > 0) {
+        constructionRisk = 100;
+        safety.warnings.push("Confirmed road closure due to active construction.");
+    } else if (constructionSet.size > 0) {
+        constructionRisk = 30;
+        safety.warnings.push("Road construction detected along this route. Construction information based on available map data.");
+    }
+
+    if (otherSet.size > 0) {
+        safety.warnings.push("Other road hazard detected along this route.");
+    }
+
+    // 3.4 Compute composite risk score with normalized weights
+    const totalWeight = ROUTE_INCIDENT_WEIGHT + ROUTE_FLOOD_WEIGHT + ROUTE_CONSTRUCTION_WEIGHT;
+    const overallRiskScore = totalWeight > 0
+        ? ((incidentRisk * ROUTE_INCIDENT_WEIGHT) + (floodRisk * ROUTE_FLOOD_WEIGHT) + (constructionRisk * ROUTE_CONSTRUCTION_WEIGHT)) / totalWeight
+        : 0;
+
     safety.riskScore = Math.round(overallRiskScore);
 
     // ==================================================
@@ -347,24 +388,23 @@ async function evaluateRoute(route, options = {}) {
 
     let isExcluded = false;
 
-    if (safety.physicalHazards.roadClosure > 0) {
+    if (roadClosureSet.size > 0) {
         isExcluded = true;
         safety.reasons.push("Road closure detected");
     }
-    if (safety.physicalHazards.flood > 0) {
+    if (floodActiveCount > 0) {
         isExcluded = true;
         safety.reasons.push("Flood hazard detected");
     }
 
-    // Only trigger road-level crime exclusions if source granularity is POINT-level
+    // Only trigger road-level exclusions if source granularity is POINT-level
     const isPointGranularity = safety.crimeRisk.granularity === "point";
 
-    if (isCrimeAvailable && isPointGranularity) {
-        if (crimeRiskScore >= crimeHardExclusion) {
+    if (isIncidentAvailable && isPointGranularity) {
+        if (incidentRisk >= crimeHardExclusion) {
             isExcluded = true;
-            safety.reasons.push("Elevated recent crime incident risk");
+            safety.reasons.push("Elevated recent reported incident risk");
         }
-        // Check for verified high-severity hotspot cluster exclusions
         if (Array.isArray(safety.crimeRisk.hotspots)) {
             const hasExclusionHotspot = safety.crimeRisk.hotspots.some(h => h.score >= crimeHotspotExclusion);
             if (hasExclusionHotspot) {
@@ -374,23 +414,22 @@ async function evaluateRoute(route, options = {}) {
         }
     }
 
-    // If required crime data is unavailable
-    if (!isCrimeAvailable && requireCrimeData) {
+    // If required crime/incident data is unavailable
+    if (!isIncidentAvailable && requireCrimeData) {
         isExcluded = true;
         safety.reasons.push("Safety verification unavailable");
     }
 
-    // If source granularity is district, add note rather than road-level crime alerts
-    if (isCrimeAvailable && safety.crimeRisk.granularity === "district") {
-        safety.warnings.push("District-level crime data indicates elevated background risk.");
+    // If source granularity is district, add note rather than road-level alerts
+    if (isIncidentAvailable && safety.crimeRisk.granularity === "district") {
+        safety.warnings.push("District-level incident data indicates elevated background risk.");
     }
 
     if (isExcluded) {
         safety.status = "EXCLUDED";
         safety.riskLevel = "EXCLUDED";
     } else {
-        // Update risk levels
-        if (!isCrimeAvailable) {
+        if (!isIncidentAvailable) {
             safety.status = "UNKNOWN";
             safety.riskLevel = "UNKNOWN";
         } else if (safety.riskScore >= 75) {

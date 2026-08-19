@@ -1117,52 +1117,52 @@ function formatRoutingResponse(startName, destinationName, options, selectedRout
         return "No routes currently available.";
     }
 
-    const headerWording = (recommendedRoute.safety && recommendedRoute.safety.riskLevel === "LOW")
+    const safety = recommendedRoute.safety;
+    const headerWording = (safety && safety.riskLevel === "LOW")
         ? "Safest currently available route"
-        : "Lower-risk route based on available current data";
+        : "Lower-risk route based on available data";
 
     let md = `🛣️ Route Recommendation\n\n`;
-    md += `${headerWording}:\n`;
+    md += `**${headerWording}**:\n`;
     md += `${startName} → ${destinationName}\n\n`;
 
-    md += `${recommendedRoute.label || `Route ${recommendedRoute.routeNumber}`}\n`;
+    md += `**${recommendedRoute.label || `Route ${recommendedRoute.routeNumber}`}**\n`;
     md += `Distance: ${recommendedRoute.distance}\n`;
     md += `Estimated time: ${recommendedRoute.time}\n\n`;
 
-    md += `Safety:\n`;
-    const safety = recommendedRoute.safety;
+    md += `### Safety & Hazard Breakdown:\n`;
     if (!safety || safety.status === "UNKNOWN" || safety.riskLevel === "UNKNOWN") {
-        md += `Safety verification is currently unavailable for this route.\n\n`;
+        md += `_Safety verification is currently unavailable for this route._\n\n`;
     } else {
-        if (safety.physicalHazards?.flood > 0) {
-            md += `✗ Flood hazard detected along this route\n`;
+        const riskScoreText = safety.riskScore !== null ? ` (Risk Score: ${safety.riskScore}/100)` : "";
+        md += `Composite Risk Level: **${safety.riskLevel}**${riskScoreText}\n`;
+        
+        if (safety.crimeRisk?.status === "AVAILABLE") {
+            const riskLvl = safety.crimeRisk.score >= 75 ? "Higher" : safety.crimeRisk.score >= 35 ? "Moderate" : "Low";
+            md += `- Incident Density Risk: **${riskLvl}** (based on reported background density)\n`;
         } else {
-            md += `✓ No reported flood hazard\n`;
+            md += `- Incident Density Risk: _Unavailable_\n`;
         }
-        if (safety.physicalHazards?.roadClosure > 0) {
-            md += `✗ Road closure detected along this route\n`;
-        } else {
-            md += `✓ No mapped road closure\n`;
-        }
-        if (safety.crimeRisk?.status !== "AVAILABLE") {
-            md += `Safety verification is currently unavailable for this route.\n`;
-        } else {
-            const riskLvl = safety.crimeRisk.score >= 75 ? "High" : safety.crimeRisk.score >= 35 ? "Moderate" : "Low";
-            md += `✓ ${riskLvl} recent incident risk\n`;
+        
+        if (safety.warnings && safety.warnings.length > 0) {
+            md += `\n**Route Advisories:**\n`;
+            safety.warnings.forEach(w => {
+                md += `- ${w}\n`;
+            });
         }
         md += `\n`;
     }
 
-    md += `Why recommended:\n`;
-    if (recommendedRoute.routeNumber === options[0]?.routeNumber && (!safety || safety.status !== "UNKNOWN")) {
-        md += `This route has the lowest safety risk among the available routes.\n\n`;
-    } else if (selectedRouteNumber !== null) {
-        md += `This is the user-selected route (Route ${recommendedRoute.routeNumber}).\n\n`;
+    md += `### Why Recommended:\n`;
+    if (selectedRouteNumber !== null) {
+        md += `This is your selected path (Route ${recommendedRoute.routeNumber}).\n\n`;
+    } else if (recommendedRoute.routeNumber === options[0]?.routeNumber) {
+        md += `This path is recommended because it offers the optimal balance of travel duration and lower reported hazard/incident indicators.\n\n`;
     } else {
-        md += `This route is recommended based on currently available safety data.\n\n`;
+        md += `This path is recommended because it has lower reported safety risks and physical hazards compared to faster alternatives.\n\n`;
     }
 
-    md += `Alternative routes:\n`;
+    md += `### Alternative Routes:\n`;
     let alternativesExist = false;
 
     let allRoutes = [...options];
@@ -1178,15 +1178,18 @@ function formatRoutingResponse(startName, destinationName, options, selectedRout
                 : r.safety?.riskLevel === "LOW" ? "Low risk"
                 : r.safety?.riskLevel === "MEDIUM" ? "Moderate risk"
                 : r.safety?.riskLevel === "HIGH" ? "Higher risk"
-                : r.safety?.riskLevel === "EXCLUDED" ? "Higher risk (Excluded)"
+                : r.safety?.riskLevel === "EXCLUDED" ? "Excluded (Hazards detected)"
                 : "Higher risk";
-            md += `${r.label || `Route ${r.routeNumber}`} — ${r.time} — ${riskLabel}\n`;
+            md += `- **${r.label || `Route ${r.routeNumber}`}** — ${r.time} (${r.distance}) — ${riskLabel}\n`;
         }
     });
 
     if (!alternativesExist) {
-        md += `No alternative routes found.\n`;
+        md += `_No alternative routes found._\n`;
     }
+
+    md += `\n> ⚠️ **Route Safety Disclaimer:**\n`;
+    md += `> Route safety and hazard levels can change quickly. Construction information based on available map data; actual road conditions may vary. Please exercise caution and drive safely.\n`;
 
     md += `\n[Show Route]`;
     return md;

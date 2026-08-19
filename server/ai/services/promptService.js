@@ -23,7 +23,8 @@ const buildPromptMessages = ({
     questionType,
     isRepeat = false,
     activeTopic = "",
-    language
+    language,
+    studentProfile
 }) => {
     const memory = historyText ? [{ role: "user", content: "Conversation History summary: " + historyText }] : [];
 
@@ -38,7 +39,8 @@ const buildPromptMessages = ({
         questionType,
         isRepeat,
         activeTopic,
-        language
+        language,
+        studentProfile
     });
 };
 

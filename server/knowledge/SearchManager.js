@@ -3,6 +3,7 @@ const webSearchService = require("../ai/services/webSearchService");
 const KnowledgeSource = require("../models/KnowledgeSource");
 
 const Document = require("../models/Document");
+const AI_CONSTANTS = require("../ai/constants/aiConstants");
 
 /**
  * Retrieves chunks from Qdrant and enriches them with MongoDB Document metadata.
@@ -12,7 +13,7 @@ const retrieveAndEnrichChunks = async (query, user, limit, ignoreInstitution = f
     const candidates = await retrievalService.retrieve({
         question: query,
         user,
-        limit: Math.max(limit * 3, 50),
+        limit: Math.min(Math.max(limit * 2, 12), 24),
         ignoreInstitution,
         filter
     });
@@ -62,6 +63,9 @@ const retrieveAndEnrichChunks = async (query, user, limit, ignoreInstitution = f
         };
     }).filter(Boolean);
 
+    enriched.resolvedType = candidates.resolvedType;
+    enriched.resolvedDept = candidates.resolvedDept;
+    enriched.retrievalTelemetry = candidates.retrievalTelemetry;
     return enriched;
 };
 
@@ -125,15 +129,26 @@ const searchLocalPdfs = async (query, user, limit, ignoreInstitution = false, fi
     
     // Filter to only include local admin-uploaded documents (uploadedFrom is not "crawler")
     const filtered = enriched.filter(chunk => chunk.metadata?.uploadedFrom !== "crawler");
-    const sliced = filtered.slice(0, limit);
+    const sliced = filtered.slice(0, Number(process.env.RAG_MAX_K) || 15);
 
-    // Expand adjacent context for the selected results
+    // Adjacent-chunk expansion is disabled by default because it can multiply prompt size.
+    // It can be explicitly enabled for documents where neighbouring context is essential.
+    const expandAdjacent = process.env.RAG_EXPAND_ADJACENT === "true";
     const expanded = [];
     for (const chunk of sliced) {
-        const exp = await expandChunkContext(chunk);
-        expanded.push(exp);
+        const exp = expandAdjacent ? await expandChunkContext(chunk) : chunk;
+        const content = String(exp.content || "");
+        expanded.push({
+            ...exp,
+            content: content.length > AI_CONSTANTS.MAX_CHUNK_CHARS
+                ? `${content.slice(0, AI_CONSTANTS.MAX_CHUNK_CHARS)}\n[context truncated]`
+                : content
+        });
     }
 
+    expanded.resolvedType = enriched.resolvedType;
+    expanded.resolvedDept = enriched.resolvedDept;
+    expanded.retrievalTelemetry = enriched.retrievalTelemetry;
     return expanded;
 };
 
@@ -160,7 +175,7 @@ const searchApprovedUrls = async (query, user, limit, ignoreInstitution = true) 
         });
     });
 
-    return filtered.slice(0, limit);
+    return filtered.slice(0, Math.min(limit, AI_CONSTANTS.MAX_RAG_CHUNKS_PER_INTENT));
 };
 
 /**

@@ -45,7 +45,7 @@ const callGeminiCompletion = async (messages, options = {}) => {
         contents,
         generationConfig: {
             temperature: 0.2,
-            maxOutputTokens: 900
+            maxOutputTokens: Number(options.maxOutputTokens) || Number(process.env.LLM_MAX_OUTPUT_TOKENS) || 500
         }
     };
     
@@ -101,7 +101,7 @@ const callGeminiStream = async (messages, onChunk, options = {}) => {
         contents,
         generationConfig: {
             temperature: 0.2,
-            maxOutputTokens: 900
+            maxOutputTokens: Number(options.maxOutputTokens) || Number(process.env.LLM_MAX_OUTPUT_TOKENS) || 500
         }
     };
     
@@ -166,6 +166,16 @@ const callGeminiStream = async (messages, onChunk, options = {}) => {
     return fullText;
 };
 
+const aiProviderManager = require("../../services/aiProviderManager");
+
+// Ensure fallback API keys for legacy modules accessing process.env directly
+if (!process.env.GEMINI_API_KEY) {
+    process.env.GEMINI_API_KEY = process.env.GEMINI_API_KEY_1 || process.env.GEMINI_API_KEY_2 || "";
+}
+if (!process.env.GROQ_API_KEY) {
+    process.env.GROQ_API_KEY = process.env.GROQ_API_KEY_1 || process.env.GROQ_API_KEY_2 || "";
+}
+
 /**
  * Unified completion handler routing to the active LLM provider.
  * @param {Array<Object>} messages - Array of { role, content }
@@ -173,84 +183,11 @@ const callGeminiStream = async (messages, onChunk, options = {}) => {
  * @returns {Promise<string>}
  */
 const generateCompletion = async (messages, options = {}) => {
-    const provider = process.env.LLM_PROVIDER || "groq";
-    const timeoutMs = options.timeoutMs || 25000;
-
-    if (provider === "groq") {
-        const result = await groqProviderManager.generateCompletion({ messages, timeoutMs });
-        if (result.success) {
-            console.log(`Provider: groq`);
-            console.log(`Model: ${process.env.GROQ_MODEL || "llama-3.3-70b-versatile"}`);
-            console.log(`Request: SUCCESS`);
-            return result.content;
-        }
-        const errorMsg = result.failures && result.failures.length > 0
-            ? result.failures.map(f => `[${f.provider}] Attempt ${f.attempt}: ${f.message}`).join("; ")
-            : "No working Groq API keys available.";
-        console.log(`Provider: groq`);
-        console.log(`Request: FAILED`);
-        throw new Error(`Groq Completion Failed: ${errorMsg}`);
-    }
-
-    const model = getActiveModel();
-    const apiKey = process.env.GEMINI_API_KEY;
-    const authStatus = apiKey ? "API key configured" : "API key missing";
-    
-    try {
-        const result = await callGeminiCompletion(messages, options);
-        console.log(`Provider: gemini`);
-        console.log(`Model: ${model}`);
-        console.log(`Authentication: ${authStatus}`);
-        console.log(`Request: SUCCESS`);
-        return result;
-    } catch (err) {
-        console.log(`Provider: gemini`);
-        console.log(`Model: ${model}`);
-        console.log(`Authentication: ${authStatus}`);
-        console.log(`Request: FAILED`);
-        throw err;
-    }
+    return aiProviderManager.generateAIResponse(messages, null, options);
 };
 
 const generateStream = async (messages, onChunk, options = {}) => {
-    const provider = process.env.LLM_PROVIDER || "groq";
-    const timeoutMs = options.timeoutMs || 25000;
-    const signal = options.signal;
-
-    if (provider === "groq") {
-        const result = await groqProviderManager.generateStream({ messages, onChunk, timeoutMs, signal });
-        if (result.success) {
-            console.log(`Provider: groq`);
-            console.log(`Model: ${process.env.GROQ_MODEL || "llama-3.3-70b-versatile"}`);
-            console.log(`Request: SUCCESS`);
-            return result.content;
-        }
-        const errorMsg = result.failures && result.failures.length > 0
-            ? result.failures.map(f => `[${f.provider}] Attempt ${f.attempt}: ${f.message}`).join("; ")
-            : "No working Groq API keys available.";
-        console.log(`Provider: groq`);
-        console.log(`Request: FAILED`);
-        throw new Error(`Groq Streaming Failed: ${errorMsg}`);
-    }
-
-    const model = getActiveModel();
-    const apiKey = process.env.GEMINI_API_KEY;
-    const authStatus = apiKey ? "API key configured" : "API key missing";
-    
-    try {
-        const result = await callGeminiStream(messages, onChunk, options);
-        console.log(`Provider: gemini`);
-        console.log(`Model: ${model}`);
-        console.log(`Authentication: ${authStatus}`);
-        console.log(`Request: SUCCESS`);
-        return result;
-    } catch (err) {
-        console.log(`Provider: gemini`);
-        console.log(`Model: ${model}`);
-        console.log(`Authentication: ${authStatus}`);
-        console.log(`Request: FAILED`);
-        throw err;
-    }
+    return aiProviderManager.generateAIResponse(messages, onChunk, options);
 };
 
 module.exports = {

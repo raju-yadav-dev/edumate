@@ -263,7 +263,8 @@ function MessageBubble({
     onEditMessage,
     onDeleteMessage,
     onPinMessage,
-    onExportDocx
+    onExportDocx,
+    isStreaming
 }) {
     const isUser = message.role === "user";
     const [isEditing, setIsEditing] = useState(false);
@@ -520,7 +521,7 @@ function MessageBubble({
                         </div>
                     ) : null}
 
-                    {!isUser ? (
+                    {!isUser && !isStreaming ? (
                         <MessageActions
                             message={message}
                             onCopy={onCopy}

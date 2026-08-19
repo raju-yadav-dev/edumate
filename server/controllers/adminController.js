@@ -6,6 +6,7 @@ const { sendSuccess } = require("../utils/response");
 const settingsService = require("../services/settingsService");
 const mongoose = require("mongoose");
 const { getConfiguredProviders } = require("../services/groqProviderManager");
+const aiProviderManager = require("../services/aiProviderManager");
 
 const DEFAULT_STORAGE_LIMIT = 10 * 1024 * 1024 * 1024;
 
@@ -513,7 +514,8 @@ const getStorageStats = asyncHandler(async (req, res) => {
             mongodb: mongoStats.connected ? "connected" : "unknown",
             supabase: supabaseStats.configured ? "connected" : "not configured",
             groq: groqStatus,
-            qdrant: qdrantStats.connected ? "connected" : "offline"
+            qdrant: qdrantStats.connected ? "connected" : "offline",
+            aiProviders: aiProviderManager.getAiProviderStatuses()
         }
     };
 

@@ -9,6 +9,7 @@ import SpeechSynthesisService from "./SpeechSynthesisService";
 import LanguageDetectionService from "./LanguageDetectionService";
 import AudioAnalyserService from "./AudioAnalyserService";
 import VoiceCommandService from "./VoiceCommandService";
+import VadService from "./VadService";
 
 class VoiceConversationManager {
     constructor() {
@@ -32,6 +33,14 @@ class VoiceConversationManager {
         // Bind SpeechSynthesis events
         this.handleSpeechStart = this.handleSpeechStart.bind(this);
         this.handleSpeechEnd = this.handleSpeechEnd.bind(this);
+
+        this.vadInitialized = false;
+    }
+
+    handleSpeechStartDetected() {
+        if (this.state === "listening") {
+            this.setState("user_speaking");
+        }
     }
 
     /**
@@ -43,12 +52,14 @@ class VoiceConversationManager {
         console.log(`[VoiceManager] State changed: ${this.state} -> ${newState}`);
         this.state = newState;
 
-        if (newState === "listening") {
+        if (newState === "listening" || newState === "user_speaking" || newState === "waiting_for_silence") {
             AudioAnalyserService.start().catch((err) => {
                 console.warn("Failed to start audio analyser:", err);
             });
+            VadService.start();
         } else {
             AudioAnalyserService.stop();
+            VadService.stop();
         }
 
         this.notifyStateChange(newState);
@@ -88,11 +99,23 @@ class VoiceConversationManager {
         this.onTimerCallbacks.forEach(cb => cb(secs));
     }
 
+    async ensureVadInitialized() {
+        if (this.vadInitialized) return;
+        try {
+            await VadService.init(() => {
+                this.handleSpeechStartDetected();
+            });
+            this.vadInitialized = true;
+        } catch (err) {
+            console.warn("[VoiceManager] Failed to init VadService:", err);
+        }
+    }
+
     /**
      * Start a Single Voice Query (one-off voice search).
      * @param {Function} sendMessageFn - Function in Chat.jsx to send query
      */
-    startSingleQuery(sendMessageFn) {
+    async startSingleQuery(sendMessageFn) {
         if (!sendMessageFn) {
             console.error("No sendMessage function provided to VoiceConversationManager.");
             return;
@@ -105,6 +128,8 @@ class VoiceConversationManager {
         this.lastQuestion = "";
         this.lastAnswer = "";
 
+        await this.ensureVadInitialized();
+
         // Reset speaking settings
         SpeechSynthesisService.cancel();
 
@@ -116,9 +141,17 @@ class VoiceConversationManager {
             onResult: (text, isFinal) => {
                 this.notifyTranscript(text, isFinal);
                 this.currentTranscript = text;
+                if (this.state === "listening") {
+                    this.setState("user_speaking");
+                }
             },
             onSilence: () => {
-                this.handleFinalInput();
+                this.setState("waiting_for_silence");
+                setTimeout(() => {
+                    if (this.state === "waiting_for_silence") {
+                        this.handleFinalInput();
+                    }
+                }, 300);
             },
             onError: (err) => {
                 console.error("Recognition error in single query:", err);
@@ -126,7 +159,7 @@ class VoiceConversationManager {
             },
             onEnd: () => {
                 // If it ended naturally without silence (e.g. no speech spoken)
-                if (this.state === "listening") {
+                if (this.state === "listening" || this.state === "user_speaking" || this.state === "waiting_for_silence") {
                     this.setState("idle");
                 }
             }
@@ -137,7 +170,7 @@ class VoiceConversationManager {
      * Start a Continuous Conversation session (like ChatGPT voice).
      * @param {Function} sendMessageFn - Function in Chat.jsx to send query
      */
-    startContinuousConversation(sendMessageFn) {
+    async startContinuousConversation(sendMessageFn) {
         if (!sendMessageFn) {
             console.error("No sendMessage function provided to VoiceConversationManager.");
             return;
@@ -149,6 +182,8 @@ class VoiceConversationManager {
         this.notifyTimer(0);
         this.lastQuestion = "";
         this.lastAnswer = "";
+
+        await this.ensureVadInitialized();
 
         // Start elapsed timer
         this.startTimer();
@@ -167,19 +202,66 @@ class VoiceConversationManager {
      * Triggered when Synthesis starts speaking.
      */
     handleSpeechStart() {
-        this.setState("speaking");
-        // Keep microphone active if in continuous mode to listen for interruptions!
-        if (this.isContinuousMode) {
-            this.startListeningCycle();
-        } else {
-            SpeechRecognitionService.stop();
-        }
+        this.setState("speaking"); // AI_SPEAKING
+
+        // Keep interruption monitor and Vad active while speaking to capture interrupts
+        VadService.start();
+
+        const recLang = LanguageDetectionService.getSpeechRecognitionLang(this.activeLang);
+        SpeechRecognitionService.startInterruptionMonitor({
+            lang: recLang,
+            onCandidate: (candidate) => this.handleSpeechInterruptionCandidate(candidate),
+            onError: (err) => console.warn("[VoiceManager] Interruption monitor:", err)
+        });
     }
 
     /**
      * Triggered when Synthesis finishes speaking.
      */
+    handleSpeechInterruptionCandidate(candidate) {
+        if (this.state !== "speaking" || !this.isContinuousMode) return;
+
+        const text = String(candidate || "").trim();
+        if (!text) return;
+
+        const normalized = text.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+        const explicitInterruptions = new Set([
+            "stop", "wait", "hold on", "one second", "just a second", "no wait",
+            "stop please", "wait please", "listen", "let me speak", "let me ask",
+            "रुको", "रुकिए", "एक सेकंड", "ठहरिए", "থামুন", "এক সেকেন্ড"
+        ]);
+
+        const words = normalized ? normalized.split(" ").filter(Boolean) : [];
+        const isExplicit = explicitInterruptions.has(normalized) || 
+                           explicitInterruptions.has(words[0]) || 
+                           words.some(w => explicitInterruptions.has(w));
+
+        // 1. Ignore short noise (need at least 2 words if not an explicit phrase)
+        if (!isExplicit && words.length < 2) return;
+
+        // 2. Ignore whispers / very short noises
+        if (!isExplicit && text.length < 5) return;
+
+        // 3. Browser speech recognition can hear the assistant's own TTS. If the
+        // transcript substantially overlaps the current answer, treat it as echo.
+        const answerWords = String(this.lastAnswer || "")
+            .toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean);
+        const candidateWords = new Set(words);
+        const overlap = answerWords.length
+            ? answerWords.filter((word) => candidateWords.has(word)).length / Math.max(1, words.length)
+            : 0;
+
+        if (!isExplicit && words.length < 5 && overlap > 0.5) return;
+        if (!isExplicit && words.length >= 5 && overlap > 0.7) return;
+
+        console.log(`[VoiceManager] Meaningful interruption detected: "${text}"`);
+        this.userInterruption();
+    }
+
     handleSpeechEnd() {
+        SpeechRecognitionService.stopInterruptionMonitor();
+        VadService.stop();
+
         if (this.state === "ended" || !this.isContinuousMode) {
             if (!this.isContinuousMode && this.state !== "ended") {
                 this.setState("idle");
@@ -196,13 +278,13 @@ class VoiceConversationManager {
      */
     startListeningCycle() {
         if (this.state === "ended" || !this.isContinuousMode) return;
+        if (this.state === "thinking" || this.state === "speaking" || this.state === "waiting_for_silence" || this.state === "user_speaking") return;
 
         // Prevent duplicate starts if already listening
         if (SpeechRecognitionService.isListening) {
             return;
         }
 
-        // Only change manager state to listening if we aren't generating or speaking answers
         if (this.state !== "thinking" && this.state !== "speaking") {
             this.setState("listening");
         }
@@ -214,27 +296,29 @@ class VoiceConversationManager {
             onResult: (text, isFinal) => {
                 this.notifyTranscript(text, isFinal);
                 this.currentTranscript = text;
-
-                // Interruption check: If user starts speaking while AI is speaking or thinking, abort synthesis & requests!
-                if ((this.state === "speaking" || this.state === "thinking") && text.trim().length > 0) {
-                    console.log("[VoiceManager] Interrupted via speech result:", text);
-                    this.userInterruption();
+                if (this.state === "listening") {
+                    this.setState("user_speaking");
                 }
             },
             onSilence: () => {
-                this.handleFinalInput();
+                this.setState("waiting_for_silence");
+                setTimeout(() => {
+                    if (this.state === "waiting_for_silence") {
+                        this.handleFinalInput();
+                    }
+                }, 300);
             },
             onError: (err) => {
                 console.error("Recognition error in continuous cycle:", err);
                 if (err === "no-speech") {
-                    setTimeout(() => {
-                        this.startListeningCycle();
-                    }, 300);
+                    if (this.isContinuousMode && (this.state === "listening" || this.state === "user_speaking" || this.state === "waiting_for_silence")) {
+                        setTimeout(() => this.startListeningCycle(), 300);
+                    }
                 } else if (err !== "not-allowed" && this.isContinuousMode) {
                     console.log("[VoiceManager] Auto restarting voice recognition after failure:", err);
-                    setTimeout(() => {
-                        this.startListeningCycle();
-                    }, 1000);
+                    if (this.isContinuousMode && (this.state === "listening" || this.state === "user_speaking" || this.state === "waiting_for_silence")) {
+                        setTimeout(() => this.startListeningCycle(), 1000);
+                    }
                 } else {
                     if (this.state !== "thinking" && this.state !== "speaking") {
                         this.setState("paused");
@@ -243,7 +327,7 @@ class VoiceConversationManager {
             },
             onEnd: () => {
                 // If browser ended the recognition session naturally but we are still in continuous mode, auto-restart it
-                if (this.isContinuousMode && ["listening", "speaking", "thinking", "interrupted"].includes(this.state)) {
+                if (this.isContinuousMode && (this.state === "listening" || this.state === "user_speaking" || this.state === "waiting_for_silence")) {
                     console.log("[VoiceManager] SpeechRecognition ended naturally. Re-starting listening cycle.");
                     setTimeout(() => {
                         this.startListeningCycle();
@@ -297,9 +381,7 @@ class VoiceConversationManager {
 
         // 3. Normal LLM Query
         this.setState("thinking");
-        if (this.isContinuousMode) {
-            this.startListeningCycle();
-        }
+        // In continuous mode, wait until TTS finishes before reopening the microphone.
         this.activeAbortController = new AbortController();
 
         try {
@@ -346,7 +428,8 @@ class VoiceConversationManager {
         if (this.state === "speaking" || this.state === "thinking") {
             console.log("[VoiceManager] User interrupted!");
             
-            // Immediately Stop SpeechSynthesis
+            // Stop the interruption monitor first, then stop speech and cancel the active request.
+            SpeechRecognitionService.stopInterruptionMonitor();
             SpeechSynthesisService.cancel();
             
             // Cancel AI response (AbortController)

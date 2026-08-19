@@ -43,6 +43,7 @@ Classify the user's question into EXACTLY ONE of the following intent categories
 - ${INTENTS.TRAVEL_COST} (bus/train fares, travel expenses)
 - ${INTENTS.ETA} (estimated travel arrival times)
 - ${INTENTS.EMERGENCY} (medical help, urgent assistance, security contacts)
+- ${INTENTS.COURSE_RECOMMENDATION} (user provides personal academic profile/marks/interests and asks which course/career to choose or what is best/better for them)
 - ${INTENTS.GENERAL_CHAT} (general chit-chat, conversational queries, non-university topics)
 
 Response MUST be exactly one of the words above in lowercase, without any other text.

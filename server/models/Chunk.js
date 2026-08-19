@@ -38,6 +38,36 @@ const chunkSchema = new mongoose.Schema(
                 type: String,
                 default: "",
                 index: true
+            },
+            sourceType: {
+                type: String
+            },
+            buildingNumber: {
+                type: String
+            },
+            buildingName: {
+                type: String
+            },
+            floor: {
+                type: String
+            },
+            roomNumber: {
+                type: String
+            },
+            documentType: {
+                type: String
+            },
+            documentName: {
+                type: String
+            },
+            page: {
+                type: Number
+            },
+            source: {
+                type: String
+            },
+            academicEntities: {
+                type: Array
             }
         }
     },

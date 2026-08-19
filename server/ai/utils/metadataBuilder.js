@@ -1,14 +1,7 @@
+const { mapCategoryToDocumentType, normalizeDepartment } = require("./normalization");
+
 /**
  * Standardizes metadata format for vector chunks to ensure schema consistency
- * @param {Object} params
- * @param {string} params.documentId
- * @param {string} params.originalName
- * @param {number} params.pageNumber
- * @param {string} params.category
- * @param {string} params.department
- * @param {string} params.institution
- * @param {string} params.uploadedBy
- * @returns {Object} - Formatted metadata dictionary
  */
 const buildMetadata = ({
     documentId,
@@ -19,14 +12,22 @@ const buildMetadata = ({
     institution,
     uploadedBy
 }) => {
+    const cleanCategory = String(category || "general").trim().toLowerCase();
+    const docType = mapCategoryToDocumentType(cleanCategory);
+    const cleanDept = normalizeDepartment(department);
+
     return {
         documentId: String(documentId || "").trim(),
         originalName: String(originalName || "").trim(),
+        documentName: String(originalName || "").trim(),
         pageNumber: Number(pageNumber) || 1,
-        category: String(category || "others").trim().toLowerCase(),
-        department: String(department || "").trim(),
+        page: Number(pageNumber) || 1,
+        category: cleanCategory,
+        documentType: docType,
+        department: cleanDept,
         institution: String(institution || "").trim(),
-        uploadedBy: String(uploadedBy || "").trim()
+        uploadedBy: String(uploadedBy || "").trim(),
+        source: String(originalName || "").trim()
     };
 };
 

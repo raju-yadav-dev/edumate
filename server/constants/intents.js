@@ -23,6 +23,7 @@ const INTENTS = Object.freeze({
     TRAVEL_COST: "travel_cost",
     ETA: "eta",
     EMERGENCY: "emergency",
+    COURSE_RECOMMENDATION: "course_recommendation",
     UNKNOWN: "unknown"
 });
 
@@ -41,7 +42,8 @@ const INSTITUTIONAL_INTENTS = Object.freeze([
     INTENTS.DOCUMENT_QUESTION,
     INTENTS.ANNOUNCEMENT,
     INTENTS.COLLEGE_INFORMATION,
-    INTENTS.TRANSPORT
+    INTENTS.TRANSPORT,
+    INTENTS.COURSE_RECOMMENDATION
 ]);
 
 module.exports = {

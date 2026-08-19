@@ -85,7 +85,9 @@ export default function VoiceUIComponent({
             const height = canvas.height;
             const centerY = height / 2;
 
-            if (voiceState === "listening") {
+            const isMicActive = (voiceState === "listening" || voiceState === "user_speaking" || voiceState === "waiting_for_silence");
+
+            if (isMicActive) {
                 // Real-time Mic Waveform Analysis
                 const data = AudioAnalyserService.getWaveformData();
                 ctx.lineWidth = 3;
@@ -196,9 +198,9 @@ export default function VoiceUIComponent({
 
     // Determine Avatar Emotion State based on Voice State & Transcript content
     let emotion = "happy"; // default
-    if (voiceState === "thinking") {
+    if (voiceState === "thinking" || voiceState === "waiting_for_silence") {
         emotion = "thinking";
-    } else if (voiceState === "listening") {
+    } else if (voiceState === "listening" || voiceState === "user_speaking") {
         emotion = "listening";
     } else if (voiceState === "speaking") {
         emotion = "speaking";
@@ -214,6 +216,8 @@ export default function VoiceUIComponent({
     const stateLabels = {
         idle: "Ready",
         listening: "Listening...",
+        user_speaking: "Speaking...",
+        waiting_for_silence: "Processing...",
         thinking: "Thinking...",
         speaking: "Speaking...",
         paused: "Paused",
@@ -224,9 +228,12 @@ export default function VoiceUIComponent({
     const stateClasses = {
         idle: "state-idle",
         listening: "state-listening",
+        user_speaking: "state-listening",
+        waiting_for_silence: "state-thinking",
         thinking: "state-thinking",
         speaking: "state-speaking",
         paused: "state-paused",
+        interrupted: "state-ended",
         ended: "state-ended"
     };
 
@@ -393,16 +400,16 @@ export default function VoiceUIComponent({
                             </p>
                         ) : (
                             <p className="transcript-placeholder">
-                                {voiceState === "listening" ? "Listening to your voice..." : "Waiting..."}
+                                 {isMicActive ? "Listening to your voice..." : "Waiting..."}
                             </p>
                         )}
                     </div>
 
                     {/* Device Status indicators */}
                     <div className="voice-device-status-row">
-                        <span className={`status-badge ${voiceState === "listening" ? "is-active" : ""}`}>
-                            {voiceState === "listening" ? <FiMic className="icon text-green-400" /> : <FiMicOff className="icon" />}
-                            <small>{voiceState === "listening" ? "Mic Active" : "Mic Muted"}</small>
+                        <span className={`status-badge ${isMicActive ? "is-active" : ""}`}>
+                            {isMicActive ? <FiMic className="icon text-green-400" /> : <FiMicOff className="icon" />}
+                            <small>{isMicActive ? "Mic Active" : "Mic Muted"}</small>
                         </span>
                         <span className={`status-badge ${!isMuted ? "is-active" : ""}`}>
                             {isMuted ? <FiVolumeX className="icon" /> : <FiVolume2 className="icon text-blue-400" />}

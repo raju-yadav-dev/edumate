@@ -145,25 +145,13 @@ const startServer = async () => {
                     const campusDocs = await Document.find({ status: "active", category: /^campus_navigation/ });
                     
                     if (count === 0 && campusDocs.length > 0) {
-                        console.log(`[Startup Reindexing] Chunks missing sourceType metadata. Triggering auto-reindexing for ${campusDocs.length} campus building documents...`);
-                        for (const doc of campusDocs) {
-                            console.log(`[Startup Reindexing] Queueing document for background indexing: ${doc.originalName} (${doc._id})`);
-                            await indexingService.indexDocumentBackground(doc._id);
-                        }
-
-                        // Wait until the indexing worker queue has finished
-                        console.log("[Startup Reindexing] Awaiting completion of all RAG indexing jobs...");
-                        while (true) {
-                            const pendingOrProcessingExists = await Document.exists({
-                                status: { $ne: "deleted" },
-                                embeddingStatus: { $in: ["pending", "processing"] }
-                            });
-                            if (!pendingOrProcessingExists) {
-                                break;
-                            }
-                            await new Promise((resolve) => setTimeout(resolve, 500));
-                        }
-                        console.log("[Startup Reindexing] All startup RAG indexing jobs completed.");
+                        console.log(`[Startup] Migration required for ${campusDocs.length} documents.`);
+                        console.log("[Startup] Automatic migration skipped.");
+                        console.log("[Startup] Use the manual reindex operation when required.");
+                    } else if (campusDocs.length > 0) {
+                        console.log("[Startup] Existing knowledge base detected.");
+                        console.log("[Startup] Automatic reindexing skipped.");
+                        console.log("[Startup] Use the manual reindex operation when required.");
                     }
                     ragIndexingReady = true;
                 } catch (ragErr) {
