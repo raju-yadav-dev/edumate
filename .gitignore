@@ -32,4 +32,4 @@ build/
 # Logs
 # ===========================
 *.log
-npm-debug.log*
+npm-debug.log*git-large-files.txt
