@@ -2,14 +2,34 @@
 # Dependencies
 # ===========================
 node_modules/
+client/node_modules/
+server/node_modules/
 
 # ===========================
-# Login Details
+# Environment Files
 # ===========================
-server.env
 .env
+server/.env
+client/.env
 
 # ===========================
-# LLM Files
+# Local LLM Models
 # ===========================
-backend\ai-models
+backend/ai-models/
+server/ai-models/
+models/
+*.gguf
+
+# ===========================
+# Uploads / Generated Files
+# ===========================
+server/uploads/
+uploads/
+dist/
+build/
+
+# ===========================
+# Logs
+# ===========================
+*.log
+npm-debug.log*
