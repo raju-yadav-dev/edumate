@@ -35,7 +35,7 @@ Question: "${question}"`;
 
         // Strip backticks or json tags if the LLM returned them
         const cleaned = response.replace(/```json/g, "").replace(/```/g, "").trim();
-        const parsed = JSON.parse(cleaned);
+        const parsed = llmService.parseLlamaContent(cleaned);
 
         return {
             course: parsed.course || null,
@@ -91,6 +91,7 @@ For each extracted entity, define:
 8. category (e.g. "Engineering", "Management", "Science", or null)
 
 Return ONLY a valid JSON object matching the schema below. Do not output markdown, preambles, backticks, or other text.
+IMPORTANT: Your output must be a single valid JSON object. Do not include any explanations or backticks. Do not truncate the JSON.
 {
   "academicEntities": [
     {
@@ -115,11 +116,40 @@ ${textSnippet}
         const response = await llmService.generateCompletion([
             { role: "system", content: "You are a precise JSON extractor." },
             { role: "user", content: systemPrompt }
-        ], { temperature: 0.1, maxOutputTokens: 1000 });
+        ], { temperature: 0.1, maxOutputTokens: 2048 });
 
-        const cleaned = response.replace(/```json/g, "").replace(/```/g, "").trim();
-        const parsed = JSON.parse(cleaned);
-        return parsed.academicEntities || [];
+        if (!response || !response.trim()) {
+            return [];
+        }
+
+        let cleaned = response.trim();
+        // Clean markdown blocks
+        cleaned = cleaned.replace(/^```json/i, "").replace(/^```/, "").replace(/```$/, "").trim();
+        cleaned = cleaned.replace(/```json/g, "").replace(/```/g, "").trim();
+
+        // Extract boundary of JSON object
+        const startIdx = cleaned.indexOf("{");
+        const endIdx = cleaned.lastIndexOf("}");
+        if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+            cleaned = cleaned.substring(startIdx, endIdx + 1);
+        }
+
+        let parsed = null;
+        try {
+            parsed = JSON.parse(cleaned);
+        } catch (jsonErr) {
+            console.warn("[Entity Extraction] Direct JSON parsing failed, attempting to clean trailing commas: ", jsonErr.message);
+            try {
+                // Remove trailing commas inside arrays and objects
+                const relaxedJson = cleaned.replace(/,(\s*[\]}])/g, "$1");
+                parsed = JSON.parse(relaxedJson);
+            } catch (relaxedErr) {
+                console.error("[Entity Extraction] Relaxed JSON parsing also failed:", relaxedErr.message);
+                console.log("[Entity Extraction] Raw response was:", response);
+            }
+        }
+
+        return parsed && parsed.academicEntities ? parsed.academicEntities : [];
     } catch (e) {
         console.error("[Entity Extraction] Failed to extract academic metadata from document text:", e.message);
         return [];
@@ -160,7 +190,7 @@ ${context}Current User message: "${question}"`;
         let cleaned = String(response || "").trim();
         // Clean markdown code blocks if any
         cleaned = cleaned.replace(/^```json/i, "").replace(/^```/, "").replace(/```$/, "").trim();
-        return JSON.parse(cleaned);
+        return llmService.parseLlamaContent(cleaned);
     } catch (err) {
         console.error("Student profile extraction failed:", err);
         return {};

@@ -1,3 +1,44 @@
+if (typeof global.document === "undefined") {
+    const mockElement = {
+        appendChild: () => {},
+        setAttribute: () => {},
+        style: {},
+        sheet: {
+            insertRule: () => {},
+            cssRules: []
+        },
+        getElementsByTagName: () => [{
+            appendChild: () => {}
+        }],
+        getContext: () => ({
+            measureText: () => ({ width: 0 }),
+            fillRect: () => {},
+            drawImage: () => {},
+            fillText: () => {},
+            getImageData: () => ({
+                data: [0, 0, 0, 0]
+            })
+        }),
+        remove: () => {},
+        removeChild: () => {}
+    };
+    global.document = {
+        createElement: () => mockElement,
+        getElementsByTagName: () => [mockElement],
+        documentElement: mockElement,
+        head: mockElement,
+        body: mockElement
+    };
+}
+
+if (typeof global.Image === "undefined") {
+    global.Image = function() {
+        setTimeout(() => {
+            if (this.onload) this.onload();
+        }, 5);
+    };
+}
+
 const pdfParse = require("pdf-parse");
 
 /**
@@ -7,6 +48,20 @@ const pdfParse = require("pdf-parse");
  */
 const extractText = async (pdfBuffer) => {
     const pageTexts = [];
+    
+    // PDFJS Operator list codes corresponding to image rendering functions
+    const IMAGE_OPS = new Set([
+        63, // beginInlineImage
+        82, // paintJpegXObject
+        83, // paintImageMaskXObject
+        84, // paintImageMaskXObjectGroup
+        85, // paintImageXObject
+        86, // paintInlineImageXObject
+        87, // paintInlineImageXObjectGroup
+        88, // paintImageXObjectRepeat
+        89, // paintImageMaskXObjectRepeat
+        90  // paintSolidColorImageMask
+    ]);
 
     // Custom pagerender to capture text and page mappings
     const renderPage = async (pageData) => {
@@ -23,9 +78,29 @@ const extractText = async (pdfBuffer) => {
             lastY = item.transform[5];
         }
 
+        let hasImage = false;
+        try {
+            const operatorList = await pageData.getOperatorList();
+            if (operatorList && operatorList.fnArray) {
+                for (const fnId of operatorList.fnArray) {
+                    if (IMAGE_OPS.has(fnId)) {
+                        hasImage = true;
+                        break;
+                    }
+                }
+            }
+        } catch (opError) {
+            console.warn(`[PDF Extractor] Page ${pageData.pageNumber} operator list fetch failed: ${opError.message}`);
+        }
+
+        const trimmedText = text.trim();
+        const needsOcr = trimmedText.length < 50 || hasImage;
+
         pageTexts.push({
             pageNumber: pageData.pageNumber,
-            text: text.trim()
+            text: trimmedText,
+            hasImage,
+            needsOcr
         });
 
         return text;
@@ -42,7 +117,9 @@ const extractText = async (pdfBuffer) => {
         if (pageTexts.length === 0 && data.text) {
             pageTexts.push({
                 pageNumber: 1,
-                text: data.text.trim()
+                text: data.text.trim(),
+                hasImage: false,
+                needsOcr: true
             });
         }
 
@@ -51,7 +128,7 @@ const extractText = async (pdfBuffer) => {
 
         // Calculate total extracted character length to determine if OCR is needed
         const totalExtractedLength = pageTexts.reduce((sum, page) => sum + page.text.length, 0);
-        const requiresOcr = totalExtractedLength < 50; // OCR needed if text is extremely sparse (e.g., image-only PDFs)
+        const requiresOcr = totalExtractedLength < 50 || pageTexts.some(p => p.needsOcr);
 
         return {
             pages: pageTexts,
@@ -73,13 +150,15 @@ const extractText = async (pdfBuffer) => {
         
         pageTexts.push({
             pageNumber: 1,
-            text: fallbackText
+            text: fallbackText,
+            hasImage: false,
+            needsOcr: true
         });
         
         return {
             pages: pageTexts,
             numPages: 1,
-            requiresOcr: false,
+            requiresOcr: true,
             info: { Title: "Fallback Extracted Document" }
         };
     }

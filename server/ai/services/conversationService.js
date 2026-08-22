@@ -206,7 +206,7 @@ const saveMessageTurn = async ({ user, conversationId, question, response, inten
             id: aMsgId,
             parentId: uMsgId,
             role: "assistant",
-            content: response.answer || response,
+            content: (response && typeof response.answer === "string") ? response.answer : String(response || ""),
             intent: finalIntent,
             confidence: response.confidence === "high" ? 0.9 : response.confidence === "medium" ? 0.65 : 0.25,
             sources: response.sources || [],

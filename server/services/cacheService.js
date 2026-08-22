@@ -8,6 +8,7 @@ class MemoryCache {
     constructor() {
         this.store = new Map();
         this.categoryKeys = new Map(); // category -> Set of keys
+        this.maxSize = 100;
     }
 
     async get(key) {
@@ -17,10 +18,22 @@ class MemoryCache {
             this.store.delete(key);
             return null;
         }
+        // LRU order refresh
+        this.store.delete(key);
+        this.store.set(key, entry);
         return entry.value;
     }
 
     async set(key, value, ttl) {
+        if (this.store.has(key)) {
+            this.store.delete(key);
+        } else if (this.store.size >= this.maxSize) {
+            // Evict oldest entry (LRU)
+            const oldestKey = this.store.keys().next().value;
+            if (oldestKey) {
+                this.store.delete(oldestKey);
+            }
+        }
         const expiry = Date.now() + (ttl * 1000);
         this.store.set(key, { value, expiry });
     }
@@ -289,12 +302,23 @@ const del = async (query, documentType = "all", department = "all") => {
     await memoryCache.delete(key);
 };
 
+const lastInvalidationTimes = new Map();
+
 /**
  * Invalidates a specific category namespace and increments the global KB version
  */
 const invalidateCategory = async (category) => {
     if (!category) return;
     const cleanCat = String(category).trim().toLowerCase();
+    
+    // Prevent invalidation loops within 1 second (Requirement 3)
+    const now = Date.now();
+    const lastTime = lastInvalidationTimes.get(cleanCat);
+    if (lastTime && (now - lastTime < 1000)) {
+        return;
+    }
+    lastInvalidationTimes.set(cleanCat, now);
+
     console.log(`[Cache Invalidation] Invalidating category: "${cleanCat}"`);
 
     // Increment global KB version so all old keys are dynamically invalidated
@@ -332,6 +356,10 @@ const getStats = () => {
     };
 };
 
+const getCacheSize = () => {
+    return memoryCache.store.size;
+};
+
 module.exports = {
     get,
     set,
@@ -339,5 +367,6 @@ module.exports = {
     invalidateCategory,
     getKbVersion,
     incrementKbVersion,
-    getStats
+    getStats,
+    getCacheSize
 };

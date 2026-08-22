@@ -1,13 +1,6 @@
 const settingsService = require("./settingsService");
 
-// Secure fetch selection to support both Node global fetch and node-fetch package
-const fetch = (() => {
-    try {
-        return require("node-fetch");
-    } catch {
-        return global.fetch;
-    }
-})();
+const { fetchWithTimeoutAndRetry } = require("../utils/fetchHelper");
 
 const sleep = (durationMs) => new Promise((resolve) => setTimeout(resolve, durationMs));
 
@@ -228,7 +221,7 @@ const requestCompletion = async ({ apiKey, messages, timeoutMs, maxOutputTokens 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
     try {
-        const response = await fetch(url, {
+        const response = await fetchWithTimeoutAndRetry(url, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json"
@@ -370,7 +363,7 @@ const requestStream = async ({ apiKey, messages, onChunk, timeoutMs, signal, max
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?key=${apiKey}`;
 
     try {
-        const response = await fetch(url, {
+        const response = await fetchWithTimeoutAndRetry(url, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json"

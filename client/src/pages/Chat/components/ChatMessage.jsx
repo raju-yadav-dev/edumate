@@ -1,4 +1,3 @@
-import React from "react";
 import { GraduationCap, User } from "lucide-react";
 import SourceCitation from "./SourceCitation";
 import ChatActions from "./ChatActions";

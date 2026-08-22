@@ -68,6 +68,20 @@ const chunkSchema = new mongoose.Schema(
             },
             academicEntities: {
                 type: Array
+            },
+            isOcr: {
+                type: Boolean,
+                default: false
+            },
+            contentType: {
+                type: String,
+                default: "text"
+            },
+            mimeType: {
+                type: String
+            },
+            filename: {
+                type: String
             }
         }
     },

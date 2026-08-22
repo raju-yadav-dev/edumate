@@ -3,7 +3,7 @@ const path = require("path");
 const CrawlJob = require("../models/CrawlJob");
 const Document = require("../../models/Document");
 const supabase = require("../../config/supabase");
-const { client: qdrantClient, collectionName: qdrantCollection } = require("../../ai/config/qdrant");
+const { client: qdrantClient, collectionName: qdrantCollection, vectorName: qdrantVectorName } = require("../../ai/config/qdrant");
 const embeddingService = require("../../ai/services/embeddingService");
 const indexingService = require("../../ai/services/indexingService");
 const { RecursiveCharacterTextSplitter } = require("../../ai/utils/chunkDocument");
@@ -205,7 +205,9 @@ const runCrawlBackground = async (jobId) => {
 
                         points.push({
                             id: pointId,
-                            vector,
+                            vector: {
+                                [qdrantVectorName || "default"]: vector
+                            },
                             payload: {
                                 id: pointId,
                                 documentId: meta.documentId,
@@ -225,6 +227,9 @@ const runCrawlBackground = async (jobId) => {
                     const qdrantBatchSize = 100;
                     for (let start = 0; start < points.length; start += qdrantBatchSize) {
                         const subPoints = points.slice(start, start + qdrantBatchSize);
+                        console.log(`[QDRANT] Collection: ${qdrantCollection}`);
+                        console.log(`[QDRANT] Vector Name: ${qdrantVectorName || "default"}`);
+                        console.log(`[QDRANT] Dimension: ${expectedDimension}`);
                         await qdrantClient.upsert(qdrantCollection, {
                             wait: true,
                             points: subPoints
@@ -416,7 +421,9 @@ const runCrawlBackground = async (jobId) => {
 
                         points.push({
                             id: pointId,
-                            vector,
+                            vector: {
+                                [qdrantVectorName || "default"]: vector
+                            },
                             payload: {
                                 id: pointId,
                                 documentId: meta.documentId,
@@ -436,6 +443,9 @@ const runCrawlBackground = async (jobId) => {
                     const qdrantBatchSize = 100;
                     for (let start = 0; start < points.length; start += qdrantBatchSize) {
                         const subPoints = points.slice(start, start + qdrantBatchSize);
+                        console.log(`[QDRANT] Collection: ${qdrantCollection}`);
+                        console.log(`[QDRANT] Vector Name: ${qdrantVectorName || "default"}`);
+                        console.log(`[QDRANT] Dimension: ${expectedDimension}`);
                         await qdrantClient.upsert(qdrantCollection, {
                             wait: true,
                             points: subPoints
@@ -564,28 +574,10 @@ const runCrawlBackground = async (jobId) => {
  * Creates and schedules a web crawl job.
  */
 const startCrawl = async ({ url, maxPages, category, institution, user }) => {
-    const normalizedStart = normalizeUrl(url);
-    if (!normalizedStart) {
-        const error = new Error("Invalid start URL provided.");
-        error.statusCode = 400;
-        throw error;
-    }
-
-    const job = await CrawlJob.create({
-        url: normalizedStart,
-        maxPages: maxPages || 50,
-        category: category || "others",
-        institution: institution || user.institution || "",
-        createdBy: user._id,
-        status: "queued"
-    });
-
-    // Run in background asynchronously
-    runCrawlBackground(job._id).catch((err) => {
-        console.error(`[CrawlerService] Background crawl runtime failure:`, err);
-    });
-
-    return job;
+    // Disable web crawling completely as per CRITICAL FIX requirements
+    const error = new Error("Web crawling is currently disabled.");
+    error.statusCode = 400;
+    throw error;
 };
 
 const cancelCrawl = async ({ jobId, user }) => {

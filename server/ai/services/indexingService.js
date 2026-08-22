@@ -1,11 +1,12 @@
 const path = require("path");
+const { fetchWithTimeoutAndRetry } = require("../../utils/fetchHelper");
 const Document = require("../../models/Document");
 const supabase = require("../../config/supabase");
 const pdfExtractor = require("../utils/pdfExtractor");
 const { RecursiveCharacterTextSplitter } = require("../utils/chunkDocument");
 const metadataBuilder = require("../utils/metadataBuilder");
 const embeddingService = require("./embeddingService");
-const { client, collectionName } = require("../config/qdrant");
+const { client, collectionName, vectorName: qdrantVectorName } = require("../config/qdrant");
 const crypto = require("crypto");
 const UniversalExtractor = require("../../crawler/extractors/UniversalExtractor");
 
@@ -160,23 +161,14 @@ const extractTextFromScannedPdf = async (buffer) => {
             }
         ]
     };
-    
-    const fetch = (() => {
-        try {
-            return require("node-fetch");
-        } catch {
-            return global.fetch;
-        }
-    })();
-
-    const response = await fetch(url, {
+    const response = await fetchWithTimeoutAndRetry(url, {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
             "x-goog-api-key": apiKey
         },
         body: JSON.stringify(requestBody)
-    });
+    }, 45000, 3, 2000);
     
     const payload = await response.json();
     if (!response.ok) {
@@ -205,9 +197,84 @@ const extractTextFromScannedPdf = async (buffer) => {
     return pages;
 };
 
+/**
+ * Uses Gemini API to transcribe specific scanned PDF pages.
+ */
+const extractTextFromScannedPages = async (buffer, pageNumbers) => {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+        throw new Error("GEMINI_API_KEY is not set. Cannot run OCR fallback.");
+    }
+    const configuredModel = process.env.GEMINI_COMPLETION_MODEL;
+    const model = (!configuredModel || configuredModel === "gemini-2.5-flash") ? "gemini-3.5-flash" : configuredModel;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+    
+    const requestBody = {
+        contents: [
+            {
+                parts: [
+                    {
+                        inlineData: {
+                            mimeType: "application/pdf",
+                            data: buffer.toString("base64")
+                        }
+                    },
+                    {
+                        text: `This is a PDF file. Please perform high-quality OCR and text/table extraction ONLY on the following page numbers: ${pageNumbers.join(", ")}.
+For each page, start your output with [PAGE_START_X] and end with [PAGE_END_X], where X is the page number. 
+Ensure you preserve any tables, layouts, and all textual content on those pages. Do not write any explanations or preambles.`
+                    }
+                ]
+            }
+        ]
+    };
+    const response = await fetchWithTimeoutAndRetry(url, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": apiKey
+        },
+        body: JSON.stringify(requestBody)
+    }, 45000, 3, 2000);
+    
+    const payload = await response.json();
+    if (!response.ok) {
+        throw new Error(payload.error?.message || `Gemini page-level OCR failed with status ${response.status}`);
+    }
+    
+    const extractedText = payload.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    
+    const pages = [];
+    const pageRegex = /\[PAGE_START_(\d+)\]([\s\S]*?)\[PAGE_END_\1\]/g;
+    let match;
+    while ((match = pageRegex.exec(extractedText)) !== null) {
+        pages.push({
+            pageNumber: parseInt(match[1]),
+            text: match[2].trim()
+        });
+    }
+    
+    if (pages.length === 0 && extractedText.trim().length > 0) {
+        if (pageNumbers.length === 1) {
+            pages.push({
+                pageNumber: pageNumbers[0],
+                text: extractedText.trim()
+            });
+        } else {
+            console.warn("[OCR] Gemini returned text without page tags for multiple pages.");
+        }
+    }
+    
+    return pages;
+};
+
 const bufferCache = new Map();
-let isWorkerRunning = false;
-const INDEXING_CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.INDEXING_CONCURRENCY) || 3));
+const manuallyQueuedIds = new Set();
+const INDEXING_CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.INDEXING_CONCURRENCY) || 1));
+const workers = Array.from({ length: INDEXING_CONCURRENCY }, (_, index) => ({
+    id: index + 1,
+    busy: false
+}));
 
 const withTimeout = (promise, ms, message = "Operation timed out") => {
     let timeoutId;
@@ -226,8 +293,15 @@ const downloadFromSupabase = async (storagePath) => {
 };
 
 const claimNextPendingDocument = async () => {
+    if (manuallyQueuedIds.size === 0) {
+        return null;
+    }
+    const nextId = manuallyQueuedIds.values().next().value;
+    manuallyQueuedIds.delete(nextId);
+
     return Document.findOneAndUpdate(
         {
+            _id: nextId,
             status: { $ne: "deleted" },
             embeddingStatus: "pending"
         },
@@ -241,68 +315,58 @@ const claimNextPendingDocument = async () => {
             }
         },
         {
-            sort: { updatedAt: 1 },
             returnDocument: "after"
         }
     );
 };
 
 const processNextJob = async () => {
-    if (isWorkerRunning) return;
-    isWorkerRunning = true;
+    // If the queue is empty, do nothing
+    if (manuallyQueuedIds.size === 0) return;
 
-    try {
-        const workerLoop = async (workerId) => {
-            let emptyPolls = 0;
-            while (true) {
-                const nextDoc = await claimNextPendingDocument();
-                if (!nextDoc) {
-                    emptyPolls += 1;
-                    if (emptyPolls < 3) {
-                        await new Promise((resolve) => setTimeout(resolve, 250));
-                        continue;
+    // Find any idle worker
+    const idleWorker = workers.find(w => !w.busy);
+    if (!idleWorker) return; // All workers are busy
+
+    // Claim next pending document
+    const nextDoc = await claimNextPendingDocument();
+    if (!nextDoc) return; // No documents can be claimed
+
+    idleWorker.busy = true;
+
+    // Process document in background asynchronously
+    (async () => {
+        try {
+            console.log(`[IndexingService] Worker ${idleWorker.id} indexing document ${nextDoc._id}`);
+            await runIndexingJob(nextDoc._id);
+        } catch (jobErr) {
+            console.error(`[IndexingService] Worker ${idleWorker.id} failed to run indexing job for document ${nextDoc._id}:`, jobErr);
+            try {
+                await Document.findByIdAndUpdate(nextDoc._id, {
+                    $set: {
+                        embeddingStatus: "failed",
+                        "metadata.error": jobErr.message,
+                        "metadata.lastErrorAt": new Date().toISOString()
                     }
-                    break;
-                }
-
-                emptyPolls = 0;
-                console.log(`[IndexingService] Worker ${workerId} indexing document ${nextDoc._id}`);
-                try {
-                    await runIndexingJob(nextDoc._id);
-                } catch (jobErr) {
-                    console.error(`[IndexingService] Worker ${workerId} failed to run indexing job for document ${nextDoc._id}:`, jobErr);
-                    try {
-                        await Document.findByIdAndUpdate(nextDoc._id, {
-                            $set: {
-                                embeddingStatus: "failed",
-                                "metadata.error": jobErr.message,
-                                "metadata.lastErrorAt": new Date().toISOString()
-                            }
-                        });
-                    } catch (saveErr) {
-                        console.error("Failed to mark document as failed:", saveErr);
-                    }
-                }
-
-                const moreWork = await Document.exists({
-                    status: { $ne: "deleted" },
-                    embeddingStatus: "pending"
                 });
-
-                if (!moreWork) {
-                    await new Promise((resolve) => setTimeout(resolve, 250));
-                }
+            } catch (saveErr) {
+                console.error("Failed to mark document as failed:", saveErr);
             }
-        };
+        } finally {
+            idleWorker.busy = false;
+            // Yield to keep Express responsive
+            await new Promise(resolve => setImmediate(resolve));
+            // Trigger processing of next queued document
+            processNextJob();
+        }
+    })();
 
-        const workers = Array.from({ length: INDEXING_CONCURRENCY }, (_, index) => workerLoop(index + 1));
-        await Promise.all(workers);
-    } catch (err) {
-        console.error("Indexing worker queue error:", err);
-    } finally {
-        isWorkerRunning = false;
+    // Check if more idle workers can immediately pull work
+    if (manuallyQueuedIds.size > 0) {
+        processNextJob();
     }
 };
+
 
 const indexDocumentBackground = async (documentId, fileBuffer = null) => {
     const document = await Document.findById(documentId);
@@ -321,6 +385,8 @@ const indexDocumentBackground = async (documentId, fileBuffer = null) => {
     if (fileBuffer) {
         bufferCache.set(String(documentId), fileBuffer);
     }
+
+    manuallyQueuedIds.add(String(documentId));
 
     processNextJob().catch((err) => {
         console.error("Background worker process start failure:", err);
@@ -361,6 +427,16 @@ const runIndexingJob = async (documentId) => {
     const fileBuffer = bufferCache.get(cacheKey);
     bufferCache.delete(cacheKey);
 
+    let buffer = fileBuffer;
+    let text = "";
+    let pageCount = 1;
+    let rawChunks = [];
+    let ocrFlag = false;
+    let academicEntities = [];
+    let embeddings = [];
+    let points = [];
+    let pages = [];
+
     try {
         document.embeddingStatus = "processing";
         document.metadata = {
@@ -370,9 +446,15 @@ const runIndexingJob = async (documentId) => {
         };
         await document.save();
 
-        let buffer = fileBuffer;
         if (!buffer) {
-            buffer = await withTimeout(downloadFromSupabase(document.storagePath), 35000, "Supabase file download timed out (35s)");
+            const fs = require("fs");
+            const localPath = path.join(__dirname, "../../uploads/documents", document.storedName || "");
+            if (fs.existsSync(localPath)) {
+                console.log(`[INDEX] Loading document from local path: ${localPath}`);
+                buffer = fs.readFileSync(localPath);
+            } else {
+                buffer = await withTimeout(downloadFromSupabase(document.storagePath), 35000, "Supabase file download timed out (35s)");
+            }
         }
 
         console.log(`[INDEX] Starting document: ${document.originalName} (${documentId})`);
@@ -381,6 +463,7 @@ const runIndexingJob = async (documentId) => {
         console.log(`[EXTRACT] Started`);
         const ext = path.extname(document.originalName || "").toLowerCase();
         const isPdf = document.mimeType === "application/pdf" || ext === ".pdf";
+        const isImage = document.mimeType && document.mimeType.startsWith("image/");
         
         let text = "";
         let pageCount = 1;
@@ -391,50 +474,60 @@ const runIndexingJob = async (documentId) => {
 
         if (isPdf) {
             const parsed = await withTimeout(pdfExtractor.extractText(buffer), 45000, "PDF text extraction timed out (45s)");
-            ocrFlag = parsed.requiresOcr;
-            pageCount = parsed.numPages || 1;
-            
-            let pages = parsed.pages || [];
-            const fullText = pages.map(p => p.text || "").join("\n");
-            text = fullText;
+            pages = parsed.pages || [];
+            pageCount = parsed.numPages || pages.length;
 
-            if (ocrFlag || text.trim().length === 0) {
-                console.log(`[INDEX] PDF requires OCR or has no text layer. Attempting Gemini scanned-PDF OCR...`);
+            const ocrPages = pages.filter(p => p.needsOcr).map(p => p.pageNumber);
+            const requiresOcr = ocrPages.length > 0;
+
+            console.log(`[OCR] Required: ${requiresOcr}`);
+            if (requiresOcr) {
+                console.log(`[OCR] Pages detected: ${ocrPages.length}`);
                 try {
-                    pages = await withTimeout(extractTextFromScannedPdf(buffer), 60000, "Gemini OCR timed out (60s)");
-                    pageCount = pages.length;
-                    text = pages.map(p => p.text || "").join("\n");
-                    ocrFlag = false; // Successfully ran OCR
-                    console.log(`[INDEX] Gemini scanned-PDF OCR successful. Extracted ${text.length} characters.`);
+                    const ocrResults = await withTimeout(
+                        extractTextFromScannedPages(buffer, ocrPages),
+                        90000,
+                        "Gemini OCR timed out (90s)"
+                    );
+                    for (const ocrPage of ocrResults) {
+                        const page = pages.find(p => p.pageNumber === ocrPage.pageNumber);
+                        if (page) {
+                            console.log(`[OCR] Processing page: ${page.pageNumber}`);
+                            console.log(`[OCR] Text extracted: ${ocrPage.text.length} characters`);
+                            if (page.text.trim().length > 0) {
+                                page.text = page.text.trim() + "\n\n=== OCR Content ===\n" + ocrPage.text.trim();
+                            } else {
+                                page.text = ocrPage.text.trim();
+                            }
+                        }
+                    }
+                    console.log(`[OCR] Completed`);
                 } catch (ocrErr) {
-                    console.error("[INDEX] Gemini scanned-PDF OCR failed:", ocrErr.message);
-                    
-                    // Fall back gracefully to binary string extraction/placeholder to prevent queue crashes when Gemini is unconfigured or rate-limited
-                    const rawStr = buffer.toString("binary");
-                    const printableMatches = rawStr.match(/[\x20-\x7E]{4,}/g) || [];
-                    const cleanWords = printableMatches
-                        .map(s => s.trim())
-                        .filter(s => s.length > 3 && !s.startsWith("/") && !s.includes("obj") && !s.includes("endobj"));
-                    
-                    const fallbackText = cleanWords.slice(0, 150).join(" ");
-                    text = fallbackText || `[Scanned PDF: Text extraction unavailable. ${ocrErr.message}]`;
-                    pages = [{
-                        pageNumber: 1,
-                        text: text
-                    }];
-                    pageCount = 1;
-                    ocrFlag = false;
-                    console.warn(`[INDEX] OCR failed or unavailable. Fallback plain text extracted instead (${text.length} characters).`);
+                    console.error("[INDEX] Gemini page-level OCR failed:", ocrErr.message);
+                    console.warn("[INDEX] Falling back to text layer or basic extraction...");
+                    for (const page of pages) {
+                        if (page.needsOcr && page.text.trim().length === 0) {
+                            page.text = `[Scanned PDF Page ${page.pageNumber}: Text extraction unavailable. OCR failed: ${ocrErr.message}]`;
+                        }
+                    }
                 }
             }
+
+            text = pages.map(p => p.text || "").join("\n");
 
             // 2. Chunking Stage
             console.log(`[CHUNK] Started`);
             for (const page of pages) {
                 const pageChunks = splitter.splitText(page.text || "");
                 pageChunks.forEach((chunk) => {
-                    rawChunks.push({ content: chunk, pageNumber: page.pageNumber });
+                    rawChunks.push({
+                        content: chunk,
+                        pageNumber: page.pageNumber,
+                        isOcr: page.needsOcr || false,
+                        contentType: page.needsOcr ? "ocr" : "text"
+                    });
                 });
+                page.text = ""; // Release page text buffer immediately (Requirement 6)
             }
         } else if (document.category && document.category.startsWith("campus_navigation")) {
             console.log(`[INDEX] Custom Campus Navigation parser activated for ${document.originalName}`);
@@ -451,11 +544,17 @@ Details: ${item.description}`;
                 return {
                     content: chunkContent,
                     pageNumber: 1,
-                    campusMeta: item
+                    campusMeta: item,
+                    isOcr: false,
+                    contentType: "text"
                 };
             });
             text = textContent;
         } else {
+            if (isImage) {
+                console.log(`[IMAGE INDEX] Starting image: ${document.originalName}`);
+                console.log(`[IMAGE INDEX] MIME: ${document.mimeType}`);
+            }
             const extracted = await withTimeout(UniversalExtractor.extract(buffer, document.originalName), 45000, "Document extraction timed out (45s)");
             text = extracted.text || "";
             
@@ -463,12 +562,24 @@ Details: ${item.description}`;
                 throw new Error("Extraction returned empty text (Empty or unreadable file).");
             }
 
+            if (isImage) {
+                console.log(`[IMAGE INDEX] Extracted text:\n${text}`);
+            }
+
             // 2. Chunking Stage
             console.log(`[CHUNK] Started`);
             const splits = splitter.splitText(text);
             splits.forEach((chunk) => {
-                rawChunks.push({ content: chunk, pageNumber: 1 });
+                rawChunks.push({
+                    content: chunk,
+                    pageNumber: 1,
+                    isOcr: isImage ? true : false,
+                    contentType: isImage ? "ocr_text" : "text"
+                });
             });
+            if (isImage) {
+                console.log(`[IMAGE INDEX] Created chunks: ${rawChunks.length}`);
+            }
         }
 
         let academicEntities = [];
@@ -491,6 +602,9 @@ Details: ${item.description}`;
         // 3. Embedding Stage
         console.log(`[EMBEDDING] Started`);
         console.log(`[EMBEDDING] Chunk count before embedding: ${rawChunks.length}`);
+        if (isImage) {
+            console.log(`[IMAGE INDEX] Embedding image chunks: ${rawChunks.length}`);
+        }
         const embeddings = await withTimeout(
             embeddingService.getChunksEmbeddings(rawChunks.map((chunk) => chunk.content)),
             50000,
@@ -545,7 +659,9 @@ Details: ${item.description}`;
 
             points.push({
                 id: pointId,
-                vector,
+                vector: {
+                    [qdrantVectorName || "default"]: vector
+                },
                 payload: {
                     id: pointId,
                     documentId: meta.documentId,
@@ -555,7 +671,7 @@ Details: ${item.description}`;
                     pageNumber: meta.pageNumber,
                     page: meta.page,
                     category: meta.category,
-                    documentType: meta.documentType,
+                    documentType: isImage ? "image" : meta.documentType,
                     department: isCampusNav ? (chunk.campusMeta?.description || "") : meta.department,
                     institution: meta.institution,
                     source: meta.source,
@@ -564,16 +680,26 @@ Details: ${item.description}`;
                     chunkIndex: index,
                     createdAt: timestamp,
                     contentHash: document.contentHash || document.checksum,
-                    sourceType: isCampusNav ? "campus_navigation" : undefined,
+                    sourceType: isImage ? "image" : (isCampusNav ? "campus_navigation" : "pdf"),
                     buildingNumber: isCampusNav ? (chunk.campusMeta?.buildingNumber || "") : undefined,
                     buildingName: isCampusNav ? (chunk.campusMeta?.buildingName || "") : undefined,
                     floor: isCampusNav ? (chunk.campusMeta?.floor || "") : undefined,
-                    roomNumber: isCampusNav ? (chunk.campusMeta?.roomNumber || "") : undefined
+                    roomNumber: isCampusNav ? (chunk.campusMeta?.roomNumber || "") : undefined,
+                    mimeType: isImage ? document.mimeType : undefined,
+                    filename: isImage ? document.originalName : undefined,
+                    isOcr: chunk.isOcr || false,
+                    contentType: chunk.contentType || "text"
                 }
             });
         });
 
         console.log(`[QDRANT] Vector count before upsert: ${points.length}`);
+        if (isImage) {
+            console.log(`[IMAGE INDEX] Qdrant upsert: ${points.length} vector${points.length === 1 ? "" : "s"}`);
+        }
+        console.log(`[QDRANT] Collection: ${collectionName}`);
+        console.log(`[QDRANT] Vector Name: ${qdrantVectorName || "default"}`);
+        console.log(`[QDRANT] Dimension: ${expectedDimension}`);
         await withTimeout(client.upsert(collectionName, { wait: true, points }), 30000, "Qdrant vector database upload timed out (30s)");
         console.log(`[QDRANT] Upsert completed`);
 
@@ -631,16 +757,20 @@ Details: ${item.description}`;
                         originalName: document.originalName || "",
                         documentName: document.originalName || "",
                         category: document.category || "",
-                        documentType: meta.documentType,
+                        documentType: isImage ? "image" : meta.documentType,
                         institution: document.institution || "",
                         academicEntities: academicEntities,
                         department: isCampusNav ? (chunk.campusMeta?.description || "") : meta.department,
                         source: document.originalName || "",
-                        sourceType: isCampusNav ? "campus_navigation" : undefined,
+                        sourceType: isImage ? "image" : (isCampusNav ? "campus_navigation" : "pdf"),
                         buildingNumber: isCampusNav ? (chunk.campusMeta?.buildingNumber || "") : undefined,
                         buildingName: isCampusNav ? (chunk.campusMeta?.buildingName || "") : undefined,
                         floor: isCampusNav ? (chunk.campusMeta?.floor || "") : undefined,
-                        roomNumber: isCampusNav ? (chunk.campusMeta?.roomNumber || "") : undefined
+                        roomNumber: isCampusNav ? (chunk.campusMeta?.roomNumber || "") : undefined,
+                        mimeType: isImage ? document.mimeType : undefined,
+                        filename: isImage ? document.originalName : undefined,
+                        isOcr: chunk.isOcr || false,
+                        contentType: chunk.contentType || "text"
                     }
                 };
             });
@@ -664,6 +794,9 @@ Details: ${item.description}`;
         };
         await document.save();
         console.log(`[INDEX] Document completed successfully with ${pointCount} Qdrant vectors`);
+        if (isImage) {
+            console.log(`[IMAGE INDEX] Completed: ${document.originalName}`);
+        }
     } catch (err) {
         console.error(`[INDEX] Background Indexing failed for ${documentId}:`, err);
         document.embeddingStatus = "failed";
@@ -675,29 +808,52 @@ Details: ${item.description}`;
         };
         await document.save();
         throw err; // Do not hide exceptions
+    } finally {
+        // Free memory after every indexed document (Requirement 2 & 6)
+        buffer = null;
+        text = null;
+        rawChunks = [];
+        embeddings = [];
+        points = [];
+        pages = [];
+        if (global.gc) {
+            try {
+                global.gc();
+            } catch (gcErr) {}
+        }
     }
 };
 
-setTimeout(async () => {
-    try {
-        const stuckDocs = await Document.updateMany(
-            { status: { $ne: "deleted" }, embeddingStatus: "processing" },
-            { 
-                $set: { 
-                    embeddingStatus: "pending",
-                    "metadata.indexAttempts": 0
-                } 
-            }
-        );
-        if (stuckDocs.modifiedCount > 0) {
-            console.log(`[IndexingService] Reset ${stuckDocs.modifiedCount} stuck "processing" documents back to "pending" and cleared attempts.`);
-        }
-    } catch (err) {
-        console.error("Failed to reset stuck processing documents on start:", err);
-    }
-
-    processNextJob().catch((err) => console.error("Initial worker queue start failed:", err));
-}, 3000);
+// Automatic startup worker queue and stale reset is disabled as per CRITICAL FIX requirements
+// setTimeout(async () => {
+//     try {
+//         const staleThresholdMs = Number(process.env.STALE_JOB_THRESHOLD_MS) || 15 * 60 * 1000;
+//         const cutoffTime = new Date(Date.now() - staleThresholdMs);
+//         const stuckDocs = await Document.updateMany(
+//             { 
+//                 status: { $ne: "deleted" }, 
+//                 embeddingStatus: "processing",
+//                 $or: [
+//                     { updatedAt: { $lt: cutoffTime } },
+//                     { "metadata.lastIndexAttemptAt": { $lt: cutoffTime.toISOString() } }
+//                 ]
+//             },
+//             { 
+//                 $set: { 
+//                     embeddingStatus: "pending",
+//                     "metadata.indexAttempts": 0
+//                 } 
+//             }
+//         );
+//         if (stuckDocs.modifiedCount > 0) {
+//             console.log(`[IndexingService] Reset ${stuckDocs.modifiedCount} stuck "processing" documents back to "pending" and cleared attempts.`);
+//         }
+//     } catch (err) {
+//         console.error("Failed to reset stuck processing documents on start:", err);
+//     }
+// 
+//     processNextJob().catch((err) => console.error("Initial worker queue start failed:", err));
+// }, 3000);
 
 const deleteDocumentIndex = async (documentId) => {
     try {
@@ -740,25 +896,22 @@ const reindexDocument = async ({ documentId }) => {
         indexAttempts: 0
     };
     await document.save();
+    
+    manuallyQueuedIds.add(String(documentId));
+
     indexDocumentBackground(document._id).catch(() => {});
     return document;
 };
 
 const rebuildAllEmbeddings = async () => {
-    const documents = await Document.find({
-        status: { $ne: "deleted" }
-    });
-
-    for (const doc of documents) {
-        indexDocumentBackground(doc._id).catch(() => {});
-    }
-
-    return { count: documents.length };
+    // Disable rebuilding all embeddings completely
+    return { count: 0 };
 };
 
 module.exports = {
     indexDocumentBackground,
     deleteDocumentIndex,
     reindexDocument,
-    rebuildAllEmbeddings
+    rebuildAllEmbeddings,
+    runIndexingJob
 };

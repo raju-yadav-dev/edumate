@@ -1,4 +1,4 @@
-import React, { createContext, useState, useEffect, useCallback } from "react";
+import { createContext, useState, useEffect, useCallback } from "react";
 import * as api from "../services/chatService";
 
 export const ChatContext = createContext();

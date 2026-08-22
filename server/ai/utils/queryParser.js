@@ -84,7 +84,92 @@ const detectQueryMode = (query) => {
     return "TARGETED";
 };
 
+const normalizeQueryText = (query) => {
+    if (!query) return "";
+    let q = String(query).toLowerCase();
+    
+    // Punctuation cleanup: replace punctuation with space, but keep letters, numbers, and spaces
+    q = q.replace(/[?.!,:;()'"\-_[\]{}]/g, " ");
+    
+    // Normalize whitespace
+    q = q.replace(/\s+/g, " ").trim();
+    
+    // Acronym and abbreviation expansion
+    q = q.replace(/\bdept\b/g, "department");
+    q = q.replace(/\bh\.?o\.?d\b/g, "head of department");
+    q = q.replace(/\bug\b/g, "undergraduate");
+    q = q.replace(/\bpg\b/g, "postgraduate");
+    q = q.replace(/\bcss\b/g, "computational sciences");
+    q = q.replace(/\bcse\b/g, "computer science and engineering");
+    q = q.replace(/\bb\.?tech\b/g, "bachelor of technology");
+    q = q.replace(/\bbca\b/g, "bachelor of computer applications");
+    q = q.replace(/\bmca\b/g, "master of computer applications");
+    q = q.replace(/\bbba\b/g, "bachelor of business administration");
+    q = q.replace(/\bmba\b/g, "master of business administration");
+    q = q.replace(/\brm\b/g, "room");
+    q = q.replace(/\broom\s+(?:no|num|number)\b/g, "room");
+    q = q.replace(/\bmaths?\b/g, "mathematics");
+    q = q.replace(/\bphysics\b/g, "physics");
+    q = q.replace(/\bplacement\s+cell\b/g, "training & placement cell");
+    q = q.replace(/\bdocuments?\b/g, "document");
+    
+    return q.replace(/\s+/g, " ").trim();
+};
+
+const detectIntent = (normalizedQuery) => {
+    const q = String(normalizedQuery || "").toLowerCase();
+    
+    if (/\b(admission|admissions|enroll|enrollment|apply|application|eligibility|admission criteria|eligibilty)\b/.test(q)) {
+        return "Admissions";
+    }
+    if (/\b(fee|fees|tuition|cost|payment|charges|refund|cost)\b/.test(q)) {
+        return "Fees";
+    }
+    if (/\b(placement|placements|career|job|jobs|internship|internships|recruitment|recruiter|recruiters|packages|package)\b/.test(q)) {
+        return "Placements";
+    }
+    if (/\b(hostel|mess|accommodation|residence|lodging)\b/.test(q)) {
+        return "Hostel";
+    }
+    if (/\b(library|book|books|journal|journals|reading room)\b/.test(q)) {
+        return "Library";
+    }
+    if (/\b(scholarship|scholarships|financial aid|stipend|waiver)\b/.test(q)) {
+        return "Scholarships";
+    }
+    if (/\b(timetable|routine|schedule|class timings?|timing|timings)\b/.test(q)) {
+        return "Timetable";
+    }
+    if (/\b(exam|exams|examination|examinations|test|tests|result|results|marksheet|grading)\b/.test(q)) {
+        return "Examination";
+    }
+    if (/\b(club|clubs|society|societies)\b/.test(q)) {
+        return "Clubs";
+    }
+    if (/\b(notice|notices|circular|circulars|announcement|announcements|update|updates|notification|notifications)\b/.test(q)) {
+        return "Notices";
+    }
+    if (/\b(hod|head of department|head of the department|head of dept|head of computational sciences|head of css)\b/.test(q)) {
+        return "HOD / Department";
+    }
+    if (/\b(department|departments|branch|branches|discipline|disciplines|school of)\b/.test(q)) {
+        return "HOD / Department";
+    }
+    if (/\b(where is|where can i find|location of|how to reach|go to|directions|route|navigation|building|floor|room|lab|labs|office|offices|placement cell|admin office|canteen|gym|gymnasium|auditorium|sick room|board room|cash counter|moot court|skills hub)\b/.test(q)) {
+        return "Campus Navigation";
+    }
+    if (/\b(faculty|professor|professors|teacher|teachers|lecturer|lecturers|dean|principal|registrar|staff)\b/.test(q)) {
+        return "Faculty";
+    }
+    if (/\b(course|courses|program|programs|programme|programmes|degree|degrees|syllabus|curriculum|subject|subjects)\b/.test(q)) {
+        return "Courses";
+    }
+    return "General Knowledge Base";
+};
+
 module.exports = {
     detectTypeAndDepartment,
-    detectQueryMode
+    detectQueryMode,
+    normalizeQueryText,
+    detectIntent
 };

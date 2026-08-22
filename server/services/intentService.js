@@ -22,6 +22,7 @@ const intentRules = [
     { intent: INTENTS.TRAVEL_COST, score: 0.84, pattern: /\b(fare|travel cost|taxi cost|cab cost)\b/i },
     { intent: INTENTS.ETA, score: 0.84, pattern: /\b(eta|arrival|time to reach|how long)\b/i },
     { intent: INTENTS.EMERGENCY, score: 0.95, pattern: /\b(emergency|police|ambulance|hospital|urgent|help now)\b/i },
+    { intent: INTENTS.COURSE_CATALOGUE_QUERY, score: 0.97, pattern: /^(show|list|tell|what|which|get|give)\s+(me\s+)?(all\s+)?(course|courses|programme|programmes|degree|degrees|department|departments)(s)?(\s+are)?\s+(offered|available|there|exist|run|have|has|conducted|offering|we\s+have)|^(list|show|all)\s+(courses|programmes|degrees)$|^(what|which)\s+(courses|programmes)\s+(does|do)\s+(brainware|university)\s+(offer|have|run)/i },
     { intent: INTENTS.COURSE_RECOMMENDATION, score: 0.96, pattern: /\b(better for me|best for me|should i choose|suits me|what should i study|which course is best|which course is better|which course should i|choose a course|recommend a course)\b|(?:\b(?:score|marks|percent|%|stream|arts|science|commerce|12th|class 12)\b.*\b(?:which|what|better|best|choose|study|suits?)\b)/i }
 ];
 

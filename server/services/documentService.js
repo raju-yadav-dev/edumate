@@ -80,12 +80,15 @@ const getSignedUrlForDoc = async (storagePath, isCrawlerDoc = false) => {
 };
 
 const uploadToSupabase = async (file, category) => {
-    const extension = getSafeExtension(file.originalname);
+    let extension = getSafeExtension(file.originalname);
+    const isImage = file.mimetype && file.mimetype.startsWith("image/");
+    if (isImage) {
+        extension = ".png";
+    }
     const uniqueName = `${Date.now()}-${crypto.randomUUID()}${extension}`;
     const storagePath = `${category}/${uniqueName}`;
 
-    const isImage = file.mimetype && file.mimetype.startsWith("image/");
-    const uploadMimeType = isImage ? "application/pdf" : file.mimetype;
+    const uploadMimeType = isImage ? "image/png" : file.mimetype;
 
     const { error } = await supabase.storage
         .from(BUCKET)
@@ -132,7 +135,11 @@ const uploadDocument = async ({ file, body, user }) => {
     }
 
     const category = sanitizeCategory(body.category);
-    const extension = getSafeExtension(file.originalname);
+    let extension = getSafeExtension(file.originalname);
+    const isImage = file.mimetype && file.mimetype.startsWith("image/");
+    if (isImage) {
+        extension = ".png";
+    }
     const uniqueName = `${Date.now()}-${crypto.randomUUID()}${extension}`;
     const storagePath = `${category}/${uniqueName}`;
 
@@ -171,7 +178,12 @@ const uploadDocument = async ({ file, body, user }) => {
     (async () => {
         try {
             const isImage = file.mimetype && file.mimetype.startsWith("image/");
-            const uploadMimeType = isImage ? "application/pdf" : file.mimetype;
+            const uploadMimeType = isImage ? "image/png" : file.mimetype;
+
+            // Trigger background indexing immediately with the buffer first!
+            indexingService.indexDocumentBackground(document._id, file.buffer).catch((err) => {
+                console.error(`Failed to trigger background indexing for ${document._id}:`, err);
+            });
 
             const { error: uploadError } = await supabase.storage
                 .from(BUCKET)
@@ -183,20 +195,24 @@ const uploadDocument = async ({ file, body, user }) => {
             if (uploadError) {
                 throw uploadError;
             }
-
-            // Once uploaded successfully, trigger background indexing
-            indexingService.indexDocumentBackground(document._id, file.buffer).catch((err) => {
-                console.error(`Failed to trigger background indexing for ${document._id}:`, err);
-            });
         } catch (uploadErr) {
             console.error(`Failed to upload ${document._id} to Supabase in background:`, uploadErr);
-            document.embeddingStatus = "failed";
-            document.metadata = {
-                ...(document.metadata || {}),
-                error: `Background upload failed: ${uploadErr.message}`,
-                notes: (document.metadata?.notes || "") + `\n[Upload Error: ${uploadErr.message}]`
-            };
-            await document.save();
+            const currentDoc = await Document.findById(document._id);
+            if (currentDoc && currentDoc.embeddingStatus !== "indexed" && currentDoc.embeddingStatus !== "processing") {
+                currentDoc.embeddingStatus = "failed";
+                currentDoc.metadata = {
+                    ...(currentDoc.metadata || {}),
+                    error: `Background upload failed: ${uploadErr.message}`,
+                    notes: (currentDoc.metadata?.notes || "") + `\n[Upload Error: ${uploadErr.message}]`
+                };
+                await currentDoc.save();
+            } else if (currentDoc) {
+                currentDoc.metadata = {
+                    ...(currentDoc.metadata || {}),
+                    notes: (currentDoc.metadata?.notes || "") + `\n[Upload Error: ${uploadErr.message}]`
+                };
+                await currentDoc.save();
+            }
         }
     })();
 
@@ -245,12 +261,15 @@ const listDocuments = async ({ query, user }) => {
         ];
 
         try {
-            const { client: qdrantClient, collectionName: qdrantColl } = require("../ai/config/qdrant");
+            const { client: qdrantClient, collectionName: qdrantColl, vectorName: qdrantVecName } = require("../ai/config/qdrant");
             const embeddingService = require("../ai/services/embeddingService");
             const queryEmbedding = await embeddingService.getQueryEmbedding(cleanSearch).catch(() => null);
             if (queryEmbedding) {
                 const results = await qdrantClient.search(qdrantColl, {
-                    vector: queryEmbedding,
+                    vector: {
+                        name: qdrantVecName || "default",
+                        vector: queryEmbedding
+                    },
                     limit: 50,
                     with_payload: true
                 }).catch(() => []);
@@ -643,26 +662,23 @@ const indexDocumentBackground = async (documentId, fileBuffer = null) => {
 };
 
 const bulkReindex = async ({ category, ids, user }) => {
-    const filter = { status: { $ne: "deleted" } };
-    if (ids && Array.isArray(ids) && ids.length > 0) {
-        filter._id = { $in: ids };
-    } else if (category && category !== "root") {
-        const cleanCat = sanitizeCategory(category);
-        filter.category = { $regex: new RegExp(`^${cleanCat}(_|\/|$)`, "i") };
+    // Only allow manual indexing of specific document IDs (NO Global Reindex)
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+        return { count: 0, scope: ids?.length ? "files" : category === "root" ? "root" : "folder" };
     }
+
+    const filter = { status: { $ne: "deleted" }, _id: { $in: ids } };
 
     if (category && category !== "root") {
         cacheService.invalidateCategory(category);
     }
-    if (ids && ids.length > 0) {
-        try {
-            const docs = await Document.find({ _id: { $in: ids } }).select("category").lean();
-            for (const d of docs) {
-                cacheService.invalidateCategory(d.category);
-            }
-        } catch (e) {
-            console.error("Bulk reindex cache invalidation failed:", e);
+    try {
+        const docs = await Document.find(filter).select("category").lean();
+        for (const d of docs) {
+            cacheService.invalidateCategory(d.category);
         }
+    } catch (e) {
+        console.error("Bulk reindex cache invalidation failed:", e);
     }
 
     const documents = await Document.find(filter);
@@ -676,7 +692,7 @@ const bulkReindex = async ({ category, ids, user }) => {
         await doc.save();
         indexDocumentBackground(doc._id).catch(() => {});
     }
-    return { count: documents.length, scope: ids?.length ? "files" : category === "root" ? "root" : "folder" };
+    return { count: documents.length, scope: "files" };
 };
 
 const getJobsStatus = async () => {
@@ -702,7 +718,8 @@ const retryFailed = async ({ user }) => {
     let count = 0;
     for (const doc of failedDocs) {
         const errorMsg = doc.metadata?.error || "";
-        if (errorMsg.includes("empty text") || errorMsg.includes("Image-only") || errorMsg.includes("scanned PDF")) {
+        const isImg = doc.mimeType && doc.mimeType.startsWith("image/");
+        if (!isImg && (errorMsg.includes("empty text") || errorMsg.includes("Image-only") || errorMsg.includes("scanned PDF"))) {
             doc.embeddingStatus = "not_required";
             doc.metadata = {
                 ...(doc.metadata || {}),
@@ -896,6 +913,7 @@ const downloadZip = async ({ category, ids }) => {
     const filePathsCount = {};
 
     for (const doc of documents) {
+        await new Promise(resolve => setImmediate(resolve)); // Yield to keep Express responsive (Requirement 4)
         try {
             const buffer = await getDocumentBuffer(doc);
             const docCategory = (doc.category || "others").trim().toLowerCase();

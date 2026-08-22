@@ -11,6 +11,34 @@ const fetch = (() => {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const JINA_MAX_RETRIES = Number(process.env.JINA_MAX_RETRIES) || 5;
+const JINA_RETRY_DELAY_MS = Number(process.env.JINA_RETRY_DELAY_MS) || 2000;
+const JINA_MAX_RETRY_DELAY_MS = Number(process.env.JINA_MAX_RETRY_DELAY_MS) || 30000;
+
+// Concurrency queue for Jina embedding requests
+const JINA_MAX_CONCURRENT_REQUESTS = Number(process.env.JINA_MAX_CONCURRENT_REQUESTS) || 1;
+let activeRequests = 0;
+const requestQueue = [];
+
+const acquireSlot = async () => {
+    if (activeRequests < JINA_MAX_CONCURRENT_REQUESTS) {
+        activeRequests++;
+        return;
+    }
+    return new Promise((resolve) => {
+        requestQueue.push(resolve);
+    });
+};
+
+const releaseSlot = () => {
+    activeRequests--;
+    if (requestQueue.length > 0 && activeRequests < JINA_MAX_CONCURRENT_REQUESTS) {
+        activeRequests++;
+        const next = requestQueue.shift();
+        next();
+    }
+};
+
 const isPermanentNetworkError = (error) => {
     const msg = error.message || "";
     const code = error.code || (error.cause && error.cause.code) || "";
@@ -68,7 +96,11 @@ const fetchWithRetry = async (url, options, maxAttempts = 6) => {
                 if (attempt >= maxAttempts) {
                     return clone;
                 }
-                const backoffDelay = retryAfterMs || (Math.pow(2, attempt) * 2000 + Math.random() * 1000);
+                let backoffDelay = retryAfterMs;
+                if (!backoffDelay) {
+                    backoffDelay = JINA_RETRY_DELAY_MS * Math.pow(2, attempt - 1) + Math.random() * 1000;
+                }
+                backoffDelay = Math.min(backoffDelay, JINA_MAX_RETRY_DELAY_MS);
                 console.log(`[Embedding API] Rate limit hit. Retrying attempt ${attempt}/${maxAttempts} after ${Math.round(backoffDelay)}ms... Reason: ${errorMessage || "429 Status"}`);
                 await sleep(backoffDelay);
                 continue;
@@ -80,7 +112,8 @@ const fetchWithRetry = async (url, options, maxAttempts = 6) => {
             if (attempt >= maxAttempts || isPermanentNetworkError(error)) {
                 throw error;
             }
-            const backoffDelay = Math.pow(2, attempt) * 2000 + Math.random() * 1000;
+            let backoffDelay = JINA_RETRY_DELAY_MS * Math.pow(2, attempt - 1) + Math.random() * 1000;
+            backoffDelay = Math.min(backoffDelay, JINA_MAX_RETRY_DELAY_MS);
             console.error(`[Embedding API] Request error. Retrying attempt ${attempt}/${maxAttempts} after ${Math.round(backoffDelay)}ms... Error: ${error.message}`);
             await sleep(backoffDelay);
         }
@@ -88,6 +121,38 @@ const fetchWithRetry = async (url, options, maxAttempts = 6) => {
 };
 
 let cachedDimension = null;
+let cachedAvailability = null;
+let lastCheckTime = 0;
+const CACHE_TTL_MS = 10000; // 10 seconds cache
+
+const getEmbeddingAvailability = async () => {
+    const now = Date.now();
+    if (cachedAvailability !== null && (now - lastCheckTime < CACHE_TTL_MS)) {
+        return cachedAvailability;
+    }
+
+    try {
+        const testVector = await embedText("test", { timeout: 3000, maxAttempts: 1 });
+        if (Array.isArray(testVector) && testVector.length > 0) {
+            cachedAvailability = { available: true };
+        } else {
+            cachedAvailability = { available: false, reason: "Embedding provider unavailable" };
+        }
+    } catch (err) {
+        const errMsg = err.message || "";
+        const isQuotaErr = errMsg.includes("Insufficient account balance") || 
+                           errMsg.includes("quota") || 
+                           errMsg.includes("402") || 
+                           errMsg.includes("429");
+        if (isQuotaErr) {
+            cachedAvailability = { available: false, reason: "Embedding provider unavailable" };
+        } else {
+            cachedAvailability = { available: true };
+        }
+    }
+    lastCheckTime = now;
+    return cachedAvailability;
+};
 
 /**
  * Validates the embedding model by generating a test embedding on startup
@@ -105,11 +170,27 @@ const getTestEmbeddingDimension = async (options = {}) => {
         if (Array.isArray(testVector) && testVector.length > 0) {
             cachedDimension = testVector.length;
             console.log(`[Embedding API] Verification successful. Detected dimension: ${cachedDimension} (Model: ${process.env.EMBEDDING_MODEL || "gemini-embedding-001"})`);
+            cachedAvailability = { available: true };
             return cachedDimension;
         } else {
             throw new Error("Returned embedding is not a valid array.");
         }
     } catch (err) {
+        const errMsg = err.message || "";
+        const isQuotaErr = errMsg.includes("Insufficient account balance") || 
+                           errMsg.includes("quota") || 
+                           errMsg.includes("402") || 
+                           errMsg.includes("429");
+        
+        if (isQuotaErr) {
+            cachedAvailability = { available: false, reason: "Embedding provider unavailable" };
+            console.warn(`[Embedding API] Warning: Jina quota exhausted. (${errMsg})`);
+            console.warn("[Embedding API] Embedding service unavailable for new indexing.");
+            console.log("[Startup] Continuing server startup.");
+            cachedDimension = 768; // Fallback so startup continues
+            return 768;
+        }
+        
         console.error(`[Embedding API] CRITICAL: Startup embedding validation failed: ${err.message}`);
         throw err;
     }
@@ -157,6 +238,7 @@ const embedText = async (text, options = {}) => {
         const qdrantDim = await getQdrantDimension();
         console.log(`[Embedding API] Request - Provider: ${provider}, Model: ${modelName}, Task: ${task}, Chunks: 1, Qdrant Dim: ${qdrantDim}, Batch: 1/1`);
 
+        await acquireSlot();
         try {
             const response = await fetchWithRetry(`https://api.jina.ai/v1/embeddings`, {
                 method: "POST",
@@ -171,7 +253,7 @@ const embedText = async (text, options = {}) => {
                     input: [text]
                 }),
                 timeout: options.timeout || 10000
-            }, options.maxAttempts || 3);
+            }, options.maxAttempts || JINA_MAX_RETRIES);
 
             const payload = await response.json();
             if (!response.ok) {
@@ -188,6 +270,8 @@ const embedText = async (text, options = {}) => {
         } catch (err) {
             console.error(`[Embedding API] Failure - Jina embedding error: ${err.message}`);
             throw err;
+        } finally {
+            releaseSlot();
         }
     } else {
         throw new Error(`Unsupported embedding provider: ${provider}`);
@@ -222,7 +306,7 @@ const embedTexts = async (texts, options = {}) => {
         const dimensions = 768;
 
         const qdrantDim = await getQdrantDimension();
-        const batchSize = 32;
+        const batchSize = 16;
         const results = [];
         const totalBatches = Math.ceil(sanitized.length / batchSize);
 
@@ -231,6 +315,7 @@ const embedTexts = async (texts, options = {}) => {
             const subBatch = sanitized.slice(i, i + batchSize);
             console.log(`[Embedding API] Batch ${batchNum}/${totalBatches} - Provider: ${provider}, Model: ${modelName}, Task: ${task}, Chunks: ${subBatch.length}, Qdrant Dim: ${qdrantDim}`);
 
+            await acquireSlot();
             try {
                 const response = await fetchWithRetry(`https://api.jina.ai/v1/embeddings`, {
                     method: "POST",
@@ -245,7 +330,7 @@ const embedTexts = async (texts, options = {}) => {
                         input: subBatch
                     }),
                     timeout: options.timeout || 15000
-                }, options.maxAttempts || 3);
+                }, options.maxAttempts || JINA_MAX_RETRIES);
 
                 const payload = await response.json();
                 if (!response.ok) {
@@ -265,6 +350,8 @@ const embedTexts = async (texts, options = {}) => {
             } catch (batchError) {
                 console.error(`[Embedding API] Batch ${batchNum}/${totalBatches} Failure - Jina batch request failed: ${batchError.message}`);
                 throw batchError;
+            } finally {
+                releaseSlot();
             }
         }
 
@@ -277,5 +364,6 @@ const embedTexts = async (texts, options = {}) => {
 module.exports = {
     embedText,
     embedTexts,
-    getTestEmbeddingDimension
+    getTestEmbeddingDimension,
+    getEmbeddingAvailability
 };

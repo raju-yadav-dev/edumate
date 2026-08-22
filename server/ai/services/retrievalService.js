@@ -1,4 +1,4 @@
-const { client, collectionName } = require("../config/qdrant");
+const { client, collectionName, vectorName } = require("../config/qdrant");
 const AI_CONSTANTS = require("../constants/aiConstants");
 const { detectTypeAndDepartment } = require("../utils/queryParser");
 
@@ -50,7 +50,10 @@ const retrieveRelevantChunks = async ({
         const qdrantFilter = isRawFilter ? filter : buildQdrantFilter(filter);
 
         const results = await client.search(collectionName, {
-            vector: queryEmbedding,
+            vector: {
+                name: vectorName || "default",
+                vector: queryEmbedding
+            },
             limit,
             filter: qdrantFilter,
             with_payload: true
@@ -250,17 +253,17 @@ const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL
         initialK = initialKList;
     }
 
-    let currentK = initialK;
+    let currentK = Math.min(limit, maxK);
+    let attemptsCount = 1;
     let usedType = undefined;
     let usedDept = undefined;
     let usedFilter = undefined;
-    let attemptsCount = 0;
 
     try {
         const queryEmbedding = await embeddingService.getQueryEmbedding(expandedQuestion);
         
         const baseMust = [];
-        if (user?.institution && !ignoreInstitution) {
+        if (user?.institution && user.institution !== "all" && !ignoreInstitution) {
             baseMust.push({
                 should: [
                     { key: "institution", match: { value: user.institution } },
@@ -274,86 +277,16 @@ const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL
             baseMust.push({ key: "sourceType", match: { value: filter.sourceType } });
         }
 
-        const buildLevelFilter = (type, dept) => {
-            const must = [...baseMust];
-            if (type) {
-                must.push({ key: "documentType", match: { value: type } });
-            }
-            if (dept) {
-                must.push({ key: "department", match: { value: dept } });
-            }
-            return must.length > 0 ? { must } : undefined;
-        };
+        console.log(`[RAG DEBUG] Executing single global vector search (Limit: ${currentK})`);
+        const qdrantFilter = baseMust.length > 0 ? { must: baseMust } : undefined;
+        usedFilter = qdrantFilter;
 
-        const levels = [];
-        if (detectedType && detectedDept) {
-            levels.push({ name: "Level 1 (Type + Department)", filter: buildLevelFilter(detectedType, detectedDept), type: detectedType, dept: detectedDept });
-            levels.push({ name: "Level 2 (Type only)", filter: buildLevelFilter(detectedType, undefined), type: detectedType, dept: undefined });
-            levels.push({ name: "Level 3 (Broad Search)", filter: buildLevelFilter(undefined, undefined), type: undefined, dept: undefined });
-        } else if (detectedType) {
-            levels.push({ name: "Level 1 (Type only)", filter: buildLevelFilter(detectedType, undefined), type: detectedType, dept: undefined });
-            levels.push({ name: "Level 2 (Broad Search)", filter: buildLevelFilter(undefined, undefined), type: undefined, dept: undefined });
-        } else if (detectedDept) {
-            levels.push({ name: "Level 1 (Department only)", filter: buildLevelFilter(undefined, detectedDept), type: undefined, dept: detectedDept });
-            levels.push({ name: "Level 2 (Broad Search)", filter: buildLevelFilter(undefined, undefined), type: undefined, dept: undefined });
-        } else {
-            levels.push({ name: "Level 1 (Broad Search)", filter: buildLevelFilter(undefined, undefined), type: undefined, dept: undefined });
-        }
-
-        while (currentK <= maxK) {
-            attemptsCount++;
-            console.log(`[RAG DEBUG] Starting Adaptive Retrieval iteration ${attemptsCount} with K = ${currentK}`);
-
-            let foundSufficientLevel = false;
-            for (const lvl of levels) {
-                console.log(`[RAG DEBUG] Attempting vector search at level: "${lvl.name}" (Limit: ${currentK})`);
-                const qdrantFilter = lvl.filter;
-                semanticCandidates = await retrieveRelevantChunks({ 
-                    queryEmbedding, 
-                    limit: currentK, 
-                    filter: qdrantFilter, 
-                    isRawFilter: true 
-                });
-
-                const hasSufficient = semanticCandidates.length > 0 && Math.max(...semanticCandidates.map(c => c.score)) >= 0.35;
-                if (hasSufficient) {
-                    console.log(`[RAG DEBUG] Vector search succeeded at "${lvl.name}" with top score: ${Math.max(...semanticCandidates.map(c => c.score))}`);
-                    usedType = lvl.type;
-                    usedDept = lvl.dept;
-                    usedFilter = lvl.filter;
-                    foundSufficientLevel = true;
-                    break;
-                } else {
-                    console.log(`[RAG DEBUG] Insufficient results at "${lvl.name}". Scope broadening...`);
-                }
-            }
-
-            if (!foundSufficientLevel && levels.length > 1) {
-                console.log(`[RAG DEBUG] Standard fallback: running Broad Search as last resort (Limit: ${currentK})`);
-                const lastLvl = levels[levels.length - 1];
-                semanticCandidates = await retrieveRelevantChunks({ 
-                    queryEmbedding, 
-                    limit: currentK, 
-                    filter: lastLvl.filter, 
-                    isRawFilter: true 
-                });
-                usedType = lastLvl.type;
-                usedDept = lastLvl.dept;
-                usedFilter = lastLvl.filter;
-            }
-
-            const evaluation = evaluateRetrievalCoverage({ chunks: semanticCandidates, mode: queryMode, currentK, maxK });
-            console.log(`[RAG DEBUG] Adaptive Evaluation - Mode: ${queryMode}, Current K: ${currentK}, Action: ${evaluation.shouldExpand ? 'EXPAND' : 'STOP'}, Reason: ${evaluation.reason}`);
-
-            if (!evaluation.shouldExpand) {
-                break;
-            }
-
-            currentK = Math.min(currentK + 3, maxK + 1);
-            if (currentK > maxK) {
-                break;
-            }
-        }
+        semanticCandidates = await retrieveRelevantChunks({ 
+            queryEmbedding, 
+            limit: currentK, 
+            filter: qdrantFilter, 
+            isRawFilter: true 
+        });
 
     } catch (vectorErr) {
         console.error("[Retrieval Service] Semantic search failed:", vectorErr.message);

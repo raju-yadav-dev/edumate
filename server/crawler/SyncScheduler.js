@@ -32,6 +32,7 @@ const scanAndSync = async () => {
         console.log(`[SyncScheduler] Found ${activeWebsiteSources.length} active scheduled websites to scan.`);
 
         for (const source of activeWebsiteSources) {
+            await new Promise(resolve => setImmediate(resolve)); // Yield to keep Express responsive (Requirement 4)
             if (checkIsDue(source.syncInterval, source.lastSyncAt)) {
                 console.log(`[SyncScheduler] Source "${source.name}" (${source.url}) is due for sync. Triggering crawler...`);
                 

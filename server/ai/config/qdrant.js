@@ -24,10 +24,12 @@ if (globalThis.fetch) {
 }
 
 const { QdrantClient } = require("@qdrant/js-client-rest");
+const { withTimeoutAndRetry } = require("../../utils/fetchHelper");
 
 const qdrantUrl = process.env.QDRANT_URL || "http://127.0.0.1:6333";
 const qdrantApiKey = process.env.QDRANT_API_KEY || undefined;
 const collectionName = process.env.QDRANT_COLLECTION || "edumate";
+const qdrantVectorName = process.env.QDRANT_VECTOR_NAME || "default";
 
 // Initialize Qdrant Client lazily
 let rawClient = null;
@@ -40,7 +42,19 @@ const client = new Proxy({}, {
                 checkCompatibility: false
             });
         }
-        return rawClient[prop];
+        const origMethod = rawClient[prop];
+        if (typeof origMethod === "function") {
+            return function (...args) {
+                return withTimeoutAndRetry(
+                    () => origMethod.apply(rawClient, args),
+                    15000,
+                    3,
+                    1000,
+                    `Qdrant.${prop}`
+                );
+            };
+        }
+        return origMethod;
     }
 });
 
@@ -88,9 +102,49 @@ Status: FAIL
 
         // Retrieve collection details to verify dimension size
         const collectionInfo = await client.getCollection(collectionName);
-        const qdrantDimension = collectionInfo.config?.params?.vectors?.size;
+        const vectorsConfig = collectionInfo.config?.params?.vectors;
 
-        if (qdrantDimension !== 768) {
+        let qdrantDimension = null;
+        let vectorName = null;
+
+        if (
+            vectorsConfig &&
+            typeof vectorsConfig === "object" &&
+            vectorsConfig[qdrantVectorName] &&
+            vectorsConfig[qdrantVectorName].size
+        ) {
+            qdrantDimension = vectorsConfig[qdrantVectorName].size;
+            vectorName = qdrantVectorName;
+        } else if (
+            vectorsConfig &&
+            typeof vectorsConfig === "object" &&
+            vectorsConfig.default &&
+            vectorsConfig.default.size
+        ) {
+            qdrantDimension = vectorsConfig.default.size;
+            vectorName = "default";
+        } else if (
+            vectorsConfig &&
+            typeof vectorsConfig === "object" &&
+            vectorsConfig.size
+        ) {
+            qdrantDimension = vectorsConfig.size;
+            vectorName = "unnamed";
+        }
+
+        if (!qdrantDimension) {
+            throw new Error("Unable to determine Qdrant vector dimension.");
+        }
+
+        console.log(`[Embedding API] Verification successful.`);
+        console.log(`Detected embedding dimension: ${actualEmbeddingDimension}\n`);
+        console.log(`[QDRANT] Collection detected: ${collectionName}`);
+        if (vectorName && vectorName !== "unnamed") {
+            console.log(`[QDRANT] Vector name: ${vectorName}`);
+        }
+        console.log(`[QDRANT] Vector dimension: ${qdrantDimension}\n`);
+
+        if (qdrantDimension !== actualEmbeddingDimension) {
             console.error(`
 Provider: ${provider}
 Model: ${model}
@@ -119,5 +173,6 @@ Status: PASS
 module.exports = {
     client,
     collectionName,
-    ensureCollection
+    ensureCollection,
+    vectorName: qdrantVectorName
 };

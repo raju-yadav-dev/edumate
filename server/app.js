@@ -44,6 +44,43 @@ function isAllowedOrigin(origin) {
 // Middlewares
 // ==============================
 
+// Request Cleanup Middleware (Requirement 3)
+app.use((req, res, next) => {
+    const cleanup = () => {
+        if (req.file) {
+            if (req.file.buffer) req.file.buffer = null;
+            req.file = null;
+        }
+        if (req.files) {
+            if (Array.isArray(req.files)) {
+                req.files.forEach(f => {
+                    if (f.buffer) f.buffer = null;
+                });
+            } else if (typeof req.files === "object") {
+                Object.keys(req.files).forEach(key => {
+                    if (Array.isArray(req.files[key])) {
+                        req.files[key].forEach(f => {
+                            if (f.buffer) f.buffer = null;
+                        });
+                    }
+                });
+            }
+            req.files = null;
+        }
+        if (req.body) {
+            req.body = null;
+        }
+        if (global.gc) {
+            try {
+                global.gc();
+            } catch (gcErr) {}
+        }
+    };
+    res.on("finish", cleanup);
+    res.on("close", cleanup);
+    next();
+});
+
 app.use(helmet());
 app.use(compression());
 
@@ -98,6 +135,9 @@ const crawlerRoutes = require("./crawler/routes/crawlerRoutes");
 app.use("/api/crawler", crawlerRoutes);
 const knowledgeRoutes = require("./knowledge/knowledgeRoutes");
 app.use("/api/knowledge", knowledgeRoutes);
+
+const { getSystemHealth } = require("./controllers/systemController");
+app.get("/api/system/health", getSystemHealth);
 
 if (global.startupTimer) {
     global.startupTimer.log("Routes registered", Date.now() - routesInitStart);

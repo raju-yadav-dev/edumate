@@ -11,8 +11,8 @@ if (fs.existsSync(envPath)) {
 
 // Auto-detect LLM provider if not set
 if (!process.env.LLM_PROVIDER) {
-    process.env.LLM_PROVIDER = "groq";
-    console.log(logger.cyan("💡 LLM_PROVIDER not set. Automatically defaulted to 'groq'."));
+    process.env.LLM_PROVIDER = "llama";
+    console.log(logger.cyan("💡 LLM_PROVIDER not set. Automatically defaulted to 'llama'."));
 }
 
 const REQUIRED_VARS = [
@@ -25,11 +25,13 @@ const REQUIRED_VARS = [
     "QDRANT_COLLECTION"
 ];
 
+/*
 if (process.env.LLM_PROVIDER === "gemini") {
     REQUIRED_VARS.push("GEMINI_API_KEY");
 } else if (process.env.LLM_PROVIDER === "groq") {
     REQUIRED_VARS.push("GROQ_API_KEY");
 }
+*/
 
 /**
  * Verifies that the .env file exists and contains all required variables

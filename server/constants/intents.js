@@ -24,6 +24,7 @@ const INTENTS = Object.freeze({
     ETA: "eta",
     EMERGENCY: "emergency",
     COURSE_RECOMMENDATION: "course_recommendation",
+    COURSE_CATALOGUE_QUERY: "course_catalogue_query",
     UNKNOWN: "unknown"
 });
 
@@ -43,7 +44,20 @@ const INSTITUTIONAL_INTENTS = Object.freeze([
     INTENTS.ANNOUNCEMENT,
     INTENTS.COLLEGE_INFORMATION,
     INTENTS.TRANSPORT,
-    INTENTS.COURSE_RECOMMENDATION
+    INTENTS.COURSE_RECOMMENDATION,
+    INTENTS.COURSE_CATALOGUE_QUERY,
+    "eligibility",
+    "hod",
+    "duration",
+    "course",
+    "fee structure",
+    "admission criteria",
+    "documents",
+    "department",
+    "program",
+    "course details",
+    "subjects",
+    "requirements"
 ]);
 
 module.exports = {

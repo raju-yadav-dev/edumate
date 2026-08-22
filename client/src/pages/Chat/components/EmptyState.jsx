@@ -1,4 +1,3 @@
-import React from "react";
 import { MessageSquare, FileText, Compass, GraduationCap } from "lucide-react";
 import "../styles/EmptyState.css";
 

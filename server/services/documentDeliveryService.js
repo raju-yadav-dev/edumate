@@ -56,7 +56,7 @@ Respond ONLY with a JSON object. No markdown formatting, no backticks, no other 
     try {
         const responseText = await llmService.generateCompletion(messages, { temperature: 0.1 });
         const cleaned = responseText.replace(/```json/g, "").replace(/```/g, "").trim();
-        return JSON.parse(cleaned);
+        return llmService.parseLlamaContent(cleaned);
     } catch (e) {
         console.error("[DocumentDelivery] LLM Intent Analysis failed:", e);
         return { isDocumentRequest: false, documentTopic: null, isAmbiguous: false, ambiguousOptions: [] };
@@ -106,7 +106,7 @@ Respond ONLY with a JSON array of indices. No markdown formatting, no backticks,
     try {
         const responseText = await llmService.generateCompletion(messages, { temperature: 0.1 });
         const cleaned = responseText.replace(/```json/g, "").replace(/```/g, "").trim();
-        const indices = JSON.parse(cleaned);
+        const indices = llmService.parseLlamaContent(cleaned);
         if (Array.isArray(indices)) {
             return indices.map(idx => docs[idx]).filter(Boolean);
         }

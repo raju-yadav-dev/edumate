@@ -48,9 +48,20 @@ const validateResponse = ({ intent, retrievedContext, generatedAnswer, providerS
         }
     }
 
+    const maxScore = retrievedContext?.chunks?.length > 0 
+        ? Math.max(...retrievedContext.chunks.map(c => c.score || 0)) 
+        : 0;
+
+    let confidence = "low";
+    if (maxScore >= 0.75) {
+        confidence = "high";
+    } else if (maxScore >= 0.55) {
+        confidence = "medium";
+    }
+
     return {
         valid: true,
-        confidence: hasTrustedSources ? "high" : "medium",
+        confidence,
         reason: "Response passed validation."
     };
 };

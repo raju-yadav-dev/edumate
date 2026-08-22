@@ -1,14 +1,7 @@
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const settingsService = require("./settingsService");
 
-// Secure fetch selection to support both Node global fetch and node-fetch package
-const fetch = (() => {
-    try {
-        return require("node-fetch");
-    } catch {
-        return global.fetch;
-    }
-})();
+const { fetchWithTimeoutAndRetry } = require("../utils/fetchHelper");
 
 const sleep = (durationMs) => new Promise((resolve) => setTimeout(resolve, durationMs));
 
@@ -191,7 +184,7 @@ const requestCompletion = async ({ apiKey, messages, timeoutMs, maxOutputTokens 
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-        const response = await fetch(GROQ_API_URL, {
+        const response = await fetchWithTimeoutAndRetry(GROQ_API_URL, {
             method: "POST",
             headers: {
                 Authorization: `Bearer ${apiKey}`,
@@ -331,7 +324,7 @@ const requestStream = async ({ apiKey, messages, onChunk, timeoutMs, signal, max
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-        const response = await fetch(GROQ_API_URL, {
+        const response = await fetchWithTimeoutAndRetry(GROQ_API_URL, {
             method: "POST",
             headers: {
                 Authorization: `Bearer ${apiKey}`,

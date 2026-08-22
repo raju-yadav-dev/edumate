@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Send, CornerDownLeft, Paperclip, Upload, Smile, X } from "lucide-react";
 import "../styles/ChatInput.css";
 

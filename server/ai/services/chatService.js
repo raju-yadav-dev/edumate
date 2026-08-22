@@ -7,6 +7,7 @@ const AI_CONSTANTS = require("../constants/aiConstants");
 
 // AI module services
 const llmService = require("./llmService");
+const llama = require("../../config/llama");
 const rerankService = require("./rerankService");
 const conversationService = require("./conversationService");
 const intentDetectionService = require("./intentDetectionService");
@@ -26,6 +27,25 @@ const RankingEngine = require("../../knowledge/RankingEngine");
 const cacheService = require("../../services/cacheService");
 const webCrawlerService = require("./webCrawlerService");
 const { detectTypeAndDepartment } = require("../utils/queryParser");
+const LRUCache = require("../utils/lruCache");
+const retrievalCache = new LRUCache(100, 5 * 60 * 1000);
+
+const ALIASES_DICT = {
+    "css": "computational sciences",
+    "hod": "head of department",
+    "ug": "undergraduate",
+    "pg": "postgraduate",
+    "placement cell": "training & placement cell"
+};
+
+const normalizeAliases = (text) => {
+    let lower = String(text || "").toLowerCase();
+    Object.entries(ALIASES_DICT).forEach(([abbr, full]) => {
+        const regex = new RegExp(`\\b${abbr.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "gi");
+        lower = lower.replace(regex, full);
+    });
+    return lower.replace(/\s+/g, " ").trim();
+};
 
 const isCampusNavigationQuery = (question) => {
     const q = String(question || "").toLowerCase();
@@ -150,6 +170,37 @@ const buildRecommendationSearchQuery = (profile, institution = "Brainware Univer
     return query;
 };
 
+const selectDiverseChunks = (rankedChunks, maxLimit = 8) => {
+    if (!rankedChunks || rankedChunks.length === 0) return [];
+    
+    const selected = [];
+    const seenDocIds = new Set();
+    
+    // 1. First pass: select the top-scoring chunk from each unique document
+    for (const chunk of rankedChunks) {
+        const docId = chunk.metadata?.documentId || chunk.metadata?.originalName || chunk.metadata?.filename;
+        if (docId && !seenDocIds.has(docId)) {
+            selected.push(chunk);
+            seenDocIds.add(docId);
+            if (selected.length >= maxLimit) break;
+        }
+    }
+    
+    // 2. Second pass: if we have remaining slots, fill them with other high-scoring chunks
+    if (selected.length < maxLimit) {
+        for (const chunk of rankedChunks) {
+            if (!selected.some(c => c.id === chunk.id)) {
+                selected.push(chunk);
+                if (selected.length >= maxLimit) break;
+            }
+        }
+    }
+    
+    // Keep original ranked order among selected chunks
+    selected.sort((a, b) => b.score - a.score);
+    return selected;
+};
+
 /**
  * Handles chatbot queries with RAG matching using Gemini 2.5 Flash and Qdrant
  */
@@ -161,14 +212,17 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
     let resolvedDept = "all";
     let qdrantDuration = 0;
     let retrievalTelemetry = null;
-    const normalizedQuestion = String(question || "").trim();
-    const activeUser = user || buildGuestUser();
-
-    if (!normalizedQuestion) {
+    const { normalizeQueryText, detectIntent } = require("../utils/queryParser");
+    const rawQuestion = String(question || "").trim();
+    if (!rawQuestion) {
         const error = new Error("Question is required.");
         error.statusCode = 422;
         throw error;
     }
+
+    const normalizedQuestion = normalizeQueryText(rawQuestion);
+    const detectedIntent = detectIntent(normalizedQuestion);
+    const activeUser = user || buildGuestUser();
 
     // Parse lightweight metadata type and department
     const { documentType: detectedType, department: detectedDept } = detectTypeAndDepartment(normalizedQuestion);
@@ -222,24 +276,28 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
         };
     }
 
-    // Expand "CSS" or "css" (Computational Sciences) and department abbreviations for better matching
-    let expandedQuestion = normalizedQuestion;
-    if (/\bcss\b/i.test(expandedQuestion)) {
-        expandedQuestion = expandedQuestion.replace(/\bcss\b/gi, "computational sciences");
-    }
+    // Expand abbreviation aliases in user question
+    let expandedQuestion = normalizeAliases(normalizedQuestion);
 
     console.log(`[RAG DEBUG] User query: "${normalizedQuestion}"`);
     if (expandedQuestion !== normalizedQuestion) {
         console.log(`[RAG DEBUG] Expanded query: "${expandedQuestion}"`);
     }
 
+    let maxOutputTokens = 500;
+
     // 1. Retrieve dialogue history memory context
-    const { historyText, activeTopic, conversationContext } = await conversationService.getRecentMemory({
+    const { historyText, activeTopic, conversationContext, rawHistory } = await conversationService.getRecentMemory({
         userId: activeUser._id,
         conversationId,
         maxTokens: 1500,
         parentId
     });
+
+    // ==========================================
+    // COURSE CATALOGUE ROUTING & LEVEL SELECTION
+    // ==========================================
+
 
     // ==========================================
     // BUG 1: AMBIGUOUS LOCATION QUERY CHECK
@@ -295,57 +353,44 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
         };
     }
 
-    // ==========================================
-    // ADMIN DOCUMENT DELIVERY FEATURE
-    // ==========================================
-    const documentDeliveryService = require("../../services/documentDeliveryService");
-    const docDeliveryResult = await documentDeliveryService.handleDocumentDelivery({
-        user: activeUser,
-        question: normalizedQuestion,
-        conversationId,
-        parentId,
-        historyText
-    });
-    if (docDeliveryResult) {
-        const responseTimeMs = Date.now() - startedAt;
-        const chat = await conversationService.saveMessageTurn({
-            user: activeUser,
-            conversationId,
-            question: normalizedQuestion,
-            response: docDeliveryResult,
-            intent: "document_delivery",
-            confidence: 0.9,
-            provider: "system",
-            responseTimeMs,
-            userMessageId,
-            assistantMessageId,
-            parentId,
-            topic: docDeliveryResult.topic || activeTopic || "",
-            entities: { conversationContext }
-        });
 
-        if (onChunk) {
-            onChunk(docDeliveryResult.answer);
-        }
-
-        return {
-            conversationId: chat?._id || conversationId || null,
-            mode: activeUser._id ? "authenticated" : "guest",
-            message: docDeliveryResult.answer,
-            intent: "document_delivery",
-            intentConfidence: 0.9,
-            confidence: docDeliveryResult.confidence,
-            sources: docDeliveryResult.sources,
-            sourceLabel: docDeliveryResult.sourceLabel || "📚 University Documents",
-            provider: "system",
-            responseTimeMs,
-            suggestions: []
-        };
-    }
 
     // 2. Query Analysis (Topic Switch, Rewrite Query, Intent, Entities, Repeat Check)
+    let followUpQuery = expandedQuestion;
+    if (/\b(what\s+about|how\s+about|what\s+of)\s+(pg|ug|undergraduate|postgraduate)\b/i.test(normalizedQuestion)) {
+        let previousIntent = "";
+        if (rawHistory && rawHistory.length > 0) {
+            for (let i = rawHistory.length - 1; i >= 0; i--) {
+                const turn = rawHistory[i];
+                if (turn.role === "user") {
+                    const prevQuery = turn.content.toLowerCase();
+                    if (prevQuery.includes("admission") || prevQuery.includes("eligibility") || prevQuery.includes("document") || prevQuery.includes("docs")) {
+                        previousIntent = "Admissions";
+                        break;
+                    } else if (prevQuery.includes("fee") || prevQuery.includes("cost") || prevQuery.includes("pay")) {
+                        previousIntent = "Fees";
+                        break;
+                    } else if (prevQuery.includes("course") || prevQuery.includes("program")) {
+                        previousIntent = "Courses";
+                        break;
+                    }
+                }
+            }
+        }
+        
+        const level = normalizedQuestion.includes("pg") || normalizedQuestion.includes("postgraduate") ? "postgraduate" : "undergraduate";
+        if (previousIntent === "Admissions") {
+            followUpQuery = `${level} admission documents required eligibility criteria`;
+        } else if (previousIntent === "Fees") {
+            followUpQuery = `${level} fee structure course cost`;
+        } else if (previousIntent === "Courses") {
+            followUpQuery = `${level} courses programs offered`;
+        }
+        console.log(`[RAG Memory] Follow-up query rewritten from "${normalizedQuestion}" to "${followUpQuery}"`);
+    }
+
     const analysisResult = await queryRewriterService.analyzeQuery({
-        question: expandedQuestion,
+        question: followUpQuery,
         historyText,
         conversationContext,
         user: activeUser
@@ -366,264 +411,26 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
     }
     const resolvedActiveTopic = analysisResult.activeTopic || activeTopic || "";
 
+    const queryComplexityService = require("../../services/queryComplexityService");
+    const adaptiveRetrievalService = require("../../services/adaptiveRetrievalService");
+    const queryType = queryComplexityService.analyzeQueryComplexity(rewrittenQuery, intent);
+    console.log(`[ADAPTIVE RAG] Query Complexity Class: ${queryType}`);
+
     // Debug logging for development
     console.log(`\n[CONTEXT]\nCurrent topic: ${updatedContext?.currentTopic || "None"}`);
     console.log(`\n[CONTEXT]\nUser query: ${normalizedQuestion}`);
     console.log(`\n[CONTEXT]\nResolved query: ${rewrittenQuery}`);
     console.log(`\n[INTENT]\n${intent}\n`);
 
-    if (clarificationPrompt) {
-        const responseTimeMs = Date.now() - startedAt;
-        const chat = await conversationService.saveMessageTurn({
-            user: activeUser,
-            conversationId,
-            question: normalizedQuestion,
-            response: { answer: clarificationPrompt, confidence: "high" },
-            intent: Array.isArray(intent) ? intent.join(",") : String(intent || "unknown"),
-            confidence: 0.9,
-            provider: "system",
-            responseTimeMs,
-            userMessageId,
-            assistantMessageId,
-            parentId,
-            topic: resolvedActiveTopic,
-            entities: { ...entities, conversationContext: updatedContext }
-        });
 
-        const suggestions = await suggestionsService.generateSuggestions({
-            question: normalizedQuestion,
-            answer: clarificationPrompt
-        });
 
-        if (onChunk) {
-            onChunk(clarificationPrompt);
-        }
 
-        return {
-            conversationId: chat?._id || conversationId || null,
-            mode: activeUser._id ? "authenticated" : "guest",
-            message: clarificationPrompt,
-            intent,
-            intentConfidence: 0.9,
-            confidence: "high",
-            sources: [],
-            sourceLabel: "EduMate Clarification",
-            provider: "system",
-            responseTimeMs,
-            suggestions
-        };
-    }
-
-    // ==========================================
-    // CAMPUS NAVIGATION SPECIAL ROUTING
+                  // ==========================================
+    // CAMPUS NAVIGATION GREETING CHECK
     // ==========================================
     const isNavigationGreeting = normalizedQuestion.toLowerCase().trim() === "campus navigation";
-    const isDirectionRequest = 
-        normalizedQuestion.toLowerCase().trim() === "yes, show directions" ||
-        normalizedQuestion.toLowerCase().trim() === "yes show directions" ||
-        /^(?:how do i reach there|show directions|get directions|how to get there|how to reach there)/i.test(normalizedQuestion);
-
-    if (isDirectionRequest) {
-        // Look up the last location discussed in this conversation history
-        const lastTurns = await conversationService.getRecentMemory({
-            userId: activeUser._id,
-            conversationId,
-            parentId
-        });
-        
-        // Find the last assistant message containing building details
-        let targetLocation = "";
-        if (lastTurns && lastTurns.rawHistory) {
-            for (let i = lastTurns.rawHistory.length - 1; i >= 0; i--) {
-                const msg = lastTurns.rawHistory[i];
-                if (msg.role === "assistant" && msg.content) {
-                    const text = msg.content;
-                    const matches = text.match(/(?:Building|Buliding)\s*:\s*(Building\s+[0-9ivx]+|[0-9ivx]+|\b[a-z]+\b)/i) || text.match(/(?:Building\s+[0-9ivx]+)/i);
-                    if (matches) {
-                        targetLocation = matches[0];
-                    }
-                    const nameMatches = text.match(/🏷️\s*([a-zA-Z0-9\s&()]+)/i) || text.match(/Name:\s*([a-zA-Z0-9\s&()]+)/i);
-                    if (nameMatches) {
-                        targetLocation += " " + nameMatches[1].trim().split("\n")[0];
-                    }
-                    if (targetLocation) {
-                        break;
-                    }
-                }
-            }
-        }
-        
-        if (targetLocation) {
-            const mapQuery = `route to ${targetLocation}`;
-            console.log(`[CAMPUS NAV] Routing direction request: "${normalizedQuestion}" -> "${mapQuery}"`);
-            
-            const mapResult = await mapService.resolveLocationRequest({
-                question: mapQuery,
-                user: activeUser,
-                userCoordinates: (latitude && longitude) ? { lat: Number(latitude), lng: Number(longitude) } : null
-            });
-            
-            const formatted = mapResult.found
-                ? responseFormattingService.formatAnswer({
-                    answer: mapResult.answer,
-                    confidence: "high",
-                    sources: mapResult.sources,
-                    sourceLabel: SOURCE_LABELS.UNIVERSITY
-                })
-                : {
-                    answer: mapResult.answer,
-                    confidence: "low",
-                    sources: []
-                };
-                
-            if (mapResult.mapData) {
-                formatted.mapData = mapResult.mapData;
-            }
-            if (mapResult.requiresLocationPermission) {
-                formatted.requiresLocationPermission = true;
-            }
-            
-            const responseTimeMs = Date.now() - startedAt;
-            const chat = await conversationService.saveMessageTurn({
-                user: activeUser,
-                conversationId,
-                question: normalizedQuestion,
-                response: { answer: formatted.answer, confidence: "high" },
-                intent: "travel_route",
-                confidence: 0.9,
-                provider: "system",
-                responseTimeMs,
-                userMessageId,
-                assistantMessageId,
-                parentId,
-                topic: "campus_navigation",
-                entities: { ...entities, conversationContext: updatedContext }
-            });
-            
-            return {
-                conversationId: chat?._id || conversationId || null,
-                mode: activeUser._id ? "authenticated" : "guest",
-                message: formatted.answer,
-                intent: "travel_route",
-                intentConfidence: 0.9,
-                confidence: "high",
-                sources: formatted.sources || [],
-                sourceLabel: "📍 Campus Navigation",
-                provider: "system",
-                responseTimeMs,
-                suggestions: ["No, thanks"],
-                mapData: formatted.mapData || null,
-                requiresLocationPermission: formatted.requiresLocationPermission || false
-            };
-        }
-    }
-
-    const isCampusNav = isNavigationGreeting || intent === "location" || isCampusNavigationQuery(rewrittenQuery);
-    
-    if (isCampusNav) {
-        console.log(`[CAMPUS NAV] Detected campus navigation query: "${rewrittenQuery}"`);
-        
-        let textResponse = "";
-        let filteredCampusChunks = [];
-        
-        if (isNavigationGreeting) {
-            textResponse = `📍 Campus Navigation\n\nSure! Tell me where you want to go in the campus.`;
-        } else {
-            // Expand spelling variations internally for search
-            const normalizedSearchQuery = normalizeLocationQuery(rewrittenQuery);
-            
-            // Retrieve ONLY campus navigation chunks
-            const campusChunks = await SearchManager.searchLocalPdfs(normalizedSearchQuery, activeUser, 15, false, { sourceType: "campus_navigation" });
-            filteredCampusChunks = campusChunks.filter(c => 
-                c.metadata?.sourceType === "campus_navigation" || 
-                (c.metadata?.category && c.metadata.category.startsWith("campus_navigation"))
-            );
-            
-            console.log(`[CAMPUS NAV] Found ${filteredCampusChunks.length} relevant campus navigation chunks.`);
-            
-            // Debugging console logs requested by requirement 14
-            console.log(`[CAMPUS NAV]\nQuery: ${rewrittenQuery}`);
-            console.log(`[CAMPUS NAV]\nNormalized query: ${normalizedSearchQuery}`);
-            console.log(`[CAMPUS NAV]\nIntent: campus_navigation`);
-            console.log(`[CAMPUS NAV]\nSearching buildings: 1-9`);
-            if (filteredCampusChunks.length > 0) {
-                const firstMatch = filteredCampusChunks[0];
-                console.log(`[CAMPUS NAV]\nMatched source: ${firstMatch.metadata?.originalName || firstMatch.metadata?.filename || "Unknown"}`);
-                console.log(`[CAMPUS NAV]\nBuilding: ${firstMatch.metadata?.buildingNumber || "N/A"}`);
-                console.log(`[CAMPUS NAV]\nFloor: ${firstMatch.metadata?.floor || "N/A"}`);
-                console.log(`[CAMPUS NAV]\nRoom: ${firstMatch.metadata?.roomNumber || "N/A"}`);
-            }
-
-            const chunksText = filteredCampusChunks.map((c, idx) => {
-                return `[Source: ${c.metadata?.filename || c.metadata?.originalName || "Unknown"}]\n${c.content}`;
-            }).join("\n\n");
-            
-            const systemPrompt = `You are a precise university campus navigation assistant.
-Your job is to answer the user's campus location question using ONLY the retrieved campus navigation chunks.
-
-Retrieved Chunks:
-${chunksText || "No campus navigation data found."}
-
-Rules:
-1. Answer ONLY from the retrieved chunks. Do NOT assume, infer, guess, or hallucinate.
-2. The response for a successful location query must follow this exact format:
-   Building [Number] ([Building Name] - e.g. "Ravindra Bhavan" instead of "Ravindra Bhavan Ground 001". Remove any floor/room location suffixes from the building name itself)
-   [Floor]
-   Room [Room Number]
-
-   [requested room/person/department details, e.g. HOD of CSS:\nDr. ABC, or Room details:\nHOD of CSS\nDr. ABC]
-
-   Make sure there is exactly one blank line before the requested details.
-   Do NOT add any extra text or pleasantries like "Sure!", "Here is the location:", "I found the following:", or "Would you like directions to this location?". Only output the structured location format directly.
-3. If multiple distinct locations, departments, or HODs are found in the chunks that could match the query (e.g. user asks "Where is the HOD?" and there are HODs for LAW, CSE, Computational Science), you MUST ask the user to clarify:
-   "Which department are you looking for? Which HOD do you mean — [List the matching departments/roles]?"
-   Do not guess or randomly select one.
-4. If the exact location is NOT found in the retrieved chunks, you MUST say:
-   "I couldn't find the exact location in the Campus Navigation data."
-   Do NOT invent or guess a room number.
-5. Never expose internal database IDs, embeddings, vector scores, or file paths.
-
-User Question: "${rewrittenQuery}"`;
-
-            const promptMessages = [
-                { role: "system", content: systemPrompt },
-                { role: "user", content: `Question: ${rewrittenQuery}` }
-            ];
-
-            if (onChunk) {
-                textResponse = await llmService.generateStream(promptMessages, onChunk, { signal });
-            } else {
-                textResponse = await llmService.generateCompletion(promptMessages);
-            }
-
-            // Clean up building name format to remove suffixes like "Ground 001", "Ground Floor", etc.
-            textResponse = textResponse.replace(/(Building\s+[0-9ivx]+)\s*\(([^)]+)\)/ig, (match, bNum, bName) => {
-                let cleanName = bName.replace(/\b(?:ground|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|floor|flour|level)\s*[0-9a-zA-Z]*\b/ig, "").trim();
-                cleanName = cleanName.replace(/\b[0-9]{3,}\b/g, "").trim(); // Remove room numbers or codes like "001"
-                return `${bNum} (${cleanName})`;
-            });
-
-            // Ensure double newlines for line breaks to prevent React Markdown from collapsing them in the UI
-            const lines = textResponse.split("\n").map(l => l.trim()).filter(l => l.length > 0);
-            if (lines.length >= 3 && lines[0].toLowerCase().startsWith("building ") && lines[2].toLowerCase().startsWith("room ")) {
-                const bLine = lines[0];
-                const fLine = lines[1];
-                const rLine = lines[2];
-                const details = lines.slice(3).join("\n\n");
-                textResponse = `${bLine}\n\n${fLine}\n\n${rLine}\n\n${details}`;
-            }
-
-            // Append directions prompt programmatically for successful queries
-            if (textResponse.toLowerCase().includes("building ") && textResponse.toLowerCase().includes("room ")) {
-                textResponse += "\n\nWould you like directions to this location?";
-            }
-        }
-
-        const suggestions = await suggestionsService.generateSuggestions({
-            question: rewrittenQuery,
-            answer: textResponse
-        });
-
+    if (isNavigationGreeting) {
+        const textResponse = `📍 Campus Navigation\n\nSure! Tell me where you want to go in the campus.`;
         const responseTimeMs = Date.now() - startedAt;
         const chat = await conversationService.saveMessageTurn({
             user: activeUser,
@@ -641,6 +448,8 @@ User Question: "${rewrittenQuery}"`;
             entities: { ...entities, conversationContext: updatedContext }
         });
 
+        const suggestions = ["Where is the HOD of CSS?", "Where is the library?"];
+
         return {
             conversationId: chat?._id || conversationId || null,
             mode: activeUser._id ? "authenticated" : "guest",
@@ -648,11 +457,7 @@ User Question: "${rewrittenQuery}"`;
             intent: "location",
             intentConfidence: 0.9,
             confidence: "high",
-            sources: filteredCampusChunks.map(c => ({
-                type: "document",
-                title: c.metadata?.filename || c.metadata?.originalName || "Campus Navigation",
-                reference: c.metadata?.documentId || "campus-nav"
-            })),
+            sources: [],
             sourceLabel: "📍 Campus Navigation",
             provider: "system",
             responseTimeMs,
@@ -663,51 +468,6 @@ User Question: "${rewrittenQuery}"`;
     const intentResult = { intent, confidence: 0.9 };
     const primaryIntent = Array.isArray(intent) ? intent[0] : intent;
     const decision = decide({ intent: primaryIntent, question: rewrittenQuery });
-
-    // 3. Clarification Handling
-    const clarification = clarificationService.checkClarification({
-        intent,
-        entities,
-        question: normalizedQuestion
-    });
-
-    if (clarification) {
-        const responseTimeMs = Date.now() - startedAt;
-        const chat = await conversationService.saveMessageTurn({
-            user: activeUser,
-            conversationId,
-            question: normalizedQuestion,
-            response: clarification,
-            intent,
-            confidence: intentResult.confidence,
-            provider: "system",
-            responseTimeMs,
-            userMessageId,
-            assistantMessageId,
-            parentId,
-            topic: resolvedActiveTopic,
-            entities: { ...entities, conversationContext: updatedContext }
-        });
-
-        const suggestions = await suggestionsService.generateSuggestions({
-            question: normalizedQuestion,
-            answer: clarification.answer
-        });
-
-        return {
-            conversationId: chat?._id || conversationId || null,
-            mode: activeUser._id ? "authenticated" : "guest",
-            message: clarification.answer,
-            intent,
-            intentConfidence: intentResult.confidence,
-            confidence: clarification.confidence,
-            sources: clarification.sources,
-            sourceLabel: SOURCE_LABELS.UNIVERSITY,
-            provider: "system",
-            responseTimeMs,
-            suggestions
-        };
-    }
 
     let retrievedChunks = [];
     let universitySiteResults = [];
@@ -724,447 +484,460 @@ User Question: "${rewrittenQuery}"`;
     let adminUrlsCount = 0;
     let internetCount = 0;
 
-    if (decision.service === "deterministic") {
-        formatted = deterministicGreeting(activeUser, language);
-        textResponse = formatted.answer;
-    } else if (decision.service === "map") {
-        const mapResult = await mapService.resolveLocationRequest({
+    // ==========================================
+    // UNIVERSAL RETRIEVER (QDRANT FIRST)
+    // ==========================================
+    let cachedResult = retrievalCache.get(normalizedQuestion);
+    let retrievedChunksRaw = [];
+    let combinedDocChunks = [];
+    let retrievalTime = 0;
+    let rerankTime = 0;
+    let qdrantStart = 0;
+
+    if (cachedResult) {
+        console.log(`[RAG LRU Cache HIT] Found cached retrieval results for query: "${normalizedQuestion}"`);
+        retrievedChunksRaw = cachedResult.retrievedChunksRaw;
+        combinedDocChunks = cachedResult.combinedDocChunks;
+        rewrittenQuery = cachedResult.rewrittenQuery;
+    } else {
+        const mongoose = require("mongoose");
+        if (mongoose.connection.readyState === 1) {
+            try {
+                const { ensureCollection } = require("../config/qdrant");
+                await ensureCollection();
+            } catch (err) {
+                console.error("[RAG] Qdrant connection check failed:", err.message);
+            }
+
+            qdrantStart = Date.now();
+            try {
+                const SearchManager = require("../../knowledge/SearchManager");
+                // Retrieve topK = 8 chunks dynamically
+                retrievedChunksRaw = await SearchManager.searchLocalPdfs(rewrittenQuery, activeUser, 8);
+            } catch (retrieveErr) {
+                console.error("[RAG] Vector retrieval failed. Falling back to MongoDB keyword search:", retrieveErr.message);
+                try {
+                    const Chunk = require("../../models/Chunk");
+                    const words = rewrittenQuery.toLowerCase().replace(/[^\w\s]/g, " ").split(/\s+/).filter(w => w.length > 2);
+                    if (words.length > 0) {
+                        const regexes = words.map(w => new RegExp(w, "i"));
+                        const matched = await Chunk.find({ content: { $in: regexes } }).limit(8).lean();
+                        retrievedChunksRaw = matched.map(c => ({
+                            id: c._id.toString(),
+                            content: c.content,
+                            metadata: {
+                                documentId: c.document?.toString() || "",
+                                originalName: c.metadata?.originalName || "",
+                                filename: c.metadata?.originalName || "",
+                                pageNumber: c.metadata?.pageNumber || 1,
+                                category: c.metadata?.category || "",
+                                department: c.metadata?.department || "",
+                                institution: c.metadata?.institution || "",
+                                sourceType: "document",
+                                uploadedFrom: "api"
+                            },
+                            score: 0.5
+                        }));
+                    }
+                } catch (mongoErr) {
+                    console.error("[RAG] MongoDB keyword fallback search failed:", mongoErr.message);
+                }
+            }
+            retrievalTime = Date.now() - qdrantStart;
+            qdrantDuration += retrievalTime;
+
+            // Hybrid Rerank
+            const rerankStart = Date.now();
+            const RankingEngine = require("../../knowledge/RankingEngine");
+            const rankedChunks = await RankingEngine.rerankCandidates(rewrittenQuery, retrievedChunksRaw, activeUser);
+            combinedDocChunks = selectDiverseChunks(rankedChunks, 8);
+            rerankTime = Date.now() - rerankStart;
+
+            retrievalCache.set(normalizedQuestion, {
+                rewrittenQuery,
+                retrievedChunksRaw,
+                combinedDocChunks
+            });
+        }
+    }
+
+    const hasStrongContext = combinedDocChunks.length > 0;
+    
+    // Set parameters for final formatting
+    retrievedChunks = combinedDocChunks;
+    adminDocsCount = combinedDocChunks.length;
+
+    if (hasStrongContext) {
+        maxOutputTokens = 800;
+        if (queryType === "DETAILED" || queryType === "FEE_STRUCTURE" || queryType === "RECOMMENDATION") {
+            maxOutputTokens = 2000;
+        }
+
+        const contextStart = Date.now();
+        const tempMessages = promptService.buildPromptMessages({
             question: rewrittenQuery,
+            intent: recPrimaryIntent || intent,
+            retrievedChunks: combinedDocChunks,
+            universitySiteResults: [],
+            webResults: [],
+            historyText,
             user: activeUser,
-            userCoordinates: (latitude && longitude) ? { lat: Number(latitude), lng: Number(longitude) } : null,
-            conversationContext: updatedContext
+            questionType: QUESTION_TYPES.UNIVERSITY_SPECIFIC,
+            isRepeat,
+            activeTopic: resolvedActiveTopic,
+            language,
+            studentProfile
+        });
+        const contextTime = Date.now() - contextStart;
+
+        if (process.env.NODE_ENV === "development") {
+            console.log("\n[RAG TRACE]");
+            console.log(`query: ${rawQuestion}`);
+            console.log(`normalizedQuery: ${normalizedQuestion}`);
+            console.log(`retrievedCount: ${retrievedChunksRaw.length}`);
+            console.log(`topScores: ${retrievedChunksRaw.slice(0, 5).map(c => c.score).join(", ")}`);
+            console.log(`selectedChunks: ${JSON.stringify(combinedDocChunks.map(c => ({ filename: c.metadata?.filename, page: c.metadata?.pageNumber, score: c.score })))}`);
+            console.log(`filteredChunks: []`);
+            console.log(`filterReasons: []`);
+            console.log(`contextChunks: ${combinedDocChunks.length}`);
+            console.log(`retrievalMs: ${retrievalTime}`);
+            console.log(`contextBuildMs: ${contextTime}`);
+            console.log(`totalBeforeLLM: ${retrievalTime + rerankTime + contextTime}`);
+            console.log("");
+        }
+
+        const topScore = combinedDocChunks.length > 0 ? combinedDocChunks[0].score : 0;
+        const totalRetrievalOverhead = retrievalTime + rerankTime + contextTime;
+        const categories = Array.from(new Set(combinedDocChunks.map(c => c.metadata?.category || c.metadata?.sourceType).filter(Boolean)));
+
+        // Debug Logs exactly matching required production keys
+        console.log("\n[RAG]");
+        console.log(`Query: ${rawQuestion}`);
+        console.log(`Normalized Query: ${normalizedQuestion}`);
+        console.log(`Retrieved Chunk Count: ${retrievedChunksRaw.length}`);
+        console.log(`Top Similarity: ${topScore}`);
+        console.log(`Categories Returned: ${categories.join(", ")}`);
+        console.log(`Sources Used: ${JSON.stringify(combinedDocChunks.map(c => c.metadata?.filename || c.metadata?.originalName))}`);
+        console.log(`Retrieval Time: ${retrievalTime} ms`);
+        console.log(`Rerank Time: ${rerankTime} ms`);
+        console.log(`Total Time: ${totalRetrievalOverhead} ms\n`);
+
+        if (tempMessages.length > 0 && tempMessages[0].role === "system") {
+            tempMessages[0].content += `\n\n## STRICT GROUNDING AND CONSTRAINTS FOR THIS QUERY\n1. Answer ONLY from retrieved evidence.\n2. If evidence is missing for a requested part of the question, state exactly that the information was not found in the university knowledge base. Do not fill missing evidence with general knowledge.`;
+        }
+
+        // Comment out old LLM call:
+        /*
+        if (onChunk) {
+            textResponse = "STREAMING_PLACEHOLDER";
+            activeQuestionType = QUESTION_TYPES.UNIVERSITY_SPECIFIC;
+            sourceLabel = SOURCE_LABELS.UNIVERSITY;
+            provider = process.env.LLM_PROVIDER || "groq";
+            finalMessages = tempMessages;
+        } else {
+            llmStart = Date.now();
+            textResponse = await llmService.generateCompletion(tempMessages, { maxOutputTokens });
+            llmDuration += Date.now() - llmStart;
+            activeQuestionType = QUESTION_TYPES.UNIVERSITY_SPECIFIC;
+            sourceLabel = SOURCE_LABELS.UNIVERSITY;
+            provider = process.env.LLM_PROVIDER || "groq";
+            finalMessages = tempMessages;
+        }
+        */
+
+        // llama.cpp local call integration:
+        const prompt = tempMessages && tempMessages.length > 1 ? tempMessages[1].content : (tempMessages && tempMessages[0] ? tempMessages[0].content : "");
+        llmStart = Date.now();
+        const completion = await llama.chat.completions.create({
+          model: "Qwen3-4B-Instruct-Q4_K_M",
+          messages: [
+            {
+              role: "system",
+              content: "You are EduMate AI, a helpful university assistant."
+            },
+            {
+              role: "user",
+              content: prompt
+            }
+          ],
+          temperature: 0.3,
+          max_tokens: 512,
         });
 
-        formatted = mapResult.found
-            ? responseFormattingService.formatAnswer({
-                answer: mapResult.answer,
-                confidence: "high",
-                sources: mapResult.sources,
-                sourceLabel: SOURCE_LABELS.UNIVERSITY
-            })
-            : {
-                answer: mapResult.answer,
-                confidence: "low",
-                sources: []
-            };
-
-        if (mapResult.mapData) {
-            formatted.mapData = mapResult.mapData;
-            // Update conversationContext with routing information if applicable
-            if (mapResult.mapData.type === "routing") {
-                updatedContext.routeStart = mapResult.mapData.startLocation;
-                updatedContext.routeDestination = mapResult.mapData.destination;
-                if (mapResult.mapData.selectedRouteNumber !== undefined) {
-                    updatedContext.selectedRouteNumber = mapResult.mapData.selectedRouteNumber;
-                }
-            }
-        }
-        if (mapResult.requiresLocationPermission) {
-            formatted.requiresLocationPermission = true;
-        }
-        textResponse = formatted.answer;
-    } else {
-        // Perform 3-Tier Sequential Fallback Search Pipeline with Query Decomposition
-        const isUniversityRelated = classifyQuestionType(rewrittenQuery, intent) !== QUESTION_TYPES.GENERAL_KNOWLEDGE;
-
-        let qdrantStart = 0;
-
-        if (isUniversityRelated) {
-            console.log(`[CHAT] Subquery RAG Search with ${activeSubqueries.length} subqueries:`, activeSubqueries);
-
-            // ==========================================
-            // TIER 1: ADMIN-UPLOADED DOCUMENTS
-            // ==========================================
-            console.log("[CHAT] Evaluating Tier 1 (Admin-Uploaded Documents)...");
-            // ==========================================
-            // TIER 1: ADMIN-UPLOADED DOCUMENTS (Intent-Specific & Validated)
-            // ==========================================
-            console.log("[CHAT] Evaluating Tier 1 (Admin-Uploaded Documents with Intent Decomposition)...");
-            
-            const targetIntents = [];
-            const qCombined = (String(normalizedQuestion) + " " + String(rewrittenQuery)).toLowerCase();
-            
-            if (/\b(fee|fees|tuition|payment|cost|charge|charges)\b/i.test(qCombined)) {
-                targetIntents.push("fee");
-            }
-            if (/\b(faculty|faculties|teacher|teachers|professor|professors|staff|instructor|instructors|members)\b/i.test(qCombined)) {
-                targetIntents.push("faculty");
-            }
-            if (/\b(eligibility|criteria|requirement|requirements|qualification|qualifications|eligible)\b/i.test(qCombined)) {
-                targetIntents.push("eligibility");
-            }
-            if (/\b(hod|head|chairperson|coordinator|dean|director)\b/i.test(qCombined)) {
-                targetIntents.push("HOD");
-            }
-            if (/\b(duration|length|period|time|years|semesters|long)\b/i.test(qCombined)) {
-                targetIntents.push("duration");
-            }
-            if (/\b(scholarship|scholarships|financial aid)\b/i.test(qCombined)) {
-                targetIntents.push("scholarship");
-            }
-            if (/\b(admission|admissions|apply|application|enroll|enrollment|required documents)\b/i.test(qCombined)) {
-                targetIntents.push("admission");
-            }
-            if (/\b(hostel|accommodation|residence|mess)\b/i.test(qCombined)) {
-                targetIntents.push("hostel");
-            }
-            if (/\b(placement|placements|career|recruitment)\b/i.test(qCombined)) {
-                targetIntents.push("placement");
-            }
-            
-            if (targetIntents.length === 0) {
-                if (intent === "fees") targetIntents.push("fee");
-                else if (intent === "faculty") targetIntents.push("faculty");
-                else targetIntents.push(intent || "general_chat");
-            }
-            
-            const INTENT_EXPANSIONS = {
-                fee: ["tuition fee", "course fee", "semester fee", "annual fee", "admission fee", "fee structure", "payment", "fees"],
-                faculty: ["faculty details", "faculty members", "professors", "teachers", "teaching staff", "faculty list"],
-                eligibility: ["eligibility criteria", "admission criteria", "eligibility requirements", "admission requirements", "qualification"],
-                HOD: ["HOD", "head of department", "head of computational sciences", "department head", "HOD qualification", "HOD details"],
-                duration: ["duration", "course duration", "duration of course", "course length", "how many years", "semesters"],
-                scholarship: ["scholarship", "financial aid", "scholarships"],
-                admission: ["admission process", "application", "required documents", "eligibility", "enrollment"],
-                hostel: ["hostel", "accommodation", "residence", "mess"],
-                placement: ["placements", "career", "recruitment", "job opportunities"]
-            };
-
-            const retrievedResultsByIntent = {};
-            const combinedDocChunks = [];
-            const docSeenIds = new Set();
-            const adminDocumentsSearched = [];
-
-            // Deterministic evidence validation: avoids an extra LLM request per intent.
-            const validateEvidenceDeterministically = (tgtIntent, chunks) => {
-                if (!Array.isArray(chunks) || chunks.length === 0) return [];
-                const candidates = chunks.slice(0, Number(process.env.RAG_CANDIDATES_TO_VALIDATE) || 6);
-                const patterns = {
-                    fee: /(?:₹|rs\.?|inr|fee|fees|tuition|semester|annual|payment|amount|cost|charge)/i,
-                    faculty: /(?:professor|prof\.?|teacher|lecturer|faculty|staff|designation|qualification)/i,
-                    HOD: /(?:\bhod\b|head of department|department head|director|dean|chairperson)/i,
-                    eligibility: /(?:eligib|criteria|requirement|qualification|minimum marks|admission)/i,
-                    duration: /(?:duration|years?|semesters?|months?)/i,
-                    scholarship: /(?:scholarship|financial aid|grant|stipend)/i,
-                    admission: /(?:admission|application|enroll|enrollment|required documents|apply)/i,
-                    hostel: /(?:hostel|accommodation|residence|mess)/i,
-                    placement: /(?:placement|career|recruitment|job)/i
-                };
-                const pattern = patterns[tgtIntent] || null;
-                return candidates.map((chunk, index) => {
-                    const content = String(chunk.content || "");
-                    const relevant = pattern ? pattern.test(content) : true;
-                    return {
-                        index,
-                        relevant,
-                        reason: relevant ? "Contains relevant evidence keywords." : "No direct evidence for this intent."
-                    };
-                });
-            };
-
-            for (const targetIntent of targetIntents) {
-                const expansions = INTENT_EXPANSIONS[targetIntent];
-                let searchQuery = rewrittenQuery;
-                if (expansions) {
-                    searchQuery = `${rewrittenQuery}, ${expansions.join(", ")}`;
-                }
-
-                console.log(`[RAG INTENT RETRIEVAL] Searching for intent: "${targetIntent}" with expanded query: "${searchQuery}"`);
-
-                qdrantStart = Date.now();
-                let chunks = await SearchManager.searchLocalPdfs(searchQuery, activeUser, Number(process.env.RAG_MAX_CHUNKS_PER_INTENT) || 3);
-                qdrantDuration += Date.now() - qdrantStart;
-                resolvedType = chunks.resolvedType || resolvedType;
-                resolvedDept = chunks.resolvedDept || resolvedDept;
-                retrievalTelemetry = chunks.retrievalTelemetry || retrievalTelemetry;
-
-                let ranked = await RankingEngine.rerankCandidates(searchQuery, chunks, activeUser);
-
-                let validatedChunks = [];
-                let validationDetails = [];
-
-                if (ranked.length > 0) {
-                    const validationResult = validateEvidenceDeterministically(targetIntent, ranked);
-                    validationDetails = validationResult;
-                    
-                    for (const item of validationResult) {
-                        if (item.relevant) {
-                            const chunk = ranked[item.index];
-                            if (chunk) {
-                                validatedChunks.push(chunk);
-                            }
-                        }
-                    }
-                }
-
-                if (validatedChunks.length === 0) {
-                    console.log(`[RAG INTENT RETRIEVAL] No relevant evidence found for intent "${targetIntent}" in primary search. Searching again...`);
-                    const broaderQuery = `${activeUser.institution || ""} ${targetIntent} ${entities?.course || resolvedActiveTopic || ""}`.trim();
-                    qdrantStart = Date.now();
-                    let fallbackChunks = await SearchManager.searchLocalPdfs(broaderQuery, activeUser, Number(process.env.RAG_MAX_CHUNKS_PER_INTENT) || 3);
-                    qdrantDuration += Date.now() - qdrantStart;
-                    resolvedType = fallbackChunks.resolvedType || resolvedType;
-                    resolvedDept = fallbackChunks.resolvedDept || resolvedDept;
-                    retrievalTelemetry = fallbackChunks.retrievalTelemetry || retrievalTelemetry;
-
-                    let fallbackRanked = await RankingEngine.rerankCandidates(broaderQuery, fallbackChunks, activeUser);
-                    
-                    if (fallbackRanked.length > 0) {
-                        const fallbackValidationResult = validateEvidenceDeterministically(targetIntent, fallbackRanked);
-                        validationDetails = fallbackValidationResult;
-                        
-                        for (const item of fallbackValidationResult) {
-                            if (item.relevant) {
-                                const chunk = fallbackRanked[item.index];
-                                if (chunk) {
-                                    validatedChunks.push(chunk);
-                                }
-                            }
-                        }
-                    }
-                }
-
-                retrievedResultsByIntent[targetIntent] = {
-                    chunks: validatedChunks,
-                    allCandidates: ranked,
-                    validation: validationDetails
-                };
-
-                ranked.forEach(c => {
-                    const docName = c.metadata?.filename || c.metadata?.originalName;
-                    if (docName && !adminDocumentsSearched.includes(docName)) {
-                        adminDocumentsSearched.push(docName);
-                    }
-                });
-
-                for (const chunk of validatedChunks.slice(0, Number(process.env.RAG_MAX_CHUNKS_PER_INTENT) || 3)) {
-                    if (!docSeenIds.has(chunk.id) && combinedDocChunks.length < (Number(process.env.RAG_MAX_CHUNKS) || 4)) {
-                        docSeenIds.add(chunk.id);
-                        combinedDocChunks.push(chunk);
-                    }
-                }
-            }
-
-            adminDocsCount = combinedDocChunks.length;
-            
-            let groundingInstructions = "";
-            for (const targetIntent of targetIntents) {
-                const validated = retrievedResultsByIntent[targetIntent]?.chunks || [];
-                if (validated.length === 0) {
-                    if (targetIntent === "fee") {
-                        groundingInstructions += `\n- The fee information was not found in the Admin documents. You MUST return exactly: "The fee information was not found in the Admin documents." for the fee section. Do not fabricate, infer, or guess any fee. Do not classify course benefits/features as fees.`;
-                    } else {
-                        groundingInstructions += `\n- The ${targetIntent} information was not found in the Admin documents. You MUST explicitly state that the ${targetIntent} information was not found in the Admin documents.`;
-                    }
-                } else {
-                    if (targetIntent === "fee") {
-                        groundingInstructions += `\n- For the fee information: Answer ONLY from the retrieved evidence. Ensure you do not classify course benefits/features (labs, mentorship, projects) as fees. Do not infer or invent a fee. Do not use generic phrases like "average fee may be...", "typically...", "generally..." unless the user explicitly asks for general information.`;
-                    }
-                }
-            }
-
-            const webCrawlingEnabled = process.env.WEB_CRAWLING_ENABLED !== "false";
-            const hasStrongContext = combinedDocChunks.length > 0 && RankingEngine.isConfident(combinedDocChunks);
-
-            if (hasStrongContext || !webCrawlingEnabled) {
-                console.log(`[CHAT] Running RAG search pipeline (Strong context: ${hasStrongContext}, Web crawling enabled: ${webCrawlingEnabled})`);
-                console.log(`[CHAT] Strong institutional context verified with ${combinedDocChunks.length} chunks.`);
-
-                const tempMessages = promptService.buildPromptMessages({
-                    question: rewrittenQuery,
-                    intent,
-                    retrievedChunks: combinedDocChunks,
-                    universitySiteResults: [],
-                    webResults: [],
-                    historyText,
-                    user: activeUser,
-                    questionType: QUESTION_TYPES.UNIVERSITY_SPECIFIC,
-                    isRepeat,
-                    activeTopic: resolvedActiveTopic,
-                    language,
-                    studentProfile
-                });
-
-                if (tempMessages.length > 0 && tempMessages[0].role === "system") {
-                    tempMessages[0].content += `\n\n## STRICT GROUNDING AND CONSTRAINTS FOR THIS QUERY\n1. Answer ONLY from retrieved evidence.\n2. If evidence is missing for a requested part of the question (e.g. fee or faculty), state exactly that the information was not found in the Admin documents. Do not fill missing evidence with general knowledge.\n3. For the fee section: do not classify course benefits/features (e.g. labs, mentorship, projects) as fees. Do not infer or invent a fee. Do not use generic phrases like "average fee may be...", "typically...", "generally..." unless the user explicitly asks for general information.\n4. Never let evidence retrieved for "faculty" satisfy the "fee" requirement.\n5. If the Admin documents do not contain the requested fee, return exactly: "The fee information was not found in the Admin documents." for that section.\n${groundingInstructions}`;
-                }
-
-                console.log("\n==================== [DEBUG RAG RETRIEVAL] ====================");
-                console.log(`Question: ${normalizedQuestion}`);
-                console.log(`Intent(s): ${targetIntents.join(", ")}`);
-                console.log(`Admin documents searched:\n  ${adminDocumentsSearched.length > 0 ? adminDocumentsSearched.join("\n  ") : "None"}`);
-                console.log("----------------------------------------------------------------");
-
-                for (const targetIntent of targetIntents) {
-                    const result = retrievedResultsByIntent[targetIntent];
-                    if (result) {
-                        console.log(`Intent: ${targetIntent}`);
-                        console.log(`Top retrieved chunks & Scores:`);
-                        result.allCandidates.slice(0, 5).forEach((c, idx) => {
-                            console.log(`  [Chunk ${idx + 1}] Score: ${c.score.toFixed(4)} | Doc: ${c.metadata?.filename || c.metadata?.originalName} | Text: ${c.content.replace(/\n/g, " ").slice(0, 100)}...`);
-                        });
-                        console.log(`Evidence accepted/rejected:`);
-                        result.validation.forEach((v) => {
-                            const cand = result.allCandidates[v.index];
-                            if (cand) {
-                                console.log(`  [Chunk ${v.index + 1}] ${v.relevant ? "ACCEPTED" : "REJECTED"} | Reason: ${v.reason}`);
-                            }
-                        });
-                        console.log("----------------------------------------------------------------");
-                    }
-                }
-
-                console.log(`Final context sent to LLM:\n${JSON.stringify(tempMessages, null, 2)}`);
-                console.log("===============================================================\n");
-
-                if (onChunk) {
-                    textResponse = "STREAMING_PLACEHOLDER";
-                    retrievedChunks = combinedDocChunks;
-                    activeQuestionType = QUESTION_TYPES.UNIVERSITY_SPECIFIC;
-                    sourceLabel = SOURCE_LABELS.UNIVERSITY;
-                    provider = process.env.LLM_PROVIDER || "groq";
-                    finalMessages = tempMessages;
-                } else {
-                    llmStart = Date.now();
-                    let attemptResponse = await llmService.generateCompletion(tempMessages);
-                    llmDuration += Date.now() - llmStart;
-                    textResponse = attemptResponse;
-                    retrievedChunks = combinedDocChunks;
-                    activeQuestionType = QUESTION_TYPES.UNIVERSITY_SPECIFIC;
-                    sourceLabel = SOURCE_LABELS.UNIVERSITY;
-                    provider = process.env.LLM_PROVIDER || "groq";
-                    finalMessages = tempMessages;
-                }
-            } else {
-                console.log("[CHAT] Weak institutional context or missing documentation. Falling back to Web Crawler...");
-                const crawledResults = await webCrawlerService.searchAndScrape(rewrittenQuery);
-                internetCount = crawledResults.length;
-
-                const formattedWeb = crawledResults.map(r => ({
-                    title: r.title,
-                    url: r.url,
-                    snippet: r.extractedContent || r.relevantSnippets || ""
-                }));
-
-                const tempMessages = promptService.buildPromptMessages({
-                    question: rewrittenQuery,
-                    intent,
-                    retrievedChunks: [],
-                    universitySiteResults: [],
-                    webResults: formattedWeb,
-                    historyText,
-                    user: activeUser,
-                    questionType: QUESTION_TYPES.GENERAL_KNOWLEDGE,
-                    isRepeat,
-                    activeTopic: resolvedActiveTopic,
-                    language,
-                    studentProfile
-                });
-
-                if (onChunk) {
-                    textResponse = "STREAMING_PLACEHOLDER";
-                    webResults = crawledResults;
-                    activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
-                    sourceLabel = SOURCE_LABELS.WEB;
-                    provider = process.env.LLM_PROVIDER || "groq";
-                    finalMessages = tempMessages;
-                } else {
-                    llmStart = Date.now();
-                    const attemptResponse = await llmService.generateCompletion(tempMessages);
-                    llmDuration += Date.now() - llmStart;
-                    textResponse = attemptResponse;
-                    webResults = crawledResults;
-                    activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
-                    sourceLabel = SOURCE_LABELS.WEB;
-                    provider = process.env.LLM_PROVIDER || "groq";
-                    finalMessages = tempMessages;
-                }
-            }
+        let reply = "";
+        if (completion && completion.choices && completion.choices[0] && completion.choices[0].message) {
+            reply = completion.choices[0].message.content;
         } else {
-            const webCrawlingEnabled = process.env.WEB_CRAWLING_ENABLED !== "false";
-            if (webCrawlingEnabled) {
-                console.log("[CHAT] General search query. Routing directly to Web Crawler...");
-                const crawledResults = await webCrawlerService.searchAndScrape(rewrittenQuery);
-                internetCount = crawledResults.length;
+            reply = String(completion || "");
+        }
+        textResponse = reply;
+        llmDuration += Date.now() - llmStart;
+        activeQuestionType = QUESTION_TYPES.UNIVERSITY_SPECIFIC;
+        sourceLabel = SOURCE_LABELS.UNIVERSITY;
+        provider = "llama";
+        
+        if (onChunk) {
+            onChunk(reply);
+        }
 
-                const formattedWeb = crawledResults.map(r => ({
-                    title: r.title,
-                    url: r.url,
-                    snippet: r.extractedContent || r.relevantSnippets || ""
-                }));
-
-                const tempMessages = promptService.buildPromptMessages({
+        // Enrich with map service coordinates if location/navigation is requested
+        if (recPrimaryIntent === "location" || recPrimaryIntent === "campus_navigation" || intent === "location" || intent === "campus_navigation") {
+            try {
+                const mapResult = await mapService.resolveLocationRequest({
                     question: rewrittenQuery,
-                    intent,
-                    retrievedChunks: [],
-                    universitySiteResults: [],
-                    webResults: formattedWeb,
-                    historyText,
                     user: activeUser,
-                    questionType: QUESTION_TYPES.GENERAL_KNOWLEDGE,
-                    isRepeat,
-                    activeTopic: resolvedActiveTopic,
-                    language,
-                    studentProfile
+                    userCoordinates: (latitude && longitude) ? { lat: Number(latitude), lng: Number(longitude) } : null,
+                    conversationContext: updatedContext
                 });
-
-                if (onChunk) {
-                    textResponse = "STREAMING_PLACEHOLDER";
-                    webResults = crawledResults;
-                    activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
-                    sourceLabel = SOURCE_LABELS.WEB;
-                    provider = process.env.LLM_PROVIDER || "groq";
-                    finalMessages = tempMessages;
-                } else {
-                    llmStart = Date.now();
-                    const attemptResponse = await llmService.generateCompletion(tempMessages);
-                    llmDuration += Date.now() - llmStart;
-                    textResponse = attemptResponse;
-                    webResults = crawledResults;
-                    activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
-                    sourceLabel = SOURCE_LABELS.WEB;
-                    provider = process.env.LLM_PROVIDER || "groq";
-                    finalMessages = tempMessages;
+                if (mapResult && mapResult.mapData) {
+                    // Inject coordinates so the frontend can render map route components
+                    formatted = formatted || {};
+                    formatted.mapData = mapResult.mapData;
                 }
-            } else {
-                console.log("[CHAT] General search query (Web Crawling Disabled). Querying LLM directly with empty context...");
-                const tempMessages = promptService.buildPromptMessages({
+            } catch (err) {
+                console.error("Map service enrichment failed:", err.message);
+            }
+        }
+    } else {
+        // Fallback Logic when Universal Retriever yields nothing
+        console.log("[RAG] Zero chunks returned. Executing fallback routing...");
+        
+        let fallbackDone = false;
+
+        // Fallback 0: Genuinely unresolved ambiguity clarification
+        if (clarificationPrompt) {
+            console.log(`[FALLBACK CLARIFICATION] Returning unresolved ambiguity clarification: "${clarificationPrompt}"`);
+            textResponse = clarificationPrompt;
+            fallbackDone = true;
+        }
+
+        // Fallback 1: Course Catalogue Service
+        const courseCatalogueService = require("../../services/courseCatalogueService");
+        let selectedLevel = courseCatalogueService.checkLevelSelection(normalizedQuestion, rawHistory);
+        let isCatalogQuery = false;
+        
+        if (selectedLevel) {
+            isCatalogQuery = true;
+        } else if (courseCatalogueService.isCourseCatalogueQuery(normalizedQuestion)) {
+            isCatalogQuery = true;
+            selectedLevel = courseCatalogueService.extractLevelFromQuestion(normalizedQuestion);
+        }
+
+        if (isCatalogQuery) {
+            console.log(`[FALLBACK COURSE CATALOGUE] Detected catalogue query fallback. Level: ${selectedLevel || "None"}`);
+            const catResponse = await courseCatalogueService.getCatalogueResponse(selectedLevel, language);
+            textResponse = catResponse.answer;
+            retrievedChunks = [];
+            fallbackDone = true;
+        }
+
+        // Fallback 2: Map Service Directions
+        if (!fallbackDone) {
+            const isDirectionRequest = 
+                normalizedQuestion.toLowerCase().trim() === "yes, show directions" ||
+                normalizedQuestion.toLowerCase().trim() === "yes show directions" ||
+                /^(?:how do i reach there|show directions|get directions|how to get there|how to reach there)/i.test(normalizedQuestion);
+
+            if (isDirectionRequest || decision.service === "map") {
+                console.log(`[FALLBACK MAP SERVICE] Executing map service fallback...`);
+                const mapResult = await mapService.resolveLocationRequest({
                     question: rewrittenQuery,
-                    intent,
-                    retrievedChunks: [],
-                    universitySiteResults: [],
-                    webResults: [],
-                    historyText,
                     user: activeUser,
-                    questionType: QUESTION_TYPES.GENERAL_KNOWLEDGE,
-                    isRepeat,
-                    activeTopic: resolvedActiveTopic,
-                    language,
-                    studentProfile
+                    userCoordinates: (latitude && longitude) ? { lat: Number(latitude), lng: Number(longitude) } : null,
+                    conversationContext: updatedContext
                 });
-
-                if (onChunk) {
-                    textResponse = "STREAMING_PLACEHOLDER";
-                    webResults = [];
-                    activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
-                    sourceLabel = SOURCE_LABELS.WEB;
-                    provider = process.env.LLM_PROVIDER || "groq";
-                    finalMessages = tempMessages;
-                } else {
-                    llmStart = Date.now();
-                    const attemptResponse = await llmService.generateCompletion(tempMessages);
-                    llmDuration += Date.now() - llmStart;
-                    textResponse = attemptResponse;
-                    webResults = [];
-                    activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
-                    sourceLabel = SOURCE_LABELS.WEB;
-                    provider = process.env.LLM_PROVIDER || "groq";
-                    finalMessages = tempMessages;
-                }
+                textResponse = mapResult.answer;
+                fallbackDone = true;
             }
         }
 
-        // Format citations
+        // Fallback 3: Document Delivery
+        if (!fallbackDone) {
+            const documentDeliveryService = require("../../services/documentDeliveryService");
+            const docDeliveryResult = await documentDeliveryService.handleDocumentDelivery({
+                user: activeUser,
+                question: normalizedQuestion,
+                conversationId,
+                parentId,
+                historyText
+            });
+            if (docDeliveryResult) {
+                console.log(`[FALLBACK DOCUMENT DELIVERY] Executing document delivery fallback...`);
+                textResponse = docDeliveryResult.answer;
+                fallbackDone = true;
+            }
+        }
+
+        // Fallback 4: Web Search / Web Scraper
+        if (!fallbackDone && process.env.WEB_CRAWLING_ENABLED !== "false") {
+            console.log("[FALLBACK WEB CRAWLER] Executing web search crawler fallback...");
+            const crawledResults = await webCrawlerService.searchAndScrape(rewrittenQuery);
+            internetCount = crawledResults.length;
+            webResults = crawledResults.map(r => ({
+                title: r.title,
+                url: r.url,
+                snippet: r.extractedContent || r.relevantSnippets || ""
+            }));
+
+            const tempMessages = promptService.buildPromptMessages({
+                question: rewrittenQuery,
+                intent,
+                retrievedChunks: [],
+                universitySiteResults: [],
+                webResults,
+                historyText,
+                user: activeUser,
+                questionType: QUESTION_TYPES.GENERAL_KNOWLEDGE,
+                isRepeat,
+                activeTopic: resolvedActiveTopic,
+                language,
+                studentProfile
+            });
+
+            // Gemini/Groq call commented out:
+            /*
+            if (onChunk) {
+                textResponse = "STREAMING_PLACEHOLDER";
+                activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
+                sourceLabel = SOURCE_LABELS.WEB;
+                provider = process.env.LLM_PROVIDER || "groq";
+                finalMessages = tempMessages;
+            } else {
+                llmStart = Date.now();
+                textResponse = await llmService.generateCompletion(tempMessages, { maxOutputTokens: 800 });
+                llmDuration += Date.now() - llmStart;
+                activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
+                sourceLabel = SOURCE_LABELS.WEB;
+                provider = process.env.LLM_PROVIDER || "groq";
+                finalMessages = tempMessages;
+            }
+            */
+
+            // llama.cpp local call integration:
+            const prompt = tempMessages && tempMessages.length > 1 ? tempMessages[1].content : (tempMessages && tempMessages[0] ? tempMessages[0].content : "");
+            llmStart = Date.now();
+            const completion = await llama.chat.completions.create({
+              model: "Qwen3-4B-Instruct-Q4_K_M",
+              messages: [
+                {
+                  role: "system",
+                  content: "You are EduMate AI, a helpful university assistant."
+                },
+                {
+                  role: "user",
+                  content: prompt
+                }
+              ],
+              temperature: 0.3,
+              max_tokens: 512,
+            });
+
+            let reply = "";
+            if (completion && completion.choices && completion.choices[0] && completion.choices[0].message) {
+                reply = completion.choices[0].message.content;
+            } else {
+                reply = String(completion || "");
+            }
+            textResponse = reply;
+            llmDuration += Date.now() - llmStart;
+            activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
+            sourceLabel = SOURCE_LABELS.WEB;
+            provider = "llama";
+
+            if (onChunk) {
+                onChunk(reply);
+            }
+            fallbackDone = true;
+        }
+
+        // Fallback 5: General AI completion (no search context)
+        if (!fallbackDone) {
+            console.log("[FALLBACK GENERAL AI] Executing general AI fallback...");
+            const tempMessages = promptService.buildPromptMessages({
+                question: rewrittenQuery,
+                intent,
+                retrievedChunks: [],
+                universitySiteResults: [],
+                webResults: [],
+                historyText,
+                user: activeUser,
+                questionType: QUESTION_TYPES.GENERAL_KNOWLEDGE,
+                isRepeat,
+                activeTopic: resolvedActiveTopic,
+                language,
+                studentProfile
+            });
+
+            // Gemini/Groq call commented out:
+            /*
+            if (onChunk) {
+                textResponse = "STREAMING_PLACEHOLDER";
+                activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
+                sourceLabel = SOURCE_LABELS.WEB;
+                provider = process.env.LLM_PROVIDER || "groq";
+                finalMessages = tempMessages;
+            } else {
+                llmStart = Date.now();
+                textResponse = await llmService.generateCompletion(tempMessages, { maxOutputTokens: 800 });
+                llmDuration += Date.now() - llmStart;
+                activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
+                sourceLabel = SOURCE_LABELS.WEB;
+                provider = process.env.LLM_PROVIDER || "groq";
+                finalMessages = tempMessages;
+            }
+            */
+
+            // llama.cpp local call integration:
+            const prompt = tempMessages && tempMessages.length > 1 ? tempMessages[1].content : (tempMessages && tempMessages[0] ? tempMessages[0].content : "");
+            llmStart = Date.now();
+            const completion = await llama.chat.completions.create({
+              model: "Qwen3-4B-Instruct-Q4_K_M",
+              messages: [
+                {
+                  role: "system",
+                  content: "You are EduMate AI, a helpful university assistant."
+                },
+                {
+                  role: "user",
+                  content: prompt
+                }
+              ],
+              temperature: 0.3,
+              max_tokens: 512,
+            });
+
+            let reply = "";
+            if (completion && completion.choices && completion.choices[0] && completion.choices[0].message) {
+                reply = completion.choices[0].message.content;
+            } else {
+                reply = String(completion || "");
+            }
+            textResponse = reply;
+            llmDuration += Date.now() - llmStart;
+            activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
+            sourceLabel = SOURCE_LABELS.WEB;
+            provider = "llama";
+
+            if (onChunk) {
+                onChunk(reply);
+            }
+            fallbackDone = true;
+        }
+
+        // Debug Logs exactly matching required production keys
+        console.log("\n[RAG]");
+        console.log(`Query: ${rawQuestion}`);
+        console.log(`Normalized Query: ${normalizedQuestion}`);
+        console.log(`Retrieved Chunk Count: 0`);
+        console.log(`Top Similarity: 0`);
+        console.log(`Categories Returned: none`);
+        console.log(`Sources Used: []`);
+        console.log(`Retrieval Time: 0 ms`);
+        console.log(`Rerank Time: 0 ms`);
+        console.log(`Total Time: ${Date.now() - startedAt} ms\n`);
+    }
+
+    // Format citations
         const sources = citationService.formatCitations(retrievedChunks, universitySiteResults, webResults);
 
         // Enrich citations with signed download URLs
@@ -1217,16 +990,18 @@ User Question: "${rewrittenQuery}"`;
             }
         });
 
-        // Call Unified LLM Service if streaming is active
+        // Call Unified LLM Service if streaming is active (commented out for llama.cpp local server)
+        /*
         if (onChunk && finalMessages.length > 0) {
             textResponse = "";
             llmStart = Date.now();
             textResponse = await llmService.generateStream(finalMessages, (chunk) => {
                 onChunk(chunk);
-            }, { signal });
+            }, { signal, maxOutputTokens });
             llmDuration += Date.now() - llmStart;
             provider = process.env.LLM_PROVIDER || "groq";
         }
+        */
 
         if (!textResponse) {
             formatted = responseFormattingService.formatUnavailable({
@@ -1238,7 +1013,7 @@ User Question: "${rewrittenQuery}"`;
                 intent,
                 retrievedContext: { chunks: retrievedChunks, sources },
                 generatedAnswer: textResponse,
-                providerSuccess: provider === "groq",
+                providerSuccess: provider === "llama",
                 questionType: activeQuestionType
             });
 
@@ -1251,7 +1026,6 @@ User Question: "${rewrittenQuery}"`;
                 })
                 : responseFormattingService.formatUnavailable({ reason: validation.reason });
         }
-    }
 
     // Save to Cache if appropriate
     const shouldBypassCache = (decision.service === "map" || intent === "travel_route" || intent === "nearby");
@@ -1337,7 +1111,7 @@ User Question: "${rewrittenQuery}"`;
         answer: formatted.answer
     });
 
-    return {
+    const finalResult = {
         conversationId: chat?._id || conversationId || null,
         mode: activeUser._id ? "authenticated" : "guest",
         message: formatted.answer,
@@ -1352,6 +1126,16 @@ User Question: "${rewrittenQuery}"`;
         mapData: formatted.mapData || null,
         requiresLocationPermission: formatted.requiresLocationPermission || false
     };
+
+    // Memory Safety: release temporary objects
+    retrievedChunks = null;
+    universitySiteResults = null;
+    webResults = null;
+    combinedDocChunks = null;
+    retrievedChunksRaw = null;
+    cachedResult = null;
+
+    return finalResult;
 };
 
 const listChats = async ({ user }) => {

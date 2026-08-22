@@ -7,107 +7,97 @@
 const rerank = async (query, chunks) => {
     if (!chunks || chunks.length === 0) return [];
     
-    let expandedQuery = query;
-    if (/\bcss\b/i.test(expandedQuery)) {
-        expandedQuery = expandedQuery.replace(/\bcss\b/gi, "computational sciences");
-    }
+    const lowerQuery = String(query).toLowerCase();
     
-    const lowerQuery = expandedQuery.toLowerCase();
-    const wantsBtech = /\b(b\.?\s*tech|btech|b\s+tech|bachelor of technology)\b/i.test(lowerQuery);
-    const wantsCse = /\b(cse|computer science|computer science and engineering|computer science & engineering)\b/i.test(lowerQuery);
+    // Normalize query terms for keyword matching
     const queryWords = lowerQuery
-        .replace(/[^\w\s]/g, "")
+        .replace(/[^\w\s]/g, " ")
         .split(/\s+/)
         .filter(w => w.length > 2);
         
-    const isFeeQuery = lowerQuery.includes("fee") || lowerQuery.includes("cost") || lowerQuery.includes("tuition") || lowerQuery.includes("charge") || lowerQuery.includes("payment");
-    const isFacultyQuery = lowerQuery.includes("faculty") || lowerQuery.includes("faculties") || lowerQuery.includes("teacher") || lowerQuery.includes("professor") || lowerQuery.includes("hod") || lowerQuery.includes("head") || lowerQuery.includes("dean") || lowerQuery.includes("director") || lowerQuery.includes("coordinator") || lowerQuery.includes("staff") || lowerQuery.includes("member") || lowerQuery.includes("lecturer");
-    const isCourseQuery = lowerQuery.includes("course") || lowerQuery.includes("bca") || lowerQuery.includes("overview") || lowerQuery.includes("eligibility") || lowerQuery.includes("admission") || lowerQuery.includes("requirement") || lowerQuery.includes("criteria") || lowerQuery.includes("syllabus");
-
     const scoredChunks = chunks.map(chunk => {
         const content = (chunk.content || "").toLowerCase();
         const filename = (chunk.metadata?.originalName || chunk.metadata?.filename || "").toLowerCase();
         const category = (chunk.metadata?.category || "").toLowerCase();
         const department = (chunk.metadata?.department || "").toLowerCase();
-        const course = (chunk.metadata?.course || "").toLowerCase();
-
-        const initialScore = Number(chunk.score || 0);
-        let keywordMatches = 0;
+        const documentType = (chunk.metadata?.documentType || "").toLowerCase();
+        const building = (chunk.metadata?.buildingName || chunk.metadata?.buildingNumber || "").toLowerCase();
+        const office = (chunk.metadata?.office || "").toLowerCase();
+        const room = (chunk.metadata?.roomNumber || "").toLowerCase();
         
+        const initialScore = Number(chunk.score || 0);
+        let boost = 0;
+        
+        // 1. Keyword overlap (percentage of query words found in content/filename, max 0.25)
+        let matchedWords = 0;
         queryWords.forEach(word => {
             if (content.includes(word) || filename.includes(word)) {
-                keywordMatches += 1;
+                matchedWords++;
             }
         });
-
-        // Normalized keyword overlap score (max 0.20)
-        const keywordScore = queryWords.length > 0 ? (keywordMatches / queryWords.length) * 0.20 : 0;
-        let domainBoost = 0;
-
-        // 1. Fee Structure Boosting
-        if (isFeeQuery) {
-            if (filename.includes("fee") || category.includes("fee")) {
-                domainBoost += 0.35;
+        const keywordScore = queryWords.length > 0 ? (matchedWords / queryWords.length) * 0.25 : 0;
+        
+        // 2. Title & Heading match (max 0.20)
+        let hasTitleMatch = false;
+        queryWords.forEach(word => {
+            if (filename.includes(word)) {
+                hasTitleMatch = true;
             }
-            if (content.includes("fee structure") || content.includes("tuition") || content.includes("per semester") || content.includes("annual fee") || content.includes("admission fee")) {
-                domainBoost += 0.30;
+        });
+        if (hasTitleMatch) boost += 0.10;
+        
+        const hasHeading = content.includes("###") || content.includes("##") || content.includes("#") || 
+                            /\n[A-Z\s]{4,30}\n/.test(chunk.content);
+        if (hasHeading) boost += 0.10;
+        
+        // 3. Metadata Match / Boosting instead of filtering (up to 0.35)
+        let matchesMetadata = false;
+        queryWords.forEach(word => {
+            if (
+                category.includes(word) || 
+                department.includes(word) || 
+                documentType.includes(word) || 
+                building.includes(word) || 
+                office.includes(word) || 
+                room.includes(word)
+            ) {
+                matchesMetadata = true;
             }
-            if ((content.includes("bca") || content.includes("computer")) && (content.includes("rs") || content.includes("₹") || content.includes("fee") || content.includes("00"))) {
-                domainBoost += 0.25;
-            }
+        });
+        if (matchesMetadata) boost += 0.25;
+        
+        // Targeted content matches
+        if (/\broom\s+[a-zA-Z\d-]+\b/i.test(content) || /\b(?:rm|office|lab)\s+\d+\b/i.test(content)) {
+            boost += 0.10;
         }
-
-        // 2. Faculty & Department Boosting (BCA -> Department of Computational Sciences)
-        if (isFacultyQuery) {
-            if (filename.includes("faculty") || category.includes("faculty") || filename.includes("staff") || filename.includes("hod")) {
-                domainBoost += 0.35;
-            }
-            if (department.includes("computational") || department.includes("computer") || 
-                content.includes("department of computational sciences") || content.includes("computational sciences") ||
-                content.includes("school of computing") || content.includes("computer application") || content.includes("css")) {
-                domainBoost += 0.30;
-            }
-            if (content.includes("professor") || content.includes("dr.") || content.includes("designation") || content.includes("qualification") || content.includes("hod") || content.includes("head of department")) {
-                domainBoost += 0.25;
-            }
-            // Direct HOD query boost
-            if (lowerQuery.includes("hod") || lowerQuery.includes("head")) {
-                if (content.includes("hod") || content.includes("head of department") || content.includes("jayanta") || content.includes("aich")) {
-                    domainBoost += 0.35;
-                }
-            }
+        if (/\b(dr\.|prof\.|professor|hod|head of department)\b/i.test(content) || 
+            /designation|qualification/i.test(content) || 
+            /jayanta|aich/i.test(content)) {
+            boost += 0.10;
         }
-
-        // 3. Course/Eligibility Boosting
-        if (isCourseQuery) {
-            if (filename.includes("bca") || category.includes("course") || filename.includes("brochure") || filename.includes("syllabus") || filename.includes("admission")) {
-                domainBoost += 0.35;
-            }
-            if (content.includes("bca") || content.includes("bachelor of computer applications") || content.includes("eligibility") || content.includes("criteria") || content.includes("requirement")) {
-                domainBoost += 0.30;
-            }
+        const hasTable = content.includes("|") || 
+                         content.includes("----") || 
+                         /\d+\s{2,}\d+/.test(content) || 
+                         (content.match(/\d+/g) || []).length > 10;
+        if (hasTable) {
+            boost += 0.10;
         }
-
-        // 4. Canonical course/department alias boost (e.g. user says B.Tech, document says CSE).
-        if (wantsBtech) {
-            if (course.includes("b.tech") || course.includes("btech") || course.includes("technology")) domainBoost += 0.20;
-            if (department.includes("computer") || department.includes("cse") || content.includes("computer science and engineering") || content.includes("computer science & engineering") || content.includes("\bcse\b")) domainBoost += 0.20;
+        
+        // 4. Adjacent Chunk Bonus (0.15)
+        if (chunk.metadata?.chunkIndex !== undefined || chunk.metadata?.pageNumber !== undefined) {
+            boost += 0.15;
         }
-        if (wantsCse && (department.includes("computer") || department.includes("cse") || content.includes("computer science"))) {
-            domainBoost += 0.20;
-        }
-
-        const rerankScore = initialScore + keywordScore + domainBoost;
+        
+        const finalScore = initialScore + keywordScore + boost;
         
         return {
             ...chunk,
             initialScore: parseFloat(initialScore.toFixed(4)),
-            rerankScore: parseFloat(rerankScore.toFixed(4)),
-            score: parseFloat(rerankScore.toFixed(4))
+            rerankScore: parseFloat(finalScore.toFixed(4)),
+            score: parseFloat(finalScore.toFixed(4))
         };
     });
     
-    // Sort descending by final score
     return scoredChunks.sort((a, b) => b.score - a.score);
 };
 

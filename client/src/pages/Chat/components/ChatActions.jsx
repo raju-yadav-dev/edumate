@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { Copy, Check, RotateCcw, ThumbsUp, ThumbsDown } from "lucide-react";
 import "../styles/ChatActions.css";
 

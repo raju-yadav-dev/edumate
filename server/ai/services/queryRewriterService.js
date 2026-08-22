@@ -204,9 +204,59 @@ const analyzeQuery = async ({ question, historyText, conversationContext, user }
     };
 
     const originalQuestion = String(question || "").trim();
-    const heuristicRewritten = queryOptimizer.resolveReferences(originalQuestion, context);
-    const intents = queryOptimizer.detectIntents(originalQuestion);
-    const topic = queryOptimizer.canonicalTopic(originalQuestion, context) || context.currentTopic || "";
+    
+    // Memory fix: check if the user is responding to a pending clarification prompt
+    if (context.pendingChoices && context.pendingChoices.length > 0) {
+        const qClean = originalQuestion.toLowerCase().trim().replace(/[?.!,:;()'"\-_[\]{}]/g, " ").replace(/\s+/g, " ").trim();
+        const { normalizeQueryText } = require("../utils/queryParser");
+        const qNormalized = normalizeQueryText(originalQuestion);
+        
+        let resolvedChoice = null;
+        for (const choice of context.pendingChoices) {
+            const choiceClean = choice.toLowerCase().trim().replace(/[?.!,:;()'"\-_[\]{}]/g, " ").replace(/\s+/g, " ").trim();
+            const choiceNormalized = normalizeQueryText(choice);
+            
+            if (qClean === choiceClean || qNormalized === choiceNormalized || choiceClean.includes(qClean) && qClean.length > 3 || choiceNormalized.includes(qNormalized) && qNormalized.length > 3) {
+                resolvedChoice = choice;
+                break;
+            }
+        }
+        
+        if (resolvedChoice) {
+            console.log(`[RAG memory] Resolved pending choices: "${resolvedChoice}" selected by user input: "${originalQuestion}"`);
+            context.currentTopic = resolvedChoice;
+            context.currentEntity = resolvedChoice;
+            delete context.pendingChoices;
+            delete context.pendingType;
+        }
+    }
+
+    const courseResolver = require("../../services/courseResolver");
+    const courseResolveResult = courseResolver.resolveCourseInQuestion(originalQuestion);
+    
+    if (courseResolveResult.clarificationPrompt) {
+        const intents = queryOptimizer.detectIntents(originalQuestion);
+        context.pendingChoices = courseResolveResult.choices || [];
+        context.pendingType = "programme";
+        return {
+            activeTopic: context.currentTopic || "",
+            rewrittenQuery: originalQuestion,
+            intent: intents.length === 1 ? intents[0] : intents,
+            entities: {
+                course: null,
+                department: context.mentionedDepartment || null
+            },
+            isRepeat: false,
+            subqueries: [originalQuestion],
+            conversationContext: context,
+            clarificationPrompt: courseResolveResult.clarificationPrompt
+        };
+    }
+
+    const questionToUse = courseResolveResult.resolvedQuestion || originalQuestion;
+    const heuristicRewritten = queryOptimizer.resolveReferences(questionToUse, context);
+    const intents = queryOptimizer.detectIntents(questionToUse);
+    const topic = courseResolveResult.canonicalName || queryOptimizer.canonicalTopic(questionToUse, context) || context.currentTopic || "";
 
     if (topic) {
         context.currentTopic = topic;
@@ -304,7 +354,8 @@ const analyzeQuery = async ({ question, historyText, conversationContext, user }
             if (uniqueDisplayNames.length > 1) {
                 const listStr = uniqueDisplayNames.slice(0, -1).join(", ") + " or " + uniqueDisplayNames.slice(-1);
                 const dynamicClarification = `Which ${matchedDegree} programme do you mean — ${listStr}?`;
-                
+                context.pendingChoices = uniqueDisplayNames;
+                context.pendingType = "programme";
                 return {
                     activeTopic: matchedDegree,
                     rewrittenQuery: heuristicRewritten,
@@ -325,6 +376,9 @@ const analyzeQuery = async ({ question, historyText, conversationContext, user }
     // Resolve obvious ambiguity without an LLM.
     const clarificationPrompt = getAmbiguousClarification(originalQuestion, historyText);
     if (clarificationPrompt) {
+        const choices = ["BCA", "B.Tech"];
+        context.pendingChoices = choices;
+        context.pendingType = "degree";
         return {
             activeTopic: topic,
             rewrittenQuery: heuristicRewritten,

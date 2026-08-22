@@ -317,7 +317,7 @@ async function evaluateRoute(route, options = {}) {
         for (const tagStr of floodSet) {
             try {
                 const tags = JSON.parse(tagStr);
-                if (tags.hazard === "flood" || tags.hazard === "flooding" || tags.flood === "yes" || tags.flooding === "yes") {
+                if (tags.hazard === "flood" || tags.hazard === "flooding" || tags.flood === "yes" || tags.flooding === "yes" || tags.flood_prone === "yes") {
                     floodActiveCount++;
                 } else {
                     floodProneCount++;

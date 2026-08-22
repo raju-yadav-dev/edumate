@@ -3,13 +3,15 @@ const { INTENTS, INSTITUTIONAL_INTENTS } = require("../constants/intents");
 const decide = ({ intent, question }) => {
     const q = String(question || "").toLowerCase();
     const mapKeywords = [
-        "distance", "route", "directions", "navigation", "nearest", "nearby", 
-        "travel time", "how do i reach", "how far", "bus", "metro", "train", 
-        "airport", "hospital", "restaurant", "hostel", "pg", "parking",
-        "navigate", "reach", "map", "cab", "taxi", "fare", "fuel cost"
+        "route", "directions", "navigation", "distance", "how to reach", 
+        "campus location", "building location", "map", "nearby", "nearest", 
+        "how far", "directions to"
     ];
 
-    const hasMapKeyword = mapKeywords.some(kw => q.includes(kw));
+    const hasMapKeyword = mapKeywords.some(kw => {
+        const regex = new RegExp(`\\b${kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+        return regex.test(q);
+    });
 
     if (hasMapKeyword) {
         return {

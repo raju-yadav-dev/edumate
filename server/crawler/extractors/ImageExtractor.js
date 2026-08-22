@@ -4,6 +4,11 @@ class ImageExtractor {
      * Supports English, Hindi, and Bengali detection.
      */
     static async extract(buffer) {
+        const savedWindow = global.window;
+        const savedDocument = global.document;
+        delete global.window;
+        delete global.document;
+
         try {
             const Tesseract = require("tesseract.js");
             console.log("[ImageExtractor] Performing OCR on image buffer...");
@@ -17,7 +22,8 @@ class ImageExtractor {
                 documentType: "image"
             };
         } catch (err) {
-            console.warn("[ImageExtractor] OCR failed, attempting Gemini fallback:", err.message);
+            console.warn("[ImageExtractor] OCR failed. Gemini fallback commented out.");
+            /*
             try {
                 const apiKey = process.env.GEMINI_API_KEY;
                 if (!apiKey) throw err;
@@ -61,6 +67,11 @@ class ImageExtractor {
                 console.error("Gemini image fallback failed:", geminiErr.message);
                 throw new Error(`Image OCR text extraction failed: Tesseract error: ${err.message}. Gemini fallback error: ${geminiErr.message}`);
             }
+            */
+            throw err;
+        } finally {
+            if (savedWindow !== undefined) global.window = savedWindow;
+            if (savedDocument !== undefined) global.document = savedDocument;
         }
     }
 }

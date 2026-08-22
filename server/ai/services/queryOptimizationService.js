@@ -84,18 +84,44 @@ function expandAliases(query, context = {}) {
             const matchesDeg = deg && new RegExp(`\\b${deg.toLowerCase().replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}\\b`, "i").test(lower);
             const matchesDept = dept && new RegExp(`\\b${dept.toLowerCase().replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}\\b`, "i").test(lower);
             const matchesProg = prog && lower.includes(prog.toLowerCase());
-            const matchesAlias = aliases.some(a => lower.includes(a.toLowerCase()));
 
-            if (matchesDeg || matchesDept || matchesProg || matchesAlias) {
+            const generalDegrees = new Set([
+                "bba", "b.tech", "btech", "b tech", "bca", "mca", "mba", "bsc", "b.sc", "cse", "computer science",
+                "bachelor of business administration",
+                "bachelor of business administration (honours)",
+                "bba (honours)",
+                "bba (h)",
+                "bachelor of technology",
+                "bachelor of computer applications",
+                "master of computer applications",
+                "master of business administration",
+                "bachelor of science",
+                "master of science",
+                "bachelor of science (honours)",
+                "bachelor of laws",
+                "bachelor of law",
+                "llb",
+                "business administration"
+            ]);
+            const matchesAlias = aliases.some(a => {
+                const cleanA = a.toLowerCase().trim();
+                if (generalDegrees.has(cleanA)) return false;
+                return lower.includes(cleanA);
+            });
+
+            const matchesSpecific = !!(matchesDept || matchesProg || matchesAlias);
+            if (matchesDeg || matchesSpecific) {
                 if (deg) {
                     additions.add(deg);
                     if (deg.toLowerCase() === "b.tech" || deg.toLowerCase() === "btech") {
                         ["B.Tech", "BTech", "B Tech", "Bachelor of Technology"].forEach(a => additions.add(a));
                     }
                 }
-                if (prog) additions.add(prog);
-                if (dept) additions.add(dept);
-                aliases.forEach(a => additions.add(a));
+                if (matchesSpecific) {
+                    if (prog) additions.add(prog);
+                    if (dept) additions.add(dept);
+                    aliases.forEach(a => additions.add(a));
+                }
             }
         });
     }

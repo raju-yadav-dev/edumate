@@ -622,7 +622,10 @@ function Chat() {
                     ...thread,
                     messages: thread.messages.map((m) => {
                         if (m.id === aMsgId) {
-                            const errorMsg = error?.message || "EduMate is unavailable right now. Please retry.";
+                            let errorMsg = error?.message || "EduMate is unavailable right now. Please retry.";
+                            if (errorMsg.toLowerCase().includes("failed to fetch") || errorMsg.includes("LLAMA_TIMEOUT")) {
+                                errorMsg = "Local AI model did not respond in time.";
+                            }
                             return {
                                 ...m,
                                 content: m.content ? `${m.content}\n\n[Error: ${errorMsg}]` : errorMsg,

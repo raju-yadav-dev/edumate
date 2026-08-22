@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { FileText, ChevronDown, ChevronUp, CheckCircle, Globe } from "lucide-react";
 import "../styles/SourceCitation.css";
 

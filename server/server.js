@@ -14,6 +14,49 @@ require("dotenv").config({ path: path.join(__dirname, ".env"), override: true })
 
 global.startupTimer.log("Environment loaded");
 
+// Global Exception and Rejection Handlers (Requirement 4)
+process.on("uncaughtException", (error) => {
+    console.error(`[UNCAUGHT EXCEPTION] [CRITICAL] ${error.stack || error}`);
+});
+
+process.on("unhandledRejection", (reason, promise) => {
+    console.error(`[UNHANDLED REJECTION] Reason: ${reason?.stack || reason}`);
+});
+
+// Memory Protection Monitor (Requirement 8 / 5)
+let hasWarnedMemory = false;
+setInterval(() => {
+    const v8 = require("v8");
+    const memory = process.memoryUsage();
+    const heapLimit = v8.getHeapStatistics().heap_size_limit;
+    const formatMB = (bytes) => `${Math.round(bytes / 1024 / 1024)} MB`;
+    
+    let cacheSize = 0;
+    try {
+        const cacheService = require("./services/cacheService");
+        cacheSize = cacheService.getCacheSize ? cacheService.getCacheSize() : 0;
+    } catch (err) {}
+    
+    const heapPercentage = Number(((memory.heapUsed / heapLimit) * 100).toFixed(2));
+    
+    console.log(`[MEMORY MONITOR]
+RSS: ${formatMB(memory.rss)}
+Heap Used: ${formatMB(memory.heapUsed)}
+Heap Limit: ${formatMB(heapLimit)}
+External: ${formatMB(memory.external)}
+Cache Size: ${cacheSize}
+Heap Percentage: ${heapPercentage}%`);
+    
+    if (heapPercentage >= 80) {
+        if (!hasWarnedMemory) {
+            console.warn(`[MEMORY WARNING] Heap usage exceeds 80%! Current: ${heapPercentage}%`);
+            hasWarnedMemory = true;
+        }
+    } else {
+        hasWarnedMemory = false;
+    }
+}, 60000);
+
 const app = require("./app");
 const connectDB = require("./config/db");
 
@@ -170,15 +213,19 @@ const startServer = async () => {
                             return false;
                         }
                     })(),
-                    // AI services check
+                    // AI services check (llama.cpp probe)
                     (async () => {
                         try {
-                            const groqProviders = await require("./services/groqProviderManager").getConfiguredProviders().catch(() => []);
-                            const groqConfigured = groqProviders.length > 0;
-                            const geminiConfigured = !!process.env.GEMINI_API_KEY;
-                            return { groqConfigured, llmAvailable: groqConfigured || geminiConfigured };
+                            const fetch = (() => {
+                                try { return require("node-fetch"); } catch { return global.fetch; }
+                            })();
+                            const probeRes = await Promise.race([
+                                fetch("http://127.0.0.1:8080/v1/models"),
+                                new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 3000))
+                            ]);
+                            return { llmAvailable: probeRes.ok };
                         } catch (e) {
-                            return { groqConfigured: false, llmAvailable: false };
+                            return { llmAvailable: false };
                         }
                     })(),
                     // Map services check
@@ -309,11 +356,12 @@ const startServer = async () => {
                 
                 dashboard.push("");
                 
-                const groqApiText = aiCheck.groqConfigured ? "✓ Configured" : "⚠️ Not Configured";
-                const llmText = aiCheck.llmAvailable ? "✓ Available" : "⚠️ Unavailable";
+                const llamaStatusText = aiCheck.llmAvailable ? "✓ Connected" : "❌ Disconnected";
                 dashboard.push(makeSectionHeader("AI SERVICES"));
-                dashboard.push(padLine("Groq API", groqApiText, 12, 60, aiCheck.groqConfigured ? colors.green : colors.yellow));
-                dashboard.push(padLine("LLM", llmText, 12, 60, aiCheck.llmAvailable ? colors.green : colors.red));
+                dashboard.push(padLine("Provider", "llama.cpp", 12));
+                dashboard.push(padLine("Model", "Qwen3-4B-Instruct-Q4_K_M.gguf", 12));
+                dashboard.push(padLine("Endpoint", "http://127.0.0.1:8080", 12));
+                dashboard.push(padLine("Status", llamaStatusText, 12, 60, aiCheck.llmAvailable ? colors.green : colors.red));
                 dashboard.push(borderSingle);
                 
                 dashboard.push("");
@@ -373,6 +421,12 @@ const startServer = async () => {
                 dashboard.push(borderDouble);
                 
                 console.log("\n" + dashboard.join("\n") + "\n");
+
+                console.log("AI Provider : llama.cpp");
+                console.log("Model       : Qwen3-4B-Instruct-Q4_K_M.gguf");
+                console.log("Endpoint    : http://127.0.0.1:8080");
+                console.log(`Status      : ${aiCheck.llmAvailable ? "Connected" : "Disconnected"}`);
+                console.log();
             });
     } catch (error) {
         console.error(error);
