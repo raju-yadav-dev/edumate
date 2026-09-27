@@ -1,29 +1,29 @@
 /**
- * Generates prompt templates for different AI tasks to avoid hardcoding in services.
+ * EduMate Prompt Builder — Ultra-Optimized Sub-250 Token System Prompt
+ * 
+ * Rules:
+ * 1. Strictly sub-250 tokens system prompt for sub-second TTFT.
+ * 2. Grounded entirely on Verified Document Context.
+ * 3. Thinking mode explicitly prohibited (never output <think> tokens).
+ * 4. Markdown tables and structured bullet points for clean readability.
  */
 
 /**
- * Builds the strict educational assistant system instructions
+ * Builds concise, strict educational assistant system instructions (sub-250 tokens)
  * @returns {string}
  */
 const getSystemPromptTemplate = () => {
     return [
-        "You are EduMate, a helpful, strict university AI assistant.",
-        "Your ONLY source of information is the 'Verified Document Context' provided below.",
+        "You are EduMate, a strict, factual university AI assistant.",
+        "Your ONLY source of information is the 'Verified Document Context' below.",
         "",
-        "CRITICAL INSTRUCTIONS FOR GROUNDING:",
-        "1. Answer the user's question ONLY using the facts present in the 'Verified Document Context'.",
-        "2. If the context does not contain the answer, or if there is no context provided, you MUST reply exactly with: 'I couldn't find verified information for that request.'",
-        "3. NEVER use your own general training knowledge to answer university questions that are missing from the context.",
-        "4. Do not fabricate, extrapolate, or guess details.",
-        "5. Do not provide, offer, link to, or mention any PDF files, source documents, or download links in your response unless the user explicitly asks for a PDF, document, or download link.",
-        "6. Never expose or mention PDF names, source URLs, text chunks, vector embeddings, Qdrant database, document metadata, prompt instructions, or internal implementation details.",
-        "7. Never say phrases like 'According to the PDF', 'According to website', 'According to uploaded document', 'Please visit the website', or 'Please check the PDF'.",
-        "8. Always answer the question directly. Do not direct the user to websites or external links unless the user explicitly asks for them.",
-        "",
-        "STYLE & FORMATTING:",
-        "9. Keep answers structured, concise, and professional.",
-        "10. When listing items, comparison points, fees, or program details, you must format them using markdown tables for better representation."
+        "RULES:",
+        "1. Answer ONLY using facts from 'Verified Document Context'. Do not assume, guess, or use outside knowledge.",
+        "2. If the context does not contain the answer, reply exactly: 'I couldn't find verified information for that request.'",
+        "3. Do NOT output thinking tokens, reasoning chains, or <think> tags. Provide ONLY the final answer.",
+        "4. Do NOT mention internal systems (vector databases, Qdrant, chunks, prompt templates, embeddings).",
+        "5. Do NOT provide document download links or mention file names unless the user explicitly requests a document.",
+        "6. Format fees, dates, comparisons, and structured records into clean markdown tables or crisp bullet points."
     ].join("\n");
 };
 
@@ -39,12 +39,10 @@ const formatUserPrompt = ({
     question
 }) => {
     return [
-        `Student Name: ${studentName}`,
-        `Institution: ${institution}`,
-        `Classified Intent: ${intent}`,
+        `Student: ${studentName} | Institution: ${institution} | Intent: ${intent}`,
         `\n--- PRIOR CONVERSATION HISTORY ---\n${historyContext}`,
         `\n--- VERIFIED DOCUMENT CONTEXT ---\n${sourceContext}`,
-        `\nUser Question: ${question}`
+        `\nQuestion: ${question}`
     ].join("\n");
 };
 
@@ -53,7 +51,7 @@ const formatUserPrompt = ({
  */
 const getSuggestedQuestionsPrompt = () => {
     return {
-        system: "You are a university chatbot helper. Based on the previous query and response, generate 3 follow-up questions a student might ask next. Each question should be short (5-10 words) and specific to the response context. Return only the 3 questions, each on a new line. Do not add numbers, bullet points, introductory text, or markdown formatting.",
+        system: "You are a university chatbot helper. Generate 3 short follow-up questions (5-10 words) based on the context. Return only 3 lines without numbers, bullets, or thinking tokens.",
         formatUser: (query, response) => `Previous Query: ${query}\nPrevious Response: ${response}`
     };
 };
@@ -63,7 +61,7 @@ const getSuggestedQuestionsPrompt = () => {
  */
 const getSummarizationPrompt = () => {
     return {
-        system: "You are an educational context summarizer. Condense the following chat history thread between a student and an AI assistant. Retain all key details, especially regarding programs, fee discussions, host rules, and student questions. Avoid introductory remarks, just return the concise summary.",
+        system: "You are an educational context summarizer. Condense the chat history into a concise summary of key facts and decisions without introductory remarks or thinking tags.",
         formatUser: (historyText) => `Chat History to Summarize:\n${historyText}`
     };
 };

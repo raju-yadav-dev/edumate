@@ -1,41 +1,15 @@
 const mongoose = require("mongoose");
-const supabase = require("../config/supabase");
+const localStorageManager = require("../storage/localStorageManager");
 
-const BUCKET = process.env.SUPABASE_STORAGE_BUCKET || process.env.SUPABASE_BUCKET;
-
-/* -----------------------------------------
-   Format Bytes
------------------------------------------ */
-
-const formatBytes = (bytes = 0) => {
-
-    if (bytes === 0) return "0 Bytes";
-
-    const sizes = [
-        "Bytes",
-        "KB",
-        "MB",
-        "GB",
-        "TB"
-    ];
-
-    const i = Math.floor(Math.log(bytes) / Math.log(1024));
-
-    return (
-        (bytes / Math.pow(1024, i)).toFixed(2) +
-        " " +
-        sizes[i]
-    );
-
-};
+const formatBytes = localStorageManager.formatBytes;
 
 let cachedMongoStats = null;
 let lastMongoStatsTime = 0;
 const MONGO_STATS_CACHE_TTL = 3 * 60 * 1000; // 3 minutes
 
-let cachedSupabaseStats = null;
-let lastSupabaseStatsTime = 0;
-const SUPABASE_STATS_CACHE_TTL = 3 * 60 * 1000; // 3 minutes
+let cachedLocalStorageStats = null;
+let lastLocalStorageStatsTime = 0;
+const LOCAL_STORAGE_STATS_CACHE_TTL = 3 * 60 * 1000; // 3 minutes
 
 const getMongoStorageLimit = () => {
     let limit = Number(process.env.MONGODB_STORAGE_LIMIT_BYTES || process.env.ADMIN_STORAGE_LIMIT_BYTES);
@@ -50,7 +24,7 @@ const getMongoStorageLimit = () => {
 
 /* -----------------------------------------
    MongoDB Stats
-   ----------------------------------------- */
+----------------------------------------- */
 
 const getMongoStorage = async (force = false) => {
     const storage = getMongoStorageLimit();
@@ -96,19 +70,17 @@ const getMongoStorage = async (force = false) => {
         try {
             const Document = mongoose.model("Document");
             const User = mongoose.model("User");
-            const Chunk = mongoose.model("Chunk");
             
             const docCount = await Document.countDocuments({ status: { $ne: "deleted" } });
             const userCount = await User.countDocuments({ status: { $ne: "deleted" } });
-            const chunkCount = await Chunk.countDocuments({});
             
-            used = (docCount * 1500) + (userCount * 1000) + (chunkCount * 3000);
+            used = (docCount * 1500) + (userCount * 1000);
         } catch (err) {
             used = 1024 * 1024; // 1 MB default fallback
         }
 
         cachedMongoStats = {
-            connected: true, // Connection is active, stats admin cmd failed
+            connected: true,
             used,
             storage,
             remaining: Math.max(storage - used, 0),
@@ -124,87 +96,44 @@ const getMongoStorage = async (force = false) => {
 };
 
 /* -----------------------------------------
-   Supabase Stats
-   ----------------------------------------- */
+   Local Storage Stats (edumate/storage/)
+----------------------------------------- */
 
-const getSupabaseStorage = async (force = false) => {
+const getLocalStorage = async (force = false) => {
     const now = Date.now();
-    if (!force && cachedSupabaseStats && (now - lastSupabaseStatsTime < SUPABASE_STATS_CACHE_TTL)) {
-        return cachedSupabaseStats;
+    if (!force && cachedLocalStorageStats && (now - lastLocalStorageStatsTime < LOCAL_STORAGE_STATS_CACHE_TTL)) {
+        return cachedLocalStorageStats;
     }
-
-    let total = 0;
-    let count = 0;
-
-    const walk = async (folder = "") => {
-        const { data, error } = await supabase.storage
-            .from(BUCKET)
-            .list(folder, {
-                limit: 1000
-            });
-
-        if (error) throw error;
-
-        if (Array.isArray(data)) {
-            for (const item of data) {
-                if (!item.id) {
-                    await walk(
-                        folder
-                            ? folder + "/" + item.name
-                            : item.name
-                    );
-                } else {
-                    total += item.metadata?.size || 0;
-                    count++;
-                }
-            }
-        }
-    };
 
     try {
-        await walk();
-    } catch (e) {
-        console.error("Error walking Supabase storage:", e);
-        // Fallback to active documents count/fileSize aggregation
-        try {
-            const Document = mongoose.model("Document");
-            const [result] = await Document.aggregate([
-                { $match: { status: { $ne: "deleted" } } },
-                {
-                    $group: {
-                        _id: null,
-                        bytes: { $sum: "$fileSize" },
-                        count: { $sum: 1 }
-                    }
-                }
-            ]);
-            total = result?.bytes || 0;
-            count = result?.count || 0;
-        } catch (dbErr) {
-            console.error("Supabase fallback DB aggregation failed:", dbErr);
-        }
+        const stats = await localStorageManager.getLocalStorageStats(force);
+        cachedLocalStorageStats = stats;
+        lastLocalStorageStatsTime = now;
+        return cachedLocalStorageStats;
+    } catch (err) {
+        console.error("Error fetching local storage stats:", err);
+        return {
+            configured: true,
+            connected: true,
+            files: 0,
+            folders: 0,
+            used: 0,
+            quota: 50 * 1024 * 1024 * 1024,
+            remaining: 50 * 1024 * 1024 * 1024,
+            usage: 0,
+            usedFormatted: formatBytes(0),
+            quotaFormatted: formatBytes(50 * 1024 * 1024 * 1024),
+            remainingFormatted: formatBytes(50 * 1024 * 1024 * 1024)
+        };
     }
-
-    const quotaMB = Number(process.env.SUPABASE_STORAGE_QUOTA_MB) || 1024;
-    const quota = quotaMB * 1024 * 1024;
-
-    cachedSupabaseStats = {
-        files: count,
-        used: total,
-        quota,
-        remaining: Math.max(quota - total, 0),
-        usedFormatted: formatBytes(total),
-        quotaFormatted: formatBytes(quota),
-        remainingFormatted: formatBytes(Math.max(quota - total, 0)),
-        usage: Number(((total / quota) * 100).toFixed(1))
-    };
-    lastSupabaseStatsTime = now;
-    return cachedSupabaseStats;
 };
+
+// Backwards-compatibility alias for any remaining references
+const getSupabaseStorage = getLocalStorage;
 
 /* -----------------------------------------
    Qdrant Stats
-   ----------------------------------------- */
+----------------------------------------- */
 
 const getQdrantStorage = async (force = false) => {
     const { client: qdrantClient, collectionName: qdrantCollection } = require("../ai/config/qdrant");
@@ -250,20 +179,23 @@ const getQdrantStorage = async (force = false) => {
 };
 
 /* -----------------------------------------
-   Combined
-   ----------------------------------------- */
+   Combined Storage
+----------------------------------------- */
 
 const getCombinedStorage = async (force = false) => {
     const mongodb = await getMongoStorage(force);
-    const supabase = await getSupabaseStorage(force);
+    const local = await getLocalStorage(force);
     const qdrant = await getQdrantStorage(force);
 
-    const used = mongodb.used + supabase.used + qdrant.used;
-    const total = mongodb.storage + supabase.quota + qdrant.total;
+    const used = mongodb.used + local.used + qdrant.used;
+    const total = mongodb.storage + local.quota + qdrant.total;
 
     return {
+        storageType: "local",
+        storagePath: local.rootPath,
         mongodb,
-        supabase,
+        localStorage: local,
+        supabase: local, // Alias for backward compatibility
         qdrant,
         combined: {
             used,
@@ -278,13 +210,10 @@ const getCombinedStorage = async (force = false) => {
 };
 
 module.exports = {
-
     getMongoStorage,
-
+    getLocalStorage,
     getSupabaseStorage,
-
     getQdrantStorage,
-
-    getCombinedStorage
-
+    getCombinedStorage,
+    getStorageStats: getCombinedStorage
 };

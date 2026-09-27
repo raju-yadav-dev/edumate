@@ -1,12 +1,13 @@
 const asyncHandler = require("../utils/asyncHandler");
 const Document = require("../models/Document");
 const User = require("../models/User");
-const Chunk = require("../models/Chunk");
+const localChunkManager = require("../storage/localChunkManager");
 const { sendSuccess } = require("../utils/response");
 const settingsService = require("../services/settingsService");
 const mongoose = require("mongoose");
 const { getConfiguredProviders } = require("../services/groqProviderManager");
 const aiProviderManager = require("../services/aiProviderManager");
+const localStorageManager = require("../storage/localStorageManager");
 
 const DEFAULT_STORAGE_LIMIT = 10 * 1024 * 1024 * 1024;
 
@@ -19,25 +20,6 @@ const toStorageLimit = () => {
         }
     }
     return Number.isFinite(limit) && limit > 0 ? limit : DEFAULT_STORAGE_LIMIT;
-};
-
-const getSupabaseConfig = () => {
-    const url = process.env.CRAWLER_SUPABASE_URL || process.env.SUPABASE_URL || process.env.SUPABASE_PROJECT_URL;
-    const key = process.env.CRAWLER_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
-    const bucket = process.env.CRAWLER_SUPABASE_STORAGE_BUCKET || process.env.SUPABASE_STORAGE_BUCKET || process.env.SUPABASE_BUCKET || "edumate-crawler";
-    
-    const mainQuotaMB = Number(process.env.SUPABASE_STORAGE_QUOTA_MB || 1024);
-    const crawlerQuotaMB = Number(process.env.CRAWLER_SUPABASE_STORAGE_QUOTA_MB || 1024);
-    const totalQuotaMB = mainQuotaMB + crawlerQuotaMB;
-    const quota = totalQuotaMB * 1024 * 1024;
-
-    return {
-        url,
-        key,
-        bucket,
-        quota,
-        configured: Boolean(url && key && bucket && typeof fetch === "function")
-    };
 };
 
 const getMongoStorageStats = async () => {
@@ -101,96 +83,10 @@ let cachedAdminStorageStats = null;
 let lastAdminStorageStatsFetch = 0;
 const ADMIN_STORAGE_STATS_CACHE_TTL = 2 * 60 * 1000; // 2 minutes cache TTL
 
-const listSupabaseObjects = async ({ url, key, bucket, prefix = "", offset = 0 }) => {
-    const response = await fetch(`${url.replace(/\/$/, "")}/storage/v1/object/list/${bucket}`, {
-        method: "POST",
-        headers: {
-            apikey: key,
-            Authorization: `Bearer ${key}`,
-            "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-            prefix,
-            limit: 1000,
-            offset,
-            sortBy: {
-                column: "name",
-                order: "asc"
-            }
-        })
-    });
-
-    if (!response.ok) {
-        throw new Error("Unable to list Supabase storage objects.");
-    }
-
-    return response.json();
+const getLocalStorageStatsInfo = () => {
+    return localStorageManager.getLocalStorageStats();
 };
 
-const walkSupabaseStorage = async (config, folder = "") => {
-    let used = 0;
-    let files = 0;
-    let largestFile = null;
-
-    const objects = await listSupabaseObjects({
-        url: config.url,
-        key: config.key,
-        bucket: config.bucket,
-        prefix: folder
-    });
-
-    if (Array.isArray(objects)) {
-        for (const object of objects) {
-            if (!object.id) {
-                // It's a folder
-                const subfolder = folder ? `${folder}/${object.name}` : object.name;
-                const subStats = await walkSupabaseStorage(config, subfolder);
-                used += subStats.used;
-                files += subStats.files;
-                if (subStats.largestFile) {
-                    if (!largestFile || subStats.largestFile.size > largestFile.size) {
-                        largestFile = subStats.largestFile;
-                    }
-                }
-            } else {
-                const size = Number(object.metadata?.size || object.size || 0);
-                if (size > 0) {
-                    used += size;
-                    files += 1;
-                    if (!largestFile || size > largestFile.size) {
-                        largestFile = {
-                            name: object.name,
-                            path: folder ? `${folder}/${object.name}` : object.name,
-                            size
-                        };
-                    }
-                }
-            }
-        }
-    }
-
-    return { used, files, largestFile };
-};
-
-let cachedSupabaseStats = null;
-let lastSupabaseStatsFetch = 0;
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes cache TTL
-
-const getSupabaseStorageStats = async (fallbackBytes = 0, fallbackCount = 0) => {
-    const config = getSupabaseConfig();
-    const quota = config.quota || 25 * 1024 * 1024 * 1024;
-    return {
-        configured: config.configured,
-        bucket: config.bucket || "documents",
-        quota,
-        used: fallbackBytes,
-        remaining: Math.max(quota - fallbackBytes, 0),
-        usage: quota ? Math.min((fallbackBytes / quota) * 100, 100) : 0,
-        files: fallbackCount,
-        averageFileSize: fallbackCount ? fallbackBytes / fallbackCount : 0,
-        largestFile: null
-    };
-};
 
 const sumBsonSizeByFilter = async (Model, filter) => {
     try {
@@ -396,23 +292,23 @@ const getStorageStats = asyncHandler(async (req, res) => {
                 };
             }
         })(),
-        sumBsonSizeByFilter(Chunk, {})
+        Promise.resolve(localChunkManager.getAllChunkStats())
     ]);
 
-    const documentBytes = documentStorage[0]?.bytes || 0;
-    const documentCount = documentStorage[0]?.count || 0;
+    const localStorageStats = getLocalStorageStatsInfo();
+    const documentBytes = localStorageStats.used || documentStorage[0]?.bytes || 0;
+    const documentCount = localStorageStats.files || documentStorage[0]?.count || 0;
     const explorerRecordBytes = documentRecords.bytes || 0;
     const userBytes = userRecords.bytes || 0;
     const adminBytes = adminRecords.bytes || 0;
-    const chunkBytes = chunkRecords?.bytes || 0;
-    const chunkCount = chunkRecords?.count || 0;
-    const dataBytes = userBytes + adminBytes + explorerRecordBytes + chunkBytes;
-    const supabaseStats = await getSupabaseStorageStats(documentBytes, documentCount);
+    const chunkBytes = chunkRecords?.totalBytes || 0;
+    const chunkCount = chunkRecords?.totalChunks || 0;
+    const dataBytes = userBytes + adminBytes + explorerRecordBytes;
     
     const mongoUsed = mongoStats.isFallback ? dataBytes : (mongoStats.used || dataBytes);
-    const supabaseUsed = supabaseStats.used || documentBytes;
-    const usedBytes = mongoUsed + supabaseUsed;
-    const totalBytes = (mongoStats.total || storageLimit) + (supabaseStats.quota || storageLimit);
+    const localUsed = localStorageStats.used || documentBytes;
+    const usedBytes = mongoUsed + localUsed;
+    const totalBytes = (mongoStats.total || storageLimit) + (localStorageStats.quota || storageLimit);
 
     const kb = kbStats[0] || {
         totalChunks: chunkCount,
@@ -470,13 +366,18 @@ const getStorageStats = asyncHandler(async (req, res) => {
         mongodbIndexSize: mongoStats.indexesSize || 0,
         mongodbCollections: mongoStats.isFallback ? mongoose.connection.modelNames().length : (mongoStats.collections || 0),
         mongodbObjects: mongoObjects,
-        supabaseBytes: supabaseUsed,
-        supabaseQuotaBytes: supabaseStats.quota || storageLimit,
-        supabaseFiles: supabaseStats.files || documentCount,
-        supabaseBucket: supabaseStats.bucket,
-        supabaseConfigured: supabaseStats.configured,
-        supabaseAverageFileSize: supabaseStats.averageFileSize || 0,
-        supabaseLargestFile: supabaseStats.largestFile,
+        localStorageBytes: localUsed,
+        localStorageQuotaBytes: localStorageStats.quota || storageLimit,
+        localStorageFiles: localStorageStats.files || documentCount,
+        localStorageFolders: localStorageStats.folders || 0,
+        localStorageRoot: localStorageStats.rootPath,
+        supabaseBytes: localUsed,
+        supabaseQuotaBytes: localStorageStats.quota || storageLimit,
+        supabaseFiles: localStorageStats.files || documentCount,
+        supabaseBucket: "local_storage",
+        supabaseConfigured: true,
+        supabaseAverageFileSize: localStorageStats.averageFileSize || 0,
+        supabaseLargestFile: localStorageStats.largestFile,
         mongodb: {
             connected: mongoStats.connected,
             total: mongoStats.total || storageLimit,
@@ -487,7 +388,8 @@ const getStorageStats = asyncHandler(async (req, res) => {
             documents: mongoObjects,
             indexesSize: mongoStats.indexesSize || 0
         },
-        supabase: supabaseStats,
+        localStorage: localStorageStats,
+        supabase: localStorageStats,
         qdrant: {
             connected: qdrantStats.connected,
             status: qdrantStats.status,
@@ -512,7 +414,8 @@ const getStorageStats = asyncHandler(async (req, res) => {
         },
         systemStatus: {
             mongodb: mongoStats.connected ? "connected" : "unknown",
-            supabase: supabaseStats.configured ? "connected" : "not configured",
+            localStorage: "connected",
+            supabase: "connected",
             groq: groqStatus,
             qdrant: qdrantStats.connected ? "connected" : "offline",
             aiProviders: aiProviderManager.getAiProviderStatuses()

@@ -16,10 +16,11 @@ const printBanner = () => {
 };
 
 const printDashboard = (stats = {}) => {
-    const aiProviderName = "Gemini";
-    const aiModelName = `${process.env.GEMINI_COMPLETION_MODEL || "gemini-2.5-flash"} (Gemini)`;
+    const aiProvider = process.env.LLM_PROVIDER || "llama.cpp";
+    const aiModelName = `${process.env.LLM_MODEL || "Qwen3-1.7B-Instruct"} (${aiProvider})`;
     const embeddingProvider = process.env.EMBEDDING_PROVIDER || "jina";
     const embeddingModelName = `${process.env.EMBEDDING_MODEL || "jina-embeddings-v3"} (${embeddingProvider})`;
+    const storageProvider = process.env.STORAGE_PROVIDER === "supabase" ? "Supabase Storage" : "Local File Storage";
 
     console.log(logger.cyan("══════════════════════════════════════════════"));
     console.log(logger.bold(logger.green("🚀 EduMate Development Environment")));
@@ -28,10 +29,9 @@ const printDashboard = (stats = {}) => {
     console.log(`${logger.green("✓")} Node.js`);
     console.log(`${logger.green("✓")} npm`);
     console.log(`${logger.green("✓")} MongoDB Connected`);
-    console.log(`${logger.green("✓")} Supabase Connected`);
-    console.log(`${logger.green("✓")} ${aiProviderName} Connected`);
+    console.log(`${logger.green("✓")} Storage: ${storageProvider}`);
+    console.log(`${logger.green("✓")} AI: ${aiProvider}`);
     console.log(`${logger.green("✓")} Qdrant Running`);
-    console.log(`${logger.green("✓")} AI Initialized`);
     console.log(`${logger.green("✓")} Backend Started`);
     console.log(`${logger.green("✓")} Frontend Started`);
     
@@ -49,6 +49,10 @@ const printDashboard = (stats = {}) => {
     console.log(logger.green(stats.env || "Development"));
     console.log();
     
+    console.log(logger.bold("Storage"));
+    console.log(logger.green(storageProvider));
+    console.log();
+
     console.log(logger.bold("Vector Database"));
     console.log(logger.green("Qdrant"));
     console.log();

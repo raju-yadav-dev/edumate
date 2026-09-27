@@ -271,22 +271,25 @@ const analyzeQuery = async ({ question, historyText, conversationContext, user }
     // 1. Fetch dynamic academic metadata from institutional documents database
     let academicEntities = [];
     try {
-        const Document = require("../../models/Document");
-        const queryFilter = {
-            status: "active",
-            embeddingStatus: "indexed"
-        };
-        if (user && user.institution) {
-            queryFilter.institution = user.institution;
-        }
-        const docs = await Document.find(queryFilter).lean();
-        docs.forEach(doc => {
-            if (doc.metadata && Array.isArray(doc.metadata.academicEntities)) {
-                doc.metadata.academicEntities.forEach(ent => {
-                    academicEntities.push(ent);
-                });
+        const mongoose = require("mongoose");
+        if (mongoose.connection && mongoose.connection.readyState === 1) {
+            const Document = require("../../models/Document");
+            const queryFilter = {
+                status: "active",
+                embeddingStatus: "indexed"
+            };
+            if (user && user.institution) {
+                queryFilter.institution = user.institution;
             }
-        });
+            const docs = await Document.find(queryFilter).lean();
+            docs.forEach(doc => {
+                if (doc.metadata && Array.isArray(doc.metadata.academicEntities)) {
+                    doc.metadata.academicEntities.forEach(ent => {
+                        academicEntities.push(ent);
+                    });
+                }
+            });
+        }
     } catch (dbErr) {
         console.error("[QueryRewriter] Failed to load academic entities:", dbErr.message);
     }

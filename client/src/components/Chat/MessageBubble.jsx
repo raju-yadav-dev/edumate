@@ -269,41 +269,11 @@ function MessageBubble({
     const isUser = message.role === "user";
     const [isEditing, setIsEditing] = useState(false);
     const [editText, setEditText] = useState(message.content);
-    const showCitations = (() => {
-        if (!Array.isArray(message.sources) || message.sources.length === 0) {
-            return false;
-        }
-
-        if (message.sourceLabel === "📚 University Documents") {
-            return true;
-        }
-
-        if (prevMessage && prevMessage.role === "user") {
-            const query = String(prevMessage.content || "").toLowerCase();
-            return (
-                query.includes("supportive document") ||
-                query.includes("supportive doc") ||
-                query.includes("give document") ||
-                query.includes("show document") ||
-                query.includes("give source") ||
-                query.includes("show source") ||
-                query.includes("citation") ||
-                query.includes("reference") ||
-                query.includes("where did you get") ||
-                query.includes("which document") ||
-                query.includes("pdf file") ||
-                query.includes("source file") ||
-                query.includes("document name") ||
-                query.includes("support doc") ||
-                query.includes("attached doc")
-            );
-        }
-
-        return false;
-    })();
+    const hasSources = Array.isArray(message.sources) && message.sources.length > 0;
+    const showCitations = !isUser && hasSources;
 
     const displayContent = (() => {
-        if (!isUser && showCitations && (isCitationsOnlyRequest(prevMessage) || message.sourceLabel === "📚 University Documents")) {
+        if (!isUser && showCitations && isCitationsOnlyRequest(prevMessage)) {
             return "Here are the supportive documents:";
         }
         return message.content;
@@ -512,14 +482,25 @@ function MessageBubble({
 
                     {showCitations ? (
                         <div className="edu-chat-citations">
-                            <p className="edu-chat-section-label">Sources</p>
+                            <p className="edu-chat-section-label">
+                                Sources &amp; Citations ({message.sources.length})
+                            </p>
                             <div className="edu-chat-citation-grid">
-                                {message.sources.map((citation) => (
-                                    <CitationCard key={`${citation.title}-${citation.page}-${citation.section}`} citation={citation} onClick={() => handleCitationClick(citation)} />
+                                {message.sources.map((citation, cIdx) => (
+                                    <CitationCard 
+                                        key={`${citation.title}-${citation.page}-${citation.section}-${cIdx}`} 
+                                        citation={citation} 
+                                        onClick={() => handleCitationClick(citation)} 
+                                    />
                                 ))}
                             </div>
                         </div>
-                    ) : null}
+                    ) : (!isUser && !isStreaming && !message.isStreaming ? (
+                        <div className="edu-chat-no-source-notice">
+                            <span className="no-source-dot"></span>
+                            <span>No document source used.</span>
+                        </div>
+                    ) : null)}
 
                     {!isUser && !isStreaming ? (
                         <MessageActions

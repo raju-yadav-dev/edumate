@@ -7,6 +7,11 @@ const { client: qdrantClient, collectionName: qdrantCollection, vectorName: qdra
 const embeddingService = require("../../ai/services/embeddingService");
 const indexingService = require("../../ai/services/indexingService");
 const { RecursiveCharacterTextSplitter } = require("../../ai/utils/chunkDocument");
+const DocumentTextCleaner = require("../../ai/utils/documentTextCleaner");
+const { extractSearchMetadata } = require("../../ai/utils/keywordEntityExtractor");
+const { validateChunks } = require("../../ai/utils/chunkValidator");
+const { deterministicChunkId, buildChunkRelationships } = require("../../ai/utils/chunkRelationships");
+const { resolveKnowledgeCategory } = require("../../ai/utils/knowledgeCategory");
 const metadataBuilder = require("../../ai/utils/metadataBuilder");
 const WebsiteCrawler = require("../WebsiteCrawler");
 const UniversalExtractor = require("../extractors/UniversalExtractor");
@@ -146,6 +151,7 @@ const runCrawlBackground = async (jobId) => {
                 const folderName = (job.category && job.category !== "others" && job.category !== "general") ? job.category : "crawled";
                 const uniqueFilename = `${Date.now()}-${crypto.randomUUID()}.txt`;
                 const storagePath = `${folderName}/${uniqueFilename}`;
+                const knowledgeCategory = resolveKnowledgeCategory({ storagePath, folder: folderName, documentCategory: folderName, metadata: { uploadedFrom: "crawler", sourceUrl: url } });
                 const uploadResult = await uploadBufferToSupabase(textBuffer, storagePath, "text/plain");
                 storageUsed += uploadResult.size;
 
@@ -174,7 +180,13 @@ const runCrawlBackground = async (jobId) => {
 
                 // Generate embeddings and insert chunks into Qdrant
                 const splitter = new RecursiveCharacterTextSplitter();
-                const splitTexts = splitter.splitText(content);
+                const cleanContent = DocumentTextCleaner.cleanText(content);
+                const candidateSplitTexts = splitter.splitText(cleanContent);
+                const chunkValidation = validateChunks(candidateSplitTexts);
+                const splitTexts = chunkValidation.validChunks;
+                const chunkIds = splitTexts.map((_, idx) => deterministicChunkId(document._id, idx));
+                const relationships = buildChunkRelationships(splitTexts, chunkIds, { documentId: document._id });
+                console.log(`[CHUNK VALIDATION] Accepted ${splitTexts.length}/${candidateSplitTexts.length}; rejected: ${JSON.stringify(chunkValidation.reasons)}`);
                 chunksCount += splitTexts.length;
 
                 if (splitTexts.length > 0) {
@@ -185,6 +197,8 @@ const runCrawlBackground = async (jobId) => {
 
                     const points = [];
                     const timestamp = new Date().toISOString();
+                    const localChunkManager = require("../../storage/localChunkManager");
+                    const chunkDocs = [];
 
                     for (let i = 0; i < splitTexts.length; i++) {
                         const vector = embeddings[i];
@@ -192,15 +206,21 @@ const runCrawlBackground = async (jobId) => {
                             throw new Error(`Runtime embedding dimension mismatch in crawler: Expected vector of length ${expectedDimension}, but got ${vector ? vector.length : "undefined"}.`);
                         }
 
-                        const pointId = crypto.randomUUID();
-                        const meta = metadataBuilder.buildMetadata({
+                        const pointId = chunkIds[i];
+                        const contentHash = crypto.createHash("sha256").update(String(splitTexts[i] || "").trim()).digest("hex");
+                        const chunkMeta = metadataBuilder.buildChunkMetadata({
                             documentId: String(document._id),
-                            originalName: documentName,
+                            chunkId: pointId,
+                            content: splitTexts[i],
+                            chunkIndex: i,
                             pageNumber: 1,
-                            category: folderName,
-                            department: "",
+                            originalName: documentName,
+                            folder: folderName,
+                            documentCategory: folderName,
                             institution: job.institution || "",
-                            uploadedBy: String(job.createdBy)
+                            uploadedBy: String(job.createdBy || ""),
+                            searchMetadata: extractSearchMetadata(splitTexts[i], { originalName: documentName }),
+                            relationships: relationships[i]
                         });
 
                         points.push({
@@ -209,17 +229,25 @@ const runCrawlBackground = async (jobId) => {
                                 [qdrantVectorName || "default"]: vector
                             },
                             payload: {
+                                ...chunkMeta,
                                 id: pointId,
-                                documentId: meta.documentId,
                                 content: splitTexts[i],
-                                originalName: meta.originalName,
-                                pageNumber: meta.pageNumber,
-                                category: meta.category,
-                                department: meta.department,
-                                institution: meta.institution,
-                                uploadedBy: meta.uploadedBy,
-                                chunkIndex: i,
+                                contentHash,
                                 createdAt: timestamp
+                            }
+                        });
+
+                        chunkDocs.push({
+                            chunkId: pointId,
+                            documentId: String(document._id),
+                            content: splitTexts[i],
+                            cleanedText: splitTexts[i],
+                            contentHash,
+                            pageNumber: 1,
+                            metadata: {
+                                ...chunkMeta,
+                                isOcr: false,
+                                contentType: "text"
                             }
                         });
                     }
@@ -236,6 +264,12 @@ const runCrawlBackground = async (jobId) => {
                         });
                     }
                     embeddingsCount += points.length;
+
+                    try {
+                        await localChunkManager.replaceDocumentChunks(document._id, chunkDocs);
+                    } catch (localErr) {
+                        console.error(`[CrawlerService] Failed to save local chunks:`, localErr);
+                    }
                 }
 
                 document.embeddingStatus = "indexed";
@@ -349,6 +383,7 @@ const runCrawlBackground = async (jobId) => {
                 const uniqueName = `${Date.now()}-${crypto.randomUUID()}${documentExtension}`;
                 const folderName = (job.category && job.category !== "others" && job.category !== "general") ? job.category : "crawled";
                 const storagePath = `${folderName}/${uniqueName}`;
+                const knowledgeCategory = resolveKnowledgeCategory({ storagePath, folder: folderName, documentCategory: folderName, originalName, metadata: { uploadedFrom: "crawler", sourceUrl: docUrl } });
                 const contentType = fileResponse.headers.get("content-type") || "application/octet-stream";
                 const detectedMimeType = contentType.split(";")[0].trim() || "application/octet-stream";
                 const resolvedFileExt = path.extname(originalName || "").toLowerCase();
@@ -390,7 +425,13 @@ const runCrawlBackground = async (jobId) => {
 
                 // 7. Chunk text and generate embeddings
                 const splitter = new RecursiveCharacterTextSplitter();
-                const splitTexts = splitter.splitText(extractionResult.text || "Empty file content.");
+                const cleanText = DocumentTextCleaner.cleanText(extractionResult.text || "Empty file content.");
+                const candidateSplitTexts = splitter.splitText(cleanText);
+                const chunkValidation = validateChunks(candidateSplitTexts);
+                const splitTexts = chunkValidation.validChunks;
+                const chunkIds = splitTexts.map(() => crypto.randomUUID());
+                const relationships = buildChunkRelationships(splitTexts, chunkIds);
+                console.log(`[CHUNK VALIDATION] Accepted ${splitTexts.length}/${candidateSplitTexts.length}; rejected: ${JSON.stringify(chunkValidation.reasons)}`);
                 chunksCount += splitTexts.length;
 
                 if (splitTexts.length > 0) {
@@ -408,15 +449,19 @@ const runCrawlBackground = async (jobId) => {
                             throw new Error(`Runtime embedding dimension mismatch in crawler: Expected vector of length ${expectedDimension}, but got ${vector ? vector.length : "undefined"}.`);
                         }
 
-                        const pointId = crypto.randomUUID();
-                        const meta = metadataBuilder.buildMetadata({
+                        const chunkMeta = metadataBuilder.buildChunkMetadata({
                             documentId: String(document._id),
-                            originalName,
+                            chunkId: pointId,
+                            content: splitTexts[i],
+                            chunkIndex: i,
                             pageNumber: 1,
-                            category: folderName,
-                            department: "",
+                            originalName: originalName,
+                            folder: folderName,
+                            documentCategory: folderName,
                             institution: job.institution || "",
-                            uploadedBy: String(job.createdBy)
+                            uploadedBy: String(job.createdBy || ""),
+                            searchMetadata: extractSearchMetadata(splitTexts[i], { originalName }),
+                            relationships: relationships[i]
                         });
 
                         points.push({
@@ -425,16 +470,9 @@ const runCrawlBackground = async (jobId) => {
                                 [qdrantVectorName || "default"]: vector
                             },
                             payload: {
+                                ...chunkMeta,
                                 id: pointId,
-                                documentId: meta.documentId,
                                 content: splitTexts[i],
-                                originalName: meta.originalName,
-                                pageNumber: meta.pageNumber,
-                                category: meta.category,
-                                department: meta.department,
-                                institution: meta.institution,
-                                uploadedBy: meta.uploadedBy,
-                                chunkIndex: i,
                                 createdAt: timestamp
                             }
                         });

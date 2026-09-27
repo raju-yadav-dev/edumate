@@ -13,7 +13,8 @@ import {
     Settings,
     Users,
     Globe,
-    BookOpen
+    BookOpen,
+    Layers
 } from "lucide-react";
 import { useState } from "react";
 
@@ -82,6 +83,16 @@ function Sidebar({
 
                     <button
                         type="button"
+                        className={activeSection === "chunking" ? "active" : ""}
+                        onClick={() => setActiveSection("chunking")}
+                        title="Chunking Studio"
+                    >
+                        <Layers />
+                        <span>Chunking Studio</span>
+                    </button>
+
+                    <button
+                        type="button"
                         className={activeSection === "users" ? "active" : ""}
                         onClick={() => setActiveSection("users")}
                         title="Users"
@@ -108,6 +119,26 @@ function Sidebar({
                     >
                         <Database />
                         <span>Data Tools</span>
+                    </button>
+
+                    <button
+                        type="button"
+                        className={activeSection === "benchmark" ? "active" : ""}
+                        onClick={() => setActiveSection("benchmark")}
+                        title="AI Performance & LLM Benchmarks"
+                    >
+                        <Activity />
+                        <span>AI Performance</span>
+                    </button>
+
+                    <button
+                        type="button"
+                        className={activeSection === "analytics" ? "active" : ""}
+                        onClick={() => setActiveSection("analytics")}
+                        title="Knowledge Base & AI Analytics"
+                    >
+                        <BookOpen />
+                        <span>Knowledge Analytics</span>
                     </button>
                 </nav>
 
@@ -183,7 +214,7 @@ function Sidebar({
                         </span>
 
                         <span>
-                            <small>Supabase</small>
+                            <small>Local Storage</small>
                             <b>{formatBytes ? formatBytes(supabaseStats.used) : "15.4 GB"}</b>
                         </span>
 

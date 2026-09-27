@@ -122,8 +122,17 @@ const chatSchema = new mongoose.Schema(
             type: Boolean,
             default: false
         },
+        summary: {
+            type: String,
+            default: "",
+            trim: true
+        },
         messages: {
             type: [messageSchema],
+            default: []
+        },
+        retrievedSources: {
+            type: [sourceSchema],
             default: []
         },
         createdBy: {

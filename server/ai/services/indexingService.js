@@ -1,16 +1,20 @@
 const path = require("path");
 const { fetchWithTimeoutAndRetry } = require("../../utils/fetchHelper");
 const Document = require("../../models/Document");
-const supabase = require("../../config/supabase");
+const localStorageManager = require("../../storage/localStorageManager");
+const localChunkManager = require("../../storage/localChunkManager");
 const pdfExtractor = require("../utils/pdfExtractor");
 const { RecursiveCharacterTextSplitter } = require("../utils/chunkDocument");
+const DocumentTextCleaner = require("../utils/documentTextCleaner");
+const { extractSearchMetadata } = require("../utils/keywordEntityExtractor");
+const { validateChunks } = require("../utils/chunkValidator");
+const { deterministicChunkId, buildChunkRelationships } = require("../utils/chunkRelationships");
+const { resolveKnowledgeCategory } = require("../utils/knowledgeCategory");
 const metadataBuilder = require("../utils/metadataBuilder");
 const embeddingService = require("./embeddingService");
 const { client, collectionName, vectorName: qdrantVectorName } = require("../config/qdrant");
 const crypto = require("crypto");
 const UniversalExtractor = require("../../crawler/extractors/UniversalExtractor");
-
-const BUCKET = process.env.SUPABASE_STORAGE_BUCKET || process.env.SUPABASE_BUCKET || "documents";
 
 const ROMAN_MAP = {
     "i": "1", "ii": "2", "iii": "3", "iv": "4", "v": "5", "vi": "6", "vii": "7", "viii": "8", "ix": "9",
@@ -284,12 +288,8 @@ const withTimeout = (promise, ms, message = "Operation timed out") => {
     return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
 };
 
-const downloadFromSupabase = async (storagePath) => {
-    const { data, error } = await supabase.storage.from(BUCKET).download(storagePath);
-    if (error) {
-        throw new Error(`Failed to download ${storagePath} from Supabase: ${error.message}`);
-    }
-    return Buffer.from(await data.arrayBuffer());
+const loadFromLocalStorage = async (storagePath) => {
+    return await localStorageManager.readFile(storagePath);
 };
 
 const claimNextPendingDocument = async () => {
@@ -417,72 +417,110 @@ const buildChunks = async (buffer, originalName, mimeType, splitter) => {
     return { chunks, pageCount: 1, requiresOcr: false };
 };
 
-const runIndexingJob = async (documentId) => {
+const runIndexingPipeline = async (documentId, initialBuffer = null, options = {}) => {
+    const {
+        workerId = "Worker #1",
+        onProgress = () => {},
+        isPaused = () => false,
+        isCancelled = () => false
+    } = options;
+
     const document = await Document.findById(documentId);
     if (!document || document.status === "deleted") {
         return;
     }
 
     const cacheKey = String(documentId);
-    const fileBuffer = bufferCache.get(cacheKey);
+    const fileBuffer = initialBuffer || bufferCache.get(cacheKey);
     bufferCache.delete(cacheKey);
 
     let buffer = fileBuffer;
     let text = "";
     let pageCount = 1;
     let rawChunks = [];
-    let ocrFlag = false;
     let academicEntities = [];
     let embeddings = [];
     let points = [];
     let pages = [];
+    let currentStageName = "Reading document";
+
+    const updateStage = async (status, stage, progress, extraStats = {}) => {
+        currentStageName = stage;
+        document.embeddingStatus = status;
+        document.progress = progress;
+        document.currentStage = stage;
+        document.workerId = workerId;
+        if (extraStats.chunkStats) {
+            document.chunkStats = {
+                ...(document.chunkStats?.toObject ? document.chunkStats.toObject() : document.chunkStats || {}),
+                ...extraStats.chunkStats
+            };
+        }
+        await document.save();
+        await onProgress({
+            progress,
+            stage,
+            status,
+            chunkStats: document.chunkStats
+        });
+    };
 
     try {
-        document.embeddingStatus = "processing";
-        document.metadata = {
-            ...(document.metadata || {}),
-            indexAttempts: (document.metadata?.indexAttempts || 0) + 1,
-            lastIndexAttemptAt: new Date().toISOString()
-        };
-        await document.save();
+        if (isCancelled()) {
+            document.embeddingStatus = "cancelled";
+            document.currentStage = "Cancelled by user";
+            await document.save();
+            return;
+        }
+
+        // STAGE 1: Reading document (10%)
+        await updateStage("processing", "Reading document", 10);
 
         if (!buffer) {
-            const fs = require("fs");
-            const localPath = path.join(__dirname, "../../uploads/documents", document.storedName || "");
-            if (fs.existsSync(localPath)) {
-                console.log(`[INDEX] Loading document from local path: ${localPath}`);
-                buffer = fs.readFileSync(localPath);
-            } else {
-                buffer = await withTimeout(downloadFromSupabase(document.storagePath), 35000, "Supabase file download timed out (35s)");
+            try {
+                buffer = await loadFromLocalStorage(document.storagePath);
+            } catch (storageErr) {
+                const fs = require("fs");
+                const localPath = path.join(__dirname, "../../uploads/documents", document.storedName || "");
+                if (fs.existsSync(localPath)) {
+                    console.log(`[INDEX] Loading document from fallback local path: ${localPath}`);
+                    buffer = fs.readFileSync(localPath);
+                } else {
+                    throw new Error(`Failed to load document from storage path '${document.storagePath}': ${storageErr.message}`);
+                }
             }
+        }
+
+        if (isCancelled()) {
+            document.embeddingStatus = "cancelled";
+            await document.save();
+            return;
         }
 
         console.log(`[INDEX] Starting document: ${document.originalName} (${documentId})`);
 
-        // 1. Extraction Stage
-        console.log(`[EXTRACT] Started`);
         const ext = path.extname(document.originalName || "").toLowerCase();
         const isPdf = document.mimeType === "application/pdf" || ext === ".pdf";
         const isImage = document.mimeType && document.mimeType.startsWith("image/");
-        
-        let text = "";
-        let pageCount = 1;
-        let rawChunks = [];
-        let ocrFlag = false;
-
         const splitter = new RecursiveCharacterTextSplitter();
 
         if (isPdf) {
-            const parsed = await withTimeout(pdfExtractor.extractText(buffer), 45000, "PDF text extraction timed out (45s)");
+            let parsed;
+            try {
+                parsed = await withTimeout(pdfExtractor.extractText(buffer), 45000, "PDF text extraction timed out (45s)");
+            } catch (pdfErr) {
+                const err = new Error(pdfErr.message || "Failed to extract text from PDF");
+                err.errorCode = "PDF_EXTRACTION_FAILED";
+                throw err;
+            }
+
             pages = parsed.pages || [];
             pageCount = parsed.numPages || pages.length;
 
             const ocrPages = pages.filter(p => p.needsOcr).map(p => p.pageNumber);
             const requiresOcr = ocrPages.length > 0;
 
-            console.log(`[OCR] Required: ${requiresOcr}`);
             if (requiresOcr) {
-                console.log(`[OCR] Pages detected: ${ocrPages.length}`);
                 try {
                     const ocrResults = await withTimeout(
                         extractTextFromScannedPages(buffer, ocrPages),
@@ -492,8 +530,6 @@ const runIndexingJob = async (documentId) => {
                     for (const ocrPage of ocrResults) {
                         const page = pages.find(p => p.pageNumber === ocrPage.pageNumber);
                         if (page) {
-                            console.log(`[OCR] Processing page: ${page.pageNumber}`);
-                            console.log(`[OCR] Text extracted: ${ocrPage.text.length} characters`);
                             if (page.text.trim().length > 0) {
                                 page.text = page.text.trim() + "\n\n=== OCR Content ===\n" + ocrPage.text.trim();
                             } else {
@@ -501,22 +537,18 @@ const runIndexingJob = async (documentId) => {
                             }
                         }
                     }
-                    console.log(`[OCR] Completed`);
                 } catch (ocrErr) {
-                    console.error("[INDEX] Gemini page-level OCR failed:", ocrErr.message);
-                    console.warn("[INDEX] Falling back to text layer or basic extraction...");
-                    for (const page of pages) {
-                        if (page.needsOcr && page.text.trim().length === 0) {
-                            page.text = `[Scanned PDF Page ${page.pageNumber}: Text extraction unavailable. OCR failed: ${ocrErr.message}]`;
-                        }
-                    }
+                    console.error("[INDEX] OCR fallback warning:", ocrErr.message);
                 }
             }
 
+            // STAGE 2: Cleaning text (20%)
+            await updateStage("processing", "Cleaning text", 20);
+            pages = DocumentTextCleaner.cleanPages(pages);
             text = pages.map(p => p.text || "").join("\n");
 
-            // 2. Chunking Stage
-            console.log(`[CHUNK] Started`);
+            // STAGE 3: Building semantic chunks (40%)
+            await updateStage("chunked", "Building semantic chunks", 40);
             for (const page of pages) {
                 const pageChunks = splitter.splitText(page.text || "");
                 pageChunks.forEach((chunk) => {
@@ -527,20 +559,17 @@ const runIndexingJob = async (documentId) => {
                         contentType: page.needsOcr ? "ocr" : "text"
                     });
                 });
-                page.text = ""; // Release page text buffer immediately (Requirement 6)
+                page.text = "";
             }
         } else if (document.category && document.category.startsWith("campus_navigation")) {
-            console.log(`[INDEX] Custom Campus Navigation parser activated for ${document.originalName}`);
             const textContent = buffer.toString("utf-8");
             const parsedRooms = parseBuildingContent(textContent, document.originalName);
-            
-            rawChunks = parsedRooms.map(item => {
-                const chunkContent = `📍 Campus Location
-Building: Building ${item.buildingNumber} (${item.buildingName})
-Floor: ${item.floor}
-Room: ${item.roomNumber || "N/A"}
-Details: ${item.description}`;
 
+            await updateStage("processing", "Cleaning text", 20);
+            await updateStage("chunked", "Building semantic chunks", 40);
+
+            rawChunks = parsedRooms.map(item => {
+                const chunkContent = `📍 Campus Location\nBuilding: Building ${item.buildingNumber} (${item.buildingName})\nFloor: ${item.floor}\nRoom: ${item.roomNumber || "N/A"}\nDetails: ${item.description}`;
                 return {
                     content: chunkContent,
                     pageNumber: 1,
@@ -551,23 +580,28 @@ Details: ${item.description}`;
             });
             text = textContent;
         } else {
-            if (isImage) {
-                console.log(`[IMAGE INDEX] Starting image: ${document.originalName}`);
-                console.log(`[IMAGE INDEX] MIME: ${document.mimeType}`);
+            let extracted;
+            try {
+                extracted = await withTimeout(UniversalExtractor.extract(buffer, document.originalName), 45000, "Document extraction timed out (45s)");
+            } catch (extErr) {
+                const err = new Error(extErr.message || "Failed to extract text from document");
+                err.errorCode = "EXTRACTION_FAILED";
+                throw err;
             }
-            const extracted = await withTimeout(UniversalExtractor.extract(buffer, document.originalName), 45000, "Document extraction timed out (45s)");
+
             text = extracted.text || "";
-            
             if (text.trim().length === 0) {
-                throw new Error("Extraction returned empty text (Empty or unreadable file).");
+                const err = new Error("Extraction returned empty text (Empty or unreadable file).");
+                err.errorCode = "EMPTY_DOCUMENT";
+                throw err;
             }
 
-            if (isImage) {
-                console.log(`[IMAGE INDEX] Extracted text:\n${text}`);
-            }
+            // STAGE 2: Cleaning text (20%)
+            await updateStage("processing", "Cleaning text", 20);
+            text = DocumentTextCleaner.cleanText(text);
 
-            // 2. Chunking Stage
-            console.log(`[CHUNK] Started`);
+            // STAGE 3: Building semantic chunks (40%)
+            await updateStage("chunked", "Building semantic chunks", 40);
             const splits = splitter.splitText(text);
             splits.forEach((chunk) => {
                 rawChunks.push({
@@ -577,139 +611,240 @@ Details: ${item.description}`;
                     contentType: isImage ? "ocr_text" : "text"
                 });
             });
-            if (isImage) {
-                console.log(`[IMAGE INDEX] Created chunks: ${rawChunks.length}`);
-            }
         }
 
-        let academicEntities = [];
+        if (isCancelled()) {
+            document.embeddingStatus = "cancelled";
+            await document.save();
+            return;
+        }
+
+        // STAGE 4: Generating metadata (55%)
+        await updateStage("chunked", "Generating metadata", 55, {
+            chunkStats: { totalChunks: rawChunks.length, pageCount }
+        });
+
         try {
             const entityExtractionService = require("./entityExtractionService");
             academicEntities = await entityExtractionService.extractAcademicMetadata(text);
-            console.log(`[INDEX] Extracted ${academicEntities.length} academic entities/relationships from document text.`);
         } catch (entityErr) {
             console.error("[INDEX] Error extracting academic entities:", entityErr.message);
         }
 
-        const charCount = text.length;
-        console.log(`[EXTRACT] Completed - characters: ${charCount}`);
-        console.log(`[CHUNK] Completed - chunks: ${rawChunks.length}`);
+        rawChunks.forEach((chunk) => {
+            chunk.searchMetadata = extractSearchMetadata(chunk.content, { originalName: document.originalName });
+        });
+
+        const chunkValidation = validateChunks(rawChunks);
+        rawChunks = chunkValidation.validChunks;
 
         if (rawChunks.length === 0) {
-            throw new Error("Chunking returned 0 chunks.");
+            const err = new Error("Chunking returned 0 valid chunks.");
+            err.errorCode = "CHUNKING_FAILED";
+            throw err;
         }
 
-        // 3. Embedding Stage
-        console.log(`[EMBEDDING] Started`);
-        console.log(`[EMBEDDING] Chunk count before embedding: ${rawChunks.length}`);
-        if (isImage) {
-            console.log(`[IMAGE INDEX] Embedding image chunks: ${rawChunks.length}`);
+        const chunkIds = rawChunks.map((_, index) => deterministicChunkId(documentId, index));
+        const relationships = buildChunkRelationships(rawChunks, chunkIds, { documentId });
+        rawChunks.forEach((chunk, index) => { chunk.relationships = relationships[index]; });
+
+        const knowledgeCategory = resolveKnowledgeCategory({
+            storagePath: document.storagePath,
+            documentCategory: document.category,
+            originalName: document.originalName,
+            metadata: document.metadata
+        });
+
+        if (isCancelled()) {
+            document.embeddingStatus = "cancelled";
+            await document.save();
+            return;
         }
-        const embeddings = await withTimeout(
-            embeddingService.getChunksEmbeddings(rawChunks.map((chunk) => chunk.content)),
-            50000,
-            "Embedding generation timed out (50s)"
-        );
-        console.log(`[EMBEDDING] Completed - vectors: ${embeddings.length}`);
 
-        if (!embeddings || embeddings.length !== rawChunks.length) {
-            throw new Error(`Embedding count (${embeddings ? embeddings.length : 0}) does not match chunk count (${rawChunks.length})`);
-        }
+        // STAGE 5: Generating embeddings (75%)
+        await updateStage("embedding", "Generating embeddings", 75);
 
-        // 4. Qdrant Upsert Stage
-        console.log(`[QDRANT] Upsert started`);
-        const { ensureCollection } = require("../config/qdrant");
-        await ensureCollection();
+        rawChunks.forEach((chunk) => {
+            chunk.contentHash = crypto.createHash("sha256").update(String(chunk.content || "").trim()).digest("hex");
+        });
 
-        await deleteDocumentIndex(documentId);
-
-        // Retrieve expected embedding dimension from configured model (strictly 768 for Jina)
         const expectedDimension = 768;
+        const missingTexts = rawChunks.map(c => c.content);
 
-        const points = [];
-        const timestamp = new Date().toISOString();
-        rawChunks.forEach((chunk, index) => {
-            const vector = embeddings[index];
-            if (!vector || !Array.isArray(vector) || vector.length !== expectedDimension) {
-                throw new Error(`Runtime embedding dimension mismatch: Expected vector of length ${expectedDimension}, but got ${vector ? vector.length : "undefined"}.`);
+        try {
+            embeddings = await withTimeout(
+                embeddingService.getChunksEmbeddings(missingTexts),
+                60000,
+                "Embedding generation timed out (60s)"
+            );
+
+            if (!embeddings || embeddings.length !== rawChunks.length) {
+                const err = new Error(`Generated embedding count (${embeddings ? embeddings.length : 0}) does not match chunk count (${rawChunks.length})`);
+                err.errorCode = "EMBEDDING_FAILED";
+                throw err;
             }
+        } catch (embErr) {
+            const err = new Error(embErr.message || "Failed to generate embeddings");
+            err.errorCode = "EMBEDDING_FAILED";
+            throw err;
+        }
 
-            // Deterministic point ID based on documentId + chunkIndex
-            const sha = crypto.createHash("sha256").update(`${documentId}:${index}`).digest("hex");
-            const pointId = `${sha.slice(0, 8)}-${sha.slice(8, 12)}-4${sha.slice(13, 16)}-a${sha.slice(17, 20)}-${sha.slice(20, 32)}`;
-            const isCampusNav = document.category && document.category.startsWith("campus_navigation");
-            const meta = metadataBuilder.buildMetadata({
-                documentId: String(documentId),
+        if (!embeddings || embeddings.some(e => !e || !Array.isArray(e) || e.length !== expectedDimension)) {
+            const err = new Error(`Embedding generation incomplete: One or more chunks missing valid ${expectedDimension}-dim vector.`);
+            err.errorCode = "EMBEDDING_FAILED";
+            throw err;
+        }
+
+        if (isCancelled()) {
+            document.embeddingStatus = "cancelled";
+            await document.save();
+            return;
+        }
+
+        // STAGE 6: Saving local chunk storage (88%)
+        await updateStage("indexing", "Saving local chunk storage", 88, {
+            chunkStats: { embeddedChunks: embeddings.length }
+        });
+
+        try {
+            const chunkObjects = rawChunks.map((chunk, index) => {
+                const pointId = deterministicChunkId(documentId, index);
+                const chunkMeta = metadataBuilder.buildChunkMetadata({
+                    documentId: String(documentId),
+                    chunkId: pointId,
+                    content: chunk.content,
+                    chunkIndex: index,
+                    pageNumber: chunk.pageNumber,
+                    originalName: document.originalName,
+                    storagePath: document.storagePath,
+                    documentCategory: document.category,
+                    department: document.department,
+                    institution: document.institution,
+                    uploadedBy: String(document.createdBy || ""),
+                    searchMetadata: chunk.searchMetadata,
+                    relationships: chunk.relationships,
+                    campusMeta: chunk.campusMeta,
+                    isImage,
+                    mimeType: document.mimeType
+                });
+
+                return {
+                    chunkId: pointId,
+                    documentId: String(documentId),
+                    chunkIndex: index,
+                    pageNumber: chunk.pageNumber || 1,
+                    heading: chunkMeta.heading || "Document",
+                    parentHeading: chunkMeta.parentHeading || "Document",
+                    hierarchy: [chunkMeta.parentHeading || "Document", chunkMeta.heading || "Document"],
+                    keywords: chunkMeta.keywords || [],
+                    content: chunk.content,
+                    contentHash: chunk.contentHash,
+                    isOcr: chunk.isOcr || false,
+                    contentType: chunk.contentType || "text",
+                    campusMeta: chunk.campusMeta,
+                    metadata: {
+                        ...chunkMeta,
+                        academicEntities: academicEntities,
+                        isOcr: chunk.isOcr || false,
+                        contentType: chunk.contentType || "text"
+                    }
+                };
+            });
+
+            await localChunkManager.replaceDocumentChunks(documentId, chunkObjects, {
                 originalName: document.originalName,
-                pageNumber: chunk.pageNumber,
                 category: document.category,
                 department: document.department,
-                institution: document.institution,
-                uploadedBy: String(document.createdBy || "")
+                institution: document.institution
             });
-            
-            if (isCampusNav && chunk.campusMeta) {
-                meta.sourceType = "campus_navigation";
-                meta.buildingNumber = chunk.campusMeta.buildingNumber || "";
-                meta.buildingName = chunk.campusMeta.buildingName || "";
-                meta.floor = chunk.campusMeta.floor || "";
-                meta.roomNumber = chunk.campusMeta.roomNumber || "";
-                meta.department = chunk.campusMeta.description || "";
-            }
+        } catch (storageErr) {
+            const err = new Error(storageErr.message || "Failed to save chunks to local storage");
+            err.errorCode = "LOCAL_CHUNK_SAVE_FAILED";
+            throw err;
+        }
 
-            points.push({
+        if (isCancelled()) {
+            document.embeddingStatus = "cancelled";
+            await document.save();
+            return;
+        }
+
+        // STAGE 7: Indexing into Qdrant (96%)
+        await updateStage("indexing", "Indexing into Qdrant", 96);
+
+        const { ensureCollection } = require("../config/qdrant");
+        await ensureCollection();
+        await deleteDocumentIndex(documentId);
+
+        // Determine whether Qdrant collection uses named or unnamed vector
+        let isNamedVector = false;
+        try {
+            const collInfo = await client.getCollection(collectionName);
+            const vConfig = collInfo.config?.params?.vectors;
+            if (vConfig && !vConfig.size && (vConfig[qdrantVectorName] || vConfig.default)) {
+                isNamedVector = true;
+            }
+        } catch (_) {}
+
+        const timestamp = new Date().toISOString();
+        points = rawChunks.map((chunk, index) => {
+            const pointId = deterministicChunkId(documentId, index);
+            const chunkMeta = metadataBuilder.buildChunkMetadata({
+                documentId: String(documentId),
+                chunkId: pointId,
+                content: chunk.content,
+                chunkIndex: index,
+                pageNumber: chunk.pageNumber,
+                originalName: document.originalName,
+                storagePath: document.storagePath,
+                documentCategory: document.category,
+                department: document.department,
+                institution: document.institution,
+                uploadedBy: String(document.createdBy || ""),
+                searchMetadata: chunk.searchMetadata,
+                relationships: chunk.relationships,
+                campusMeta: chunk.campusMeta,
+                isImage,
+                mimeType: document.mimeType
+            });
+
+            return {
                 id: pointId,
-                vector: {
-                    [qdrantVectorName || "default"]: vector
-                },
+                vector: isNamedVector ? { [qdrantVectorName || "default"]: embeddings[index] } : embeddings[index],
                 payload: {
+                    ...chunkMeta,
                     id: pointId,
-                    documentId: meta.documentId,
                     content: chunk.content,
-                    originalName: meta.originalName,
-                    documentName: meta.documentName,
-                    pageNumber: meta.pageNumber,
-                    page: meta.page,
-                    category: meta.category,
-                    documentType: isImage ? "image" : meta.documentType,
-                    department: isCampusNav ? (chunk.campusMeta?.description || "") : meta.department,
-                    institution: meta.institution,
-                    source: meta.source,
+                    contentHash: chunk.contentHash,
                     academicEntities: academicEntities,
-                    uploadedBy: meta.uploadedBy,
-                    chunkIndex: index,
                     createdAt: timestamp,
-                    contentHash: document.contentHash || document.checksum,
-                    sourceType: isImage ? "image" : (isCampusNav ? "campus_navigation" : "pdf"),
-                    buildingNumber: isCampusNav ? (chunk.campusMeta?.buildingNumber || "") : undefined,
-                    buildingName: isCampusNav ? (chunk.campusMeta?.buildingName || "") : undefined,
-                    floor: isCampusNav ? (chunk.campusMeta?.floor || "") : undefined,
-                    roomNumber: isCampusNav ? (chunk.campusMeta?.roomNumber || "") : undefined,
-                    mimeType: isImage ? document.mimeType : undefined,
-                    filename: isImage ? document.originalName : undefined,
                     isOcr: chunk.isOcr || false,
                     contentType: chunk.contentType || "text"
                 }
-            });
+            };
         });
 
-        console.log(`[QDRANT] Vector count before upsert: ${points.length}`);
-        if (isImage) {
-            console.log(`[IMAGE INDEX] Qdrant upsert: ${points.length} vector${points.length === 1 ? "" : "s"}`);
+        try {
+            const QDRANT_BATCH_SIZE = 64;
+            for (let start = 0; start < points.length; start += QDRANT_BATCH_SIZE) {
+                const subPoints = points.slice(start, start + QDRANT_BATCH_SIZE);
+                await withTimeout(
+                    client.upsert(collectionName, { wait: true, points: subPoints }),
+                    30000,
+                    `Qdrant vector database upload batch timed out (30s)`
+                );
+            }
+        } catch (qdrantErr) {
+            const err = new Error(qdrantErr.message || "Failed to upsert points into Qdrant");
+            err.errorCode = "QDRANT_INDEX_FAILED";
+            throw err;
         }
-        console.log(`[QDRANT] Collection: ${collectionName}`);
-        console.log(`[QDRANT] Vector Name: ${qdrantVectorName || "default"}`);
-        console.log(`[QDRANT] Dimension: ${expectedDimension}`);
-        await withTimeout(client.upsert(collectionName, { wait: true, points }), 30000, "Qdrant vector database upload timed out (30s)");
-        console.log(`[QDRANT] Upsert completed`);
 
-        // Verify vectors are inserted in Qdrant PER DOCUMENT
+        // STAGE 8: Strict Validation & Completion (100%)
         const qCountRes = await withTimeout(
             client.count(collectionName, {
                 filter: {
-                    must: [
-                        { key: "documentId", match: { value: String(documentId) } }
-                    ]
+                    must: [{ key: "documentId", match: { value: String(documentId) } }]
                 }
             }),
             10000,
@@ -717,73 +852,30 @@ Details: ${item.description}`;
         );
 
         const pointCount = qCountRes?.count || 0;
-        console.log(`[QDRANT] Verified point count for document ${documentId}: ${pointCount}`);
 
-        if (pointCount === 0) {
-            throw new Error(`Qdrant vector verification failed: 0 points found for document ${documentId}`);
+        // Strict Completion Validation: indexedChunks === totalChunks
+        if (pointCount !== rawChunks.length || pointCount === 0) {
+            const err = new Error(`Strict validation failed: Expected ${rawChunks.length} vectors in Qdrant but verified ${pointCount}.`);
+            err.errorCode = "VALIDATION_FAILED";
+            throw err;
         }
 
-        // 5. Save/Sync MongoDB Chunk collection
-        try {
-            const Chunk = require("../../models/Chunk");
-            await Chunk.deleteMany({ document: documentId });
-            const chunkDocs = rawChunks.map((chunk, index) => {
-                const isCampusNav = document.category && document.category.startsWith("campus_navigation");
-                const meta = metadataBuilder.buildMetadata({
-                    documentId: String(documentId),
-                    originalName: document.originalName,
-                    pageNumber: chunk.pageNumber,
-                    category: document.category,
-                    department: document.department,
-                    institution: document.institution,
-                    uploadedBy: String(document.createdBy || "")
-                });
-                
-                if (isCampusNav && chunk.campusMeta) {
-                    meta.sourceType = "campus_navigation";
-                    meta.buildingNumber = chunk.campusMeta.buildingNumber || "";
-                    meta.buildingName = chunk.campusMeta.buildingName || "";
-                    meta.floor = chunk.campusMeta.floor || "";
-                    meta.roomNumber = chunk.campusMeta.roomNumber || "";
-                    meta.department = chunk.campusMeta.description || "";
-                }
-                return {
-                    document: documentId,
-                    content: chunk.content,
-                    embedding: embeddings[index] || [],
-                    metadata: {
-                        pageNumber: chunk.pageNumber || 1,
-                        page: chunk.pageNumber || 1,
-                        originalName: document.originalName || "",
-                        documentName: document.originalName || "",
-                        category: document.category || "",
-                        documentType: isImage ? "image" : meta.documentType,
-                        institution: document.institution || "",
-                        academicEntities: academicEntities,
-                        department: isCampusNav ? (chunk.campusMeta?.description || "") : meta.department,
-                        source: document.originalName || "",
-                        sourceType: isImage ? "image" : (isCampusNav ? "campus_navigation" : "pdf"),
-                        buildingNumber: isCampusNav ? (chunk.campusMeta?.buildingNumber || "") : undefined,
-                        buildingName: isCampusNav ? (chunk.campusMeta?.buildingName || "") : undefined,
-                        floor: isCampusNav ? (chunk.campusMeta?.floor || "") : undefined,
-                        roomNumber: isCampusNav ? (chunk.campusMeta?.roomNumber || "") : undefined,
-                        mimeType: isImage ? document.mimeType : undefined,
-                        filename: isImage ? document.originalName : undefined,
-                        isOcr: chunk.isOcr || false,
-                        contentType: chunk.contentType || "text"
-                    }
-                };
-            });
-            if (chunkDocs.length > 0) {
-                await Chunk.insertMany(chunkDocs);
-            }
-        } catch (mongoChunkErr) {
-            console.error(`Failed to sync MongoDB Chunk collection for ${documentId}:`, mongoChunkErr);
-        }
+        const totalTokens = rawChunks.reduce((acc, c) => acc + Math.ceil((c.content || "").length / 4), 0);
 
-        // 6. MongoDB Update & Completion (ONLY AFTER VERIFYING QDRANT POINTS > 0)
-        document.embeddingStatus = "indexed";
+        document.embeddingStatus = "completed";
         document.chunkCount = rawChunks.length;
+        document.progress = 100;
+        document.currentStage = "Validation completed";
+        document.healthy = true;
+        document.failureInfo = {};
+        document.chunkStats = {
+            totalChunks: rawChunks.length,
+            embeddedChunks: embeddings.length,
+            indexedChunks: pointCount,
+            failedChunks: 0,
+            tokenCount: totalTokens,
+            pageCount
+        };
         document.metadata = {
             ...(document.metadata || {}),
             pages: pageCount,
@@ -793,23 +885,42 @@ Details: ${item.description}`;
             academicEntities: academicEntities
         };
         await document.save();
-        console.log(`[INDEX] Document completed successfully with ${pointCount} Qdrant vectors`);
-        if (isImage) {
-            console.log(`[IMAGE INDEX] Completed: ${document.originalName}`);
+
+        await onProgress({
+            progress: 100,
+            stage: "Validation completed",
+            status: "completed",
+            chunkStats: document.chunkStats
+        });
+
+        // Invalidate retrieval category cache
+        try {
+            const cacheService = require("../../services/cacheService");
+            await cacheService.invalidateCategory(document.category);
+        } catch (cacheInvErr) {
+            console.warn("[INDEX] Cache invalidation warning:", cacheInvErr.message);
         }
     } catch (err) {
-        console.error(`[INDEX] Background Indexing failed for ${documentId}:`, err);
+        console.error(`[INDEX] Indexing failed at stage "${currentStageName}" for ${documentId}:`, err.message);
         document.embeddingStatus = "failed";
+        document.progress = 0;
+        document.currentStage = `Failed at ${currentStageName}`;
+        document.healthy = false;
+        document.failureInfo = {
+            failedStage: currentStageName,
+            errorCode: err.errorCode || "INDEXING_FAILED",
+            errorMessage: err.message || "Unknown error",
+            timestamp: new Date()
+        };
         document.metadata = {
             ...(document.metadata || {}),
             error: err.message,
-            lastErrorAt: new Date().toISOString(),
-            notes: (document.metadata?.notes || "") + `\n[Index Error: ${err.message}]`
+            errorCode: err.errorCode || "INDEXING_FAILED",
+            lastErrorAt: new Date().toISOString()
         };
         await document.save();
-        throw err; // Do not hide exceptions
+        throw err;
     } finally {
-        // Free memory after every indexed document (Requirement 2 & 6)
         buffer = null;
         text = null;
         rawChunks = [];
@@ -824,49 +935,19 @@ Details: ${item.description}`;
     }
 };
 
-// Automatic startup worker queue and stale reset is disabled as per CRITICAL FIX requirements
-// setTimeout(async () => {
-//     try {
-//         const staleThresholdMs = Number(process.env.STALE_JOB_THRESHOLD_MS) || 15 * 60 * 1000;
-//         const cutoffTime = new Date(Date.now() - staleThresholdMs);
-//         const stuckDocs = await Document.updateMany(
-//             { 
-//                 status: { $ne: "deleted" }, 
-//                 embeddingStatus: "processing",
-//                 $or: [
-//                     { updatedAt: { $lt: cutoffTime } },
-//                     { "metadata.lastIndexAttemptAt": { $lt: cutoffTime.toISOString() } }
-//                 ]
-//             },
-//             { 
-//                 $set: { 
-//                     embeddingStatus: "pending",
-//                     "metadata.indexAttempts": 0
-//                 } 
-//             }
-//         );
-//         if (stuckDocs.modifiedCount > 0) {
-//             console.log(`[IndexingService] Reset ${stuckDocs.modifiedCount} stuck "processing" documents back to "pending" and cleared attempts.`);
-//         }
-//     } catch (err) {
-//         console.error("Failed to reset stuck processing documents on start:", err);
-//     }
-// 
-//     processNextJob().catch((err) => console.error("Initial worker queue start failed:", err));
-// }, 3000);
+const runIndexingJob = async (documentId) => {
+    return runIndexingPipeline(documentId);
+};
 
 const deleteDocumentIndex = async (documentId) => {
     try {
+        await localChunkManager.deleteDocumentChunks(documentId);
         await withTimeout(
             client.delete(collectionName, {
                 filter: {
-                    must: [
-                        {
-                            key: "documentId",
-                            match: {
-                                value: String(documentId)
-                            }
-                        }
+                    should: [
+                        { key: "documentId", match: { value: String(documentId) } },
+                        { key: "sourceDocumentId", match: { value: String(documentId) } }
                     ]
                 }
             }),
@@ -890,21 +971,12 @@ const reindexDocument = async ({ documentId }) => {
         throw error;
     }
 
-    document.embeddingStatus = "pending";
-    document.metadata = {
-        ...(document.metadata || {}),
-        indexAttempts: 0
-    };
-    await document.save();
-    
-    manuallyQueuedIds.add(String(documentId));
-
-    indexDocumentBackground(document._id).catch(() => {});
+    const { enqueueDocuments } = require("./chunkingQueueService");
+    await enqueueDocuments({ ids: [documentId], forceRechunk: true });
     return document;
 };
 
 const rebuildAllEmbeddings = async () => {
-    // Disable rebuilding all embeddings completely
     return { count: 0 };
 };
 
@@ -913,5 +985,7 @@ module.exports = {
     deleteDocumentIndex,
     reindexDocument,
     rebuildAllEmbeddings,
-    runIndexingJob
+    runIndexingJob,
+    runIndexingPipeline
 };
+

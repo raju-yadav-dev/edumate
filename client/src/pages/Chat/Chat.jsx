@@ -257,6 +257,9 @@ function Chat() {
         isContinuousMode,
         startSingleQuery,
         startContinuousConversation,
+        startListening,
+        stopListening,
+        stopResponse,
         stopConversation,
         toggleMute,
         setLanguage,
@@ -537,7 +540,10 @@ function Chat() {
                 parentId: finalParentId,
                 language: activeLang,
                 onChunk: (event) => {
-                    if (event.type === "chunk") {
+                    if (event.type === "status") {
+                        VoiceConversationManager.handleSseStatus(event.status);
+                    } else if (event.type === "chunk") {
+                        VoiceConversationManager.handleSseStatus("generating_response");
                         finalText += event.content;
                         setStreamingText((prev) => prev + event.content);
                     } else if (event.type === "done") {
@@ -1131,8 +1137,20 @@ function Chat() {
                         onClear={handleClearInput}
                         attachments={attachments}
                         onRemoveAttachment={handleRemoveAttachment}
-                        onVoiceSingleClick={() => startSingleQuery(sendMessage)}
-                        onVoiceContinuousClick={() => startContinuousConversation(sendMessage)}
+                        onVoiceSingleClick={() => {
+                            if (voiceState === "listening" && !isContinuousMode) {
+                                stopConversation();
+                            } else {
+                                startSingleQuery(sendMessage);
+                            }
+                        }}
+                        onVoiceContinuousClick={() => {
+                            if (isContinuousMode) {
+                                stopConversation();
+                            } else {
+                                startContinuousConversation(sendMessage);
+                            }
+                        }}
                         isVoiceSingleActive={voiceState === "listening" && !isContinuousMode}
                         isVoiceContinuousActive={isContinuousMode}
                     />
@@ -1146,6 +1164,9 @@ function Chat() {
                 activeLang={activeLang}
                 isMuted={isMuted}
                 isContinuousMode={isContinuousMode}
+                startListening={startListening}
+                stopListening={stopListening}
+                stopResponse={stopResponse}
                 stopConversation={stopConversation}
                 toggleMute={toggleMute}
                 setLanguage={setLanguage}

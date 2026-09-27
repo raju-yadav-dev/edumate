@@ -10,16 +10,14 @@ if (fs.existsSync(envPath)) {
 
 // Auto-detect LLM provider if not set
 if (!process.env.LLM_PROVIDER) {
-    process.env.LLM_PROVIDER = "llama";
-    console.log(colors.cyan("💡 LLM_PROVIDER not set. Automatically defaulted to 'llama'."));
+    process.env.LLM_PROVIDER = "llama.cpp";
+    console.log(colors.cyan("💡 LLM_PROVIDER not set. Automatically defaulted to 'llama.cpp'."));
 }
 
 const REQUIRED_VARS = [
     "PORT",
     "MONGODB_URI",
     "JWT_SECRET",
-    "SUPABASE_URL",
-    "SUPABASE_SERVICE_ROLE_KEY",
     "QDRANT_URL",
     "QDRANT_COLLECTION"
 ];

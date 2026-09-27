@@ -8,6 +8,7 @@ const AI_CONSTANTS = require("../constants/aiConstants");
 // AI module services
 const llmService = require("./llmService");
 const llama = require("../../config/llama");
+const { getLlmConfig } = require("../../config/llm");
 const rerankService = require("./rerankService");
 const conversationService = require("./conversationService");
 const intentDetectionService = require("./intentDetectionService");
@@ -27,6 +28,8 @@ const RankingEngine = require("../../knowledge/RankingEngine");
 const cacheService = require("../../services/cacheService");
 const webCrawlerService = require("./webCrawlerService");
 const { detectTypeAndDepartment } = require("../utils/queryParser");
+const { planQuery } = require("../utils/queryPlanner");
+const performanceMonitoringService = require("../../services/performanceMonitoringService");
 const LRUCache = require("../utils/lruCache");
 const retrievalCache = new LRUCache(100, 5 * 60 * 1000);
 
@@ -204,7 +207,7 @@ const selectDiverseChunks = (rankedChunks, maxLimit = 8) => {
 /**
  * Handles chatbot queries with RAG matching using Gemini 2.5 Flash and Qdrant
  */
-const askQuestion = async ({ user, question, conversationId, onChunk, signal, latitude, longitude, userMessageId, assistantMessageId, parentId, language }) => {
+const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, signal, latitude, longitude, userMessageId, assistantMessageId, parentId, language }) => {
     const startedAt = Date.now();
     let llmStart = 0;
     let llmDuration = 0;
@@ -223,6 +226,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
     const normalizedQuestion = normalizeQueryText(rawQuestion);
     const detectedIntent = detectIntent(normalizedQuestion);
     const activeUser = user || buildGuestUser();
+    const tracker = performanceMonitoringService.createTracker({ question: normalizedQuestion, user: activeUser });
 
     // Parse lightweight metadata type and department
     const { documentType: detectedType, department: detectedDept } = detectTypeAndDepartment(normalizedQuestion);
@@ -233,6 +237,10 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
     const cachedResponse = await cacheService.get(normalizedQuestion, detectedType, detectedDept, queryMode);
     if (cachedResponse) {
         const responseTimeMs = Date.now() - startedAt;
+        tracker.recordMetric("cacheHit", true);
+        tracker.recordMetric("cacheMiss", false);
+        tracker.recordMetric("cacheStatus", "hit");
+        tracker.finish();
         console.log(`[Cache HIT] Found cached response for query: "${normalizedQuestion}" (Type: ${detectedType || 'none'}, Dept: ${detectedDept || 'none'})`);
         console.log(`[Observability] Cache HIT | Duration: ${responseTimeMs}ms | LLM Calls Avoided: 1`);
         if (onChunk && cachedResponse.answer) {
@@ -256,12 +264,13 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
 
         const suggestions = await suggestionsService.generateSuggestions({
             question: normalizedQuestion,
-            answer: cachedResponse.answer
+            answer: cachedResponse.answer,
+            intent: cachedResponse.intent
         });
 
         return {
-            conversationId: chat?._id || conversationId || null,
-            mode: activeUser._id ? "authenticated" : "guest",
+            id: chat?._id,
+            conversationId: chat?._id || conversationId,
             message: cachedResponse.answer,
             intent: cachedResponse.intent || "cached",
             intentConfidence: 1.0,
@@ -276,6 +285,22 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
         };
     }
 
+    // Cache Miss
+    tracker.recordMetric("cacheHit", false);
+    tracker.recordMetric("cacheMiss", true);
+    tracker.recordMetric("cacheStatus", "miss");
+
+    // ==========================================
+    // STAGE 1: INCOMING REQUEST
+    // ==========================================
+    console.log(`[STAGE 1: Incoming Request]`, {
+        question: rawQuestion,
+        userId: activeUser._id,
+        role: activeUser.role,
+        conversationId: conversationId || null,
+        language: language || "en"
+    });
+
     // Expand abbreviation aliases in user question
     let expandedQuestion = normalizeAliases(normalizedQuestion);
 
@@ -286,18 +311,15 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
 
     let maxOutputTokens = 500;
 
-    // 1. Retrieve dialogue history memory context
+    // 1. Retrieve dialogue history memory context (Mongo Lookup)
+    const stopMongoHistoryTimer = tracker.startTimer("mongoLookup");
     const { historyText, activeTopic, conversationContext, rawHistory } = await conversationService.getRecentMemory({
         userId: activeUser._id,
         conversationId,
-        maxTokens: 1500,
+        maxTokens: 500,
         parentId
     });
-
-    // ==========================================
-    // COURSE CATALOGUE ROUTING & LEVEL SELECTION
-    // ==========================================
-
+    stopMongoHistoryTimer();
 
     // ==========================================
     // BUG 1: AMBIGUOUS LOCATION QUERY CHECK
@@ -352,8 +374,6 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
             suggestions: []
         };
     }
-
-
 
     // 2. Query Analysis (Topic Switch, Rewrite Query, Intent, Entities, Repeat Check)
     let followUpQuery = expandedQuestion;
@@ -412,168 +432,181 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
     const resolvedActiveTopic = analysisResult.activeTopic || activeTopic || "";
 
     const queryComplexityService = require("../../services/queryComplexityService");
-    const adaptiveRetrievalService = require("../../services/adaptiveRetrievalService");
     const queryType = queryComplexityService.analyzeQueryComplexity(rewrittenQuery, intent);
-    console.log(`[ADAPTIVE RAG] Query Complexity Class: ${queryType}`);
 
-    // Debug logging for development
-    console.log(`\n[CONTEXT]\nCurrent topic: ${updatedContext?.currentTopic || "None"}`);
-    console.log(`\n[CONTEXT]\nUser query: ${normalizedQuestion}`);
-    console.log(`\n[CONTEXT]\nResolved query: ${rewrittenQuery}`);
-    console.log(`\n[INTENT]\n${intent}\n`);
-
-
-
-
-                  // ==========================================
-    // CAMPUS NAVIGATION GREETING CHECK
     // ==========================================
-    const isNavigationGreeting = normalizedQuestion.toLowerCase().trim() === "campus navigation";
-    if (isNavigationGreeting) {
-        const textResponse = `📍 Campus Navigation\n\nSure! Tell me where you want to go in the campus.`;
-        const responseTimeMs = Date.now() - startedAt;
-        const chat = await conversationService.saveMessageTurn({
-            user: activeUser,
-            conversationId,
-            question: normalizedQuestion,
-            response: { answer: textResponse, confidence: "high" },
-            intent: "location",
-            confidence: 0.9,
-            provider: "system",
-            responseTimeMs,
-            userMessageId,
-            assistantMessageId,
-            parentId,
-            topic: "campus_navigation",
-            entities: { ...entities, conversationContext: updatedContext }
-        });
+    // STAGE 2: QUERY CLASSIFICATION (Query Planner & Router)
+    // ==========================================
+    const stopPlannerTimer = tracker.startTimer("queryPlanner");
+    const chatQueryPlan = planQuery(rewrittenQuery, {
+        conversationHistory: historyText,
+        historyText,
+        activeTopic: resolvedActiveTopic,
+        intent: recPrimaryIntent || intent,
+        user: activeUser,
+        studentProfile
+    });
+    stopPlannerTimer();
 
-        const suggestions = ["Where is the HOD of CSS?", "Where is the library?"];
+    const routeChosen = chatQueryPlan.route || "UNIVERSITY_SPECIFIC";
+    const skipRag = Boolean(chatQueryPlan.skipRag);
 
-        return {
-            conversationId: chat?._id || conversationId || null,
-            mode: activeUser._id ? "authenticated" : "guest",
-            message: textResponse,
-            intent: "location",
-            intentConfidence: 0.9,
-            confidence: "high",
-            sources: [],
-            sourceLabel: "📍 Campus Navigation",
-            provider: "system",
-            responseTimeMs,
-            suggestions
-        };
-    }
+    console.log(`[STAGE 2: Query Classification]`, {
+        route: routeChosen,
+        intent: chatQueryPlan.intent || recPrimaryIntent || intent,
+        confidence: chatQueryPlan.routingDetails?.confidence || 0.95,
+        skipRag,
+        subqueries: activeSubqueries
+    });
 
-    const intentResult = { intent, confidence: 0.9 };
-    const primaryIntent = Array.isArray(intent) ? intent[0] : intent;
-    const decision = decide({ intent: primaryIntent, question: rewrittenQuery });
+    // ==========================================
+    // STAGE 3: METADATA FILTERS & TELEMETRY
+    // ==========================================
+    const stopFilterTimer = tracker.startTimer("metadataFilter");
+    const metadataFilters = {
+        category: chatQueryPlan.category || null,
+        department: chatQueryPlan.department || null,
+        program: chatQueryPlan.program || null,
+        documentType: chatQueryPlan.documentType || null,
+        ...(chatQueryPlan.filters || {})
+    };
+    tracker.recordMetric("metadataFilters", metadataFilters);
+    tracker.recordMetric("routeChosen", routeChosen);
+    tracker.recordMetric("skipRag", skipRag);
+    stopFilterTimer();
+
+    console.log(`[STAGE 3: Metadata Filters]`, metadataFilters);
 
     let retrievedChunks = [];
     let universitySiteResults = [];
     let webResults = [];
-    let activeQuestionType = QUESTION_TYPES.UNIVERSITY_SPECIFIC;
-    let sourceLabel = SOURCE_LABELS.UNIVERSITY;
+    let activeQuestionType = routeChosen === "GENERAL_KNOWLEDGE" 
+        ? QUESTION_TYPES.GENERAL_KNOWLEDGE 
+        : (routeChosen === "CONVERSATIONAL" ? "conversational" : QUESTION_TYPES.UNIVERSITY_SPECIFIC);
+    let sourceLabel = routeChosen === "GENERAL_KNOWLEDGE" 
+        ? "🤖 EduMate AI (General Knowledge)" 
+        : (routeChosen === "CONVERSATIONAL" ? "💬 EduMate Assistant" : SOURCE_LABELS.UNIVERSITY);
     let formatted;
-    let provider = "system";
+    let provider = "llama.cpp";
     let textResponse = "";
-    let finalMessages = [];
 
-    // Counters for debug logging
-    let adminDocsCount = 0;
-    let adminUrlsCount = 0;
-    let internetCount = 0;
-
-    // ==========================================
-    // UNIVERSAL RETRIEVER (QDRANT FIRST)
-    // ==========================================
-    let cachedResult = retrievalCache.get(normalizedQuestion);
     let retrievedChunksRaw = [];
     let combinedDocChunks = [];
     let retrievalTime = 0;
     let rerankTime = 0;
-    let qdrantStart = 0;
 
-    if (cachedResult) {
-        console.log(`[RAG LRU Cache HIT] Found cached retrieval results for query: "${normalizedQuestion}"`);
-        retrievedChunksRaw = cachedResult.retrievedChunksRaw;
-        combinedDocChunks = cachedResult.combinedDocChunks;
-        rewrittenQuery = cachedResult.rewrittenQuery;
-    } else {
-        const mongoose = require("mongoose");
-        if (mongoose.connection.readyState === 1) {
-            try {
-                const { ensureCollection } = require("../config/qdrant");
-                await ensureCollection();
-            } catch (err) {
-                console.error("[RAG] Qdrant connection check failed:", err.message);
-            }
+    // ==========================================
+    // STAGE 4: RETRIEVAL STATUS (Executed or Skipped)
+    // ==========================================
+    console.log(`[STAGE 4: Retrieval Status]`, {
+        executed: !skipRag,
+        reason: skipRag ? `RAG skipped for route: ${routeChosen}` : "Knowledge base retrieval scheduled"
+    });
 
-            qdrantStart = Date.now();
-            try {
-                const SearchManager = require("../../knowledge/SearchManager");
-                // Retrieve topK = 8 chunks dynamically
-                retrievedChunksRaw = await SearchManager.searchLocalPdfs(rewrittenQuery, activeUser, 8);
-            } catch (retrieveErr) {
-                console.error("[RAG] Vector retrieval failed. Falling back to MongoDB keyword search:", retrieveErr.message);
-                try {
-                    const Chunk = require("../../models/Chunk");
-                    const words = rewrittenQuery.toLowerCase().replace(/[^\w\s]/g, " ").split(/\s+/).filter(w => w.length > 2);
-                    if (words.length > 0) {
-                        const regexes = words.map(w => new RegExp(w, "i"));
-                        const matched = await Chunk.find({ content: { $in: regexes } }).limit(8).lean();
-                        retrievedChunksRaw = matched.map(c => ({
-                            id: c._id.toString(),
-                            content: c.content,
-                            metadata: {
-                                documentId: c.document?.toString() || "",
-                                originalName: c.metadata?.originalName || "",
-                                filename: c.metadata?.originalName || "",
-                                pageNumber: c.metadata?.pageNumber || 1,
-                                category: c.metadata?.category || "",
-                                department: c.metadata?.department || "",
-                                institution: c.metadata?.institution || "",
-                                sourceType: "document",
-                                uploadedFrom: "api"
-                            },
-                            score: 0.5
-                        }));
-                    }
-                } catch (mongoErr) {
-                    console.error("[RAG] MongoDB keyword fallback search failed:", mongoErr.message);
-                }
-            }
-            retrievalTime = Date.now() - qdrantStart;
-            qdrantDuration += retrievalTime;
+    if (!skipRag) {
+        if (onStatus) {
+            onStatus("Searching documents...", "searching_knowledge_base", { progress: 25 });
+        }
 
-            // Hybrid Rerank
-            const rerankStart = Date.now();
+        const stopQdrantTimer = tracker.startTimer("qdrant");
+        let qdrantStart = Date.now();
+
+        const RETRIEVAL_TIMEOUT_MS = 8000;
+        let retrievalTimeoutHandle;
+        const retrievalTimeoutPromise = new Promise((resolve) => {
+            retrievalTimeoutHandle = setTimeout(() => {
+                console.warn(`[CHAT PIPELINE] Retrieval exceeded ${RETRIEVAL_TIMEOUT_MS}ms timeout. Falling back to partial results.`);
+                resolve([]);
+            }, RETRIEVAL_TIMEOUT_MS);
+        });
+
+        try {
+            const SearchManager = require("../../knowledge/SearchManager");
+            retrievedChunksRaw = await Promise.race([
+                SearchManager.searchLocalPdfs(rewrittenQuery, activeUser, 8),
+                retrievalTimeoutPromise
+            ]);
+        } catch (retrieveErr) {
+            console.error("[CHAT PIPELINE] Knowledge retrieval error:", retrieveErr.message);
+            tracker.recordMetric("failedRetrievals", 1);
+            retrievedChunksRaw = [];
+        } finally {
+            if (retrievalTimeoutHandle) clearTimeout(retrievalTimeoutHandle);
+        }
+
+        retrievalTime = Date.now() - qdrantStart;
+        qdrantDuration += retrievalTime;
+        stopQdrantTimer();
+
+        const rawChunkIds = (retrievedChunksRaw || []).map(c => String(c.id || c.metadata?.chunkId || c._id || "")).filter(Boolean);
+        tracker.recordMetric("retrievedChunkIds", rawChunkIds);
+        tracker.recordMetric("chunksRetrieved", (retrievedChunksRaw || []).length);
+
+        // ==========================================
+        // CONTEXT BUILDER (Context Cache + Reranking & Selection)
+        // ==========================================
+        const stopContextTimer = tracker.startTimer("contextBuilder");
+        const rerankStart = Date.now();
+
+        // Check Context Cache first
+        const cachedContext = await cacheService.getContextCache(rawChunkIds);
+        if (cachedContext && Array.isArray(cachedContext) && cachedContext.length > 0) {
+            combinedDocChunks = cachedContext;
+            console.log(`[Context Cache HIT] Reused merged context for ${rawChunkIds.length} candidate chunks`);
+        } else {
             const RankingEngine = require("../../knowledge/RankingEngine");
             const rankedChunks = await RankingEngine.rerankCandidates(rewrittenQuery, retrievedChunksRaw, activeUser);
             combinedDocChunks = selectDiverseChunks(rankedChunks, 8);
-            rerankTime = Date.now() - rerankStart;
+            if (rawChunkIds.length > 0 && combinedDocChunks.length > 0) {
+                cacheService.setContextCache(rawChunkIds, combinedDocChunks).catch(() => {});
+            }
+        }
+        rerankTime = Date.now() - rerankStart;
+        stopContextTimer();
 
-            retrievalCache.set(normalizedQuestion, {
-                rewrittenQuery,
-                retrievedChunksRaw,
-                combinedDocChunks
+        tracker.recordMetric("chunksMerged", combinedDocChunks.length);
+        tracker.recordTimer("retrieval", retrievalTime + rerankTime);
+
+        if (onStatus) {
+            onStatus(`Found ${combinedDocChunks.length} relevant document${combinedDocChunks.length === 1 ? "" : "s"}.`, "retrieval_completed", { 
+                progress: 50, 
+                count: combinedDocChunks.length 
             });
         }
+    } else {
+        tracker.recordMetric("chunksRetrieved", 0);
+        tracker.recordMetric("chunksMerged", 0);
     }
 
-    const hasStrongContext = combinedDocChunks.length > 0;
-    
-    // Set parameters for final formatting
-    retrievedChunks = combinedDocChunks;
-    adminDocsCount = combinedDocChunks.length;
+    // ==========================================
+    // STAGE 5: RETRIEVED CHUNK COUNT
+    // ==========================================
+    console.log(`[STAGE 5: Retrieved Chunk Count]`, {
+        rawCandidates: (retrievedChunksRaw || []).length,
+        selectedChunks: (combinedDocChunks || []).length,
+        chunkIds: (combinedDocChunks || []).map(c => c.id || c.metadata?.chunkId || "chunk")
+    });
 
-    if (hasStrongContext) {
-        maxOutputTokens = 800;
-        if (queryType === "DETAILED" || queryType === "FEE_STRUCTURE" || queryType === "RECOMMENDATION") {
-            maxOutputTokens = 2000;
+    const hasStrongContext = combinedDocChunks.length > 0;
+    retrievedChunks = combinedDocChunks;
+
+    // ==========================================
+    // STAGE 6, 7, 8, 9, 10: PROMPT & LLM GENERATION
+    // ==========================================
+    let ttftMsRecorded = 0;
+    const shouldGenerateLlmResponse = (
+        routeChosen === "GENERAL_KNOWLEDGE" || 
+        routeChosen === "CONVERSATIONAL" || 
+        (routeChosen === "MIXED") || 
+        (routeChosen === "UNIVERSITY_SPECIFIC" && hasStrongContext)
+    );
+
+    if (shouldGenerateLlmResponse) {
+        if (onStatus) {
+            onStatus("Building answer context...", "building_context", { progress: 65 });
         }
 
-        const contextStart = Date.now();
+        const stopPromptTimer = tracker.startTimer("promptBuilder");
         const tempMessages = promptService.buildPromptMessages({
             question: rewrittenQuery,
             intent: recPrimaryIntent || intent,
@@ -582,105 +615,120 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
             webResults: [],
             historyText,
             user: activeUser,
-            questionType: QUESTION_TYPES.UNIVERSITY_SPECIFIC,
+            questionType: activeQuestionType,
             isRepeat,
             activeTopic: resolvedActiveTopic,
             language,
-            studentProfile
+            studentProfile,
+            queryPlan: chatQueryPlan,
+            route: routeChosen
         });
-        const contextTime = Date.now() - contextStart;
+        stopPromptTimer();
+        const promptFullText = tempMessages.map(m => m.content).join("\n");
+        const promptTokensEstimate = Math.round(promptFullText.length / 4);
+        tracker.recordTokens({ promptText: promptFullText });
 
-        if (process.env.NODE_ENV === "development") {
-            console.log("\n[RAG TRACE]");
-            console.log(`query: ${rawQuestion}`);
-            console.log(`normalizedQuery: ${normalizedQuestion}`);
-            console.log(`retrievedCount: ${retrievedChunksRaw.length}`);
-            console.log(`topScores: ${retrievedChunksRaw.slice(0, 5).map(c => c.score).join(", ")}`);
-            console.log(`selectedChunks: ${JSON.stringify(combinedDocChunks.map(c => ({ filename: c.metadata?.filename, page: c.metadata?.pageNumber, score: c.score })))}`);
-            console.log(`filteredChunks: []`);
-            console.log(`filterReasons: []`);
-            console.log(`contextChunks: ${combinedDocChunks.length}`);
-            console.log(`retrievalMs: ${retrievalTime}`);
-            console.log(`contextBuildMs: ${contextTime}`);
-            console.log(`totalBeforeLLM: ${retrievalTime + rerankTime + contextTime}`);
-            console.log("");
+        // STAGE 6: Prompt Token Count
+        console.log(`[STAGE 6: Prompt Token Count]`, {
+            messagesCount: tempMessages.length,
+            characterCount: promptFullText.length,
+            estimatedTokens: promptTokensEstimate
+        });
+
+        if (onStatus) {
+            onStatus("Generating answer...", "generating_response", { progress: 80 });
         }
 
-        const topScore = combinedDocChunks.length > 0 ? combinedDocChunks[0].score : 0;
-        const totalRetrievalOverhead = retrievalTime + rerankTime + contextTime;
-        const categories = Array.from(new Set(combinedDocChunks.map(c => c.metadata?.category || c.metadata?.sourceType).filter(Boolean)));
-
-        // Debug Logs exactly matching required production keys
-        console.log("\n[RAG]");
-        console.log(`Query: ${rawQuestion}`);
-        console.log(`Normalized Query: ${normalizedQuestion}`);
-        console.log(`Retrieved Chunk Count: ${retrievedChunksRaw.length}`);
-        console.log(`Top Similarity: ${topScore}`);
-        console.log(`Categories Returned: ${categories.join(", ")}`);
-        console.log(`Sources Used: ${JSON.stringify(combinedDocChunks.map(c => c.metadata?.filename || c.metadata?.originalName))}`);
-        console.log(`Retrieval Time: ${retrievalTime} ms`);
-        console.log(`Rerank Time: ${rerankTime} ms`);
-        console.log(`Total Time: ${totalRetrievalOverhead} ms\n`);
-
-        if (tempMessages.length > 0 && tempMessages[0].role === "system") {
-            tempMessages[0].content += `\n\n## STRICT GROUNDING AND CONSTRAINTS FOR THIS QUERY\n1. Answer ONLY from retrieved evidence.\n2. If evidence is missing for a requested part of the question, state exactly that the information was not found in the university knowledge base. Do not fill missing evidence with general knowledge.`;
-        }
-
-        // Comment out old LLM call:
-        /*
-        if (onChunk) {
-            textResponse = "STREAMING_PLACEHOLDER";
-            activeQuestionType = QUESTION_TYPES.UNIVERSITY_SPECIFIC;
-            sourceLabel = SOURCE_LABELS.UNIVERSITY;
-            provider = process.env.LLM_PROVIDER || "groq";
-            finalMessages = tempMessages;
-        } else {
-            llmStart = Date.now();
-            textResponse = await llmService.generateCompletion(tempMessages, { maxOutputTokens });
-            llmDuration += Date.now() - llmStart;
-            activeQuestionType = QUESTION_TYPES.UNIVERSITY_SPECIFIC;
-            sourceLabel = SOURCE_LABELS.UNIVERSITY;
-            provider = process.env.LLM_PROVIDER || "groq";
-            finalMessages = tempMessages;
-        }
-        */
-
-        // llama.cpp local call integration:
-        const prompt = tempMessages && tempMessages.length > 1 ? tempMessages[1].content : (tempMessages && tempMessages[0] ? tempMessages[0].content : "");
+        const llmConfig = getLlmConfig();
+        const stopLlmTimer = tracker.startTimer("llm");
         llmStart = Date.now();
-        const completion = await llama.chat.completions.create({
-          model: "Qwen3-4B-Instruct-Q4_K_M",
-          messages: [
-            {
-              role: "system",
-              content: "You are EduMate AI, a helpful university assistant."
-            },
-            {
-              role: "user",
-              content: prompt
-            }
-          ],
-          temperature: 0.3,
-          max_tokens: 512,
+
+        // STAGE 7: llama.cpp Request Payload
+        console.log(`[STAGE 7: llama.cpp Request Payload]`, {
+            model: llmConfig.model,
+            baseUrl: llmConfig.baseUrl,
+            temperature: llmConfig.temperature,
+            topP: llmConfig.topP,
+            maxTokens: maxOutputTokens || llmConfig.maxTokens,
+            stream: Boolean(onChunk && llmConfig.stream)
         });
 
-        let reply = "";
-        if (completion && completion.choices && completion.choices[0] && completion.choices[0].message) {
-            reply = completion.choices[0].message.content;
-        } else {
-            reply = String(completion || "");
-        }
-        textResponse = reply;
-        llmDuration += Date.now() - llmStart;
-        activeQuestionType = QUESTION_TYPES.UNIVERSITY_SPECIFIC;
-        sourceLabel = SOURCE_LABELS.UNIVERSITY;
-        provider = "llama";
-        
-        if (onChunk) {
-            onChunk(reply);
+        try {
+            const completion = await llama.chat.completions.create({
+                model: llmConfig.model,
+                messages: tempMessages,
+                temperature: llmConfig.temperature,
+                top_p: llmConfig.topP,
+                max_tokens: maxOutputTokens || llmConfig.maxTokens,
+                stream: Boolean(onChunk && llmConfig.stream),
+                onChunk,
+                signal,
+                conversationId,
+                sessionId: conversationId,
+                onFirstToken: (ttft) => {
+                    ttftMsRecorded = ttft;
+                    // STAGE 9: First Token Received
+                    console.log(`[STAGE 9: First Token Received]`, {
+                        ttftMs: ttft,
+                        timestamp: new Date().toISOString()
+                    });
+                }
+            });
+
+            let reply = "";
+            if (completion && completion.choices && completion.choices[0] && completion.choices[0].message) {
+                reply = completion.choices[0].message.content;
+            } else {
+                reply = String(completion || "");
+            }
+            textResponse = reply;
+
+            // STAGE 8: llama.cpp Response Status
+            console.log(`[STAGE 8: llama.cpp Response Status]`, {
+                status: 200,
+                durationMs: Date.now() - llmStart,
+                provider: llmConfig.provider
+            });
+        } catch (llmErr) {
+            console.error("[STAGE 8: llama.cpp Response Status] Error:", llmErr.message || llmErr);
+            if (routeChosen === "CONVERSATIONAL") {
+                const greeting = deterministicGreeting(activeUser, language);
+                textResponse = greeting.answer;
+                if (onChunk) onChunk(textResponse);
+            } else if (routeChosen === "GENERAL_KNOWLEDGE") {
+                textResponse = `Here is information on your query: ${rawQuestion}. For comprehensive technical or academic details, feel free to explore specific curriculum resources.`;
+                if (onChunk) onChunk(textResponse);
+            } else {
+                textResponse = "I could not retrieve an answer from the local model at this moment. Please check with official university resources.";
+            }
         }
 
-        // Enrich with map service coordinates if location/navigation is requested
+        stopLlmTimer();
+        tracker.recordTokens({ completionText: textResponse });
+        llmDuration += Date.now() - llmStart;
+
+        // STAGE 10: Streaming Completion
+        const speedTps = llmDuration > 0 ? Number((Math.round(textResponse.length / 4) / (llmDuration / 1000)).toFixed(1)) : 0;
+        console.log(`[STAGE 10: Streaming Completion]`, {
+            totalChars: textResponse.length,
+            durationMs: llmDuration,
+            ttftMs: ttftMsRecorded || llmDuration,
+            speedTokensPerSec: speedTps
+        });
+
+        provider = llmConfig.provider;
+
+        if (routeChosen === "MIXED") {
+            sourceLabel = combinedDocChunks.length > 0 ? "📚 University Knowledge + General AI" : "🤖 EduMate AI (General Knowledge)";
+        } else if (routeChosen === "GENERAL_KNOWLEDGE") {
+            sourceLabel = "🤖 EduMate AI (General Knowledge)";
+        } else if (routeChosen === "CONVERSATIONAL") {
+            sourceLabel = "💬 EduMate Assistant";
+        } else {
+            sourceLabel = SOURCE_LABELS.UNIVERSITY;
+        }
+
+        // Campus Navigation Map Enrichment if applicable
         if (recPrimaryIntent === "location" || recPrimaryIntent === "campus_navigation" || intent === "location" || intent === "campus_navigation") {
             try {
                 const mapResult = await mapService.resolveLocationRequest({
@@ -690,7 +738,6 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
                     conversationContext: updatedContext
                 });
                 if (mapResult && mapResult.mapData) {
-                    // Inject coordinates so the frontend can render map route components
                     formatted = formatted || {};
                     formatted.mapData = mapResult.mapData;
                 }
@@ -699,259 +746,33 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
             }
         }
     } else {
-        // Fallback Logic when Universal Retriever yields nothing
-        console.log("[RAG] Zero chunks returned. Executing fallback routing...");
-        
-        let fallbackDone = false;
-
-        // Fallback 0: Genuinely unresolved ambiguity clarification
-        if (clarificationPrompt) {
-            console.log(`[FALLBACK CLARIFICATION] Returning unresolved ambiguity clarification: "${clarificationPrompt}"`);
-            textResponse = clarificationPrompt;
-            fallbackDone = true;
+        // Zero chunks found for UNIVERSITY_SPECIFIC: Strict ungrounded fallback
+        console.log("[CHAT PIPELINE] No relevant chunks found in knowledge base for UNIVERSITY_SPECIFIC query. Responding with strict ungrounded fallback.");
+        textResponse = "I couldn't find matching information in the university knowledge base for that request. Please verify with the official university department or admissions office.";
+        if (onChunk) {
+            onChunk(textResponse);
         }
-
-        // Fallback 1: Course Catalogue Service
-        const courseCatalogueService = require("../../services/courseCatalogueService");
-        let selectedLevel = courseCatalogueService.checkLevelSelection(normalizedQuestion, rawHistory);
-        let isCatalogQuery = false;
-        
-        if (selectedLevel) {
-            isCatalogQuery = true;
-        } else if (courseCatalogueService.isCourseCatalogueQuery(normalizedQuestion)) {
-            isCatalogQuery = true;
-            selectedLevel = courseCatalogueService.extractLevelFromQuestion(normalizedQuestion);
-        }
-
-        if (isCatalogQuery) {
-            console.log(`[FALLBACK COURSE CATALOGUE] Detected catalogue query fallback. Level: ${selectedLevel || "None"}`);
-            const catResponse = await courseCatalogueService.getCatalogueResponse(selectedLevel, language);
-            textResponse = catResponse.answer;
-            retrievedChunks = [];
-            fallbackDone = true;
-        }
-
-        // Fallback 2: Map Service Directions
-        if (!fallbackDone) {
-            const isDirectionRequest = 
-                normalizedQuestion.toLowerCase().trim() === "yes, show directions" ||
-                normalizedQuestion.toLowerCase().trim() === "yes show directions" ||
-                /^(?:how do i reach there|show directions|get directions|how to get there|how to reach there)/i.test(normalizedQuestion);
-
-            if (isDirectionRequest || decision.service === "map") {
-                console.log(`[FALLBACK MAP SERVICE] Executing map service fallback...`);
-                const mapResult = await mapService.resolveLocationRequest({
-                    question: rewrittenQuery,
-                    user: activeUser,
-                    userCoordinates: (latitude && longitude) ? { lat: Number(latitude), lng: Number(longitude) } : null,
-                    conversationContext: updatedContext
-                });
-                textResponse = mapResult.answer;
-                fallbackDone = true;
-            }
-        }
-
-        // Fallback 3: Document Delivery
-        if (!fallbackDone) {
-            const documentDeliveryService = require("../../services/documentDeliveryService");
-            const docDeliveryResult = await documentDeliveryService.handleDocumentDelivery({
-                user: activeUser,
-                question: normalizedQuestion,
-                conversationId,
-                parentId,
-                historyText
-            });
-            if (docDeliveryResult) {
-                console.log(`[FALLBACK DOCUMENT DELIVERY] Executing document delivery fallback...`);
-                textResponse = docDeliveryResult.answer;
-                fallbackDone = true;
-            }
-        }
-
-        // Fallback 4: Web Search / Web Scraper
-        if (!fallbackDone && process.env.WEB_CRAWLING_ENABLED !== "false") {
-            console.log("[FALLBACK WEB CRAWLER] Executing web search crawler fallback...");
-            const crawledResults = await webCrawlerService.searchAndScrape(rewrittenQuery);
-            internetCount = crawledResults.length;
-            webResults = crawledResults.map(r => ({
-                title: r.title,
-                url: r.url,
-                snippet: r.extractedContent || r.relevantSnippets || ""
-            }));
-
-            const tempMessages = promptService.buildPromptMessages({
-                question: rewrittenQuery,
-                intent,
-                retrievedChunks: [],
-                universitySiteResults: [],
-                webResults,
-                historyText,
-                user: activeUser,
-                questionType: QUESTION_TYPES.GENERAL_KNOWLEDGE,
-                isRepeat,
-                activeTopic: resolvedActiveTopic,
-                language,
-                studentProfile
-            });
-
-            // Gemini/Groq call commented out:
-            /*
-            if (onChunk) {
-                textResponse = "STREAMING_PLACEHOLDER";
-                activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
-                sourceLabel = SOURCE_LABELS.WEB;
-                provider = process.env.LLM_PROVIDER || "groq";
-                finalMessages = tempMessages;
-            } else {
-                llmStart = Date.now();
-                textResponse = await llmService.generateCompletion(tempMessages, { maxOutputTokens: 800 });
-                llmDuration += Date.now() - llmStart;
-                activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
-                sourceLabel = SOURCE_LABELS.WEB;
-                provider = process.env.LLM_PROVIDER || "groq";
-                finalMessages = tempMessages;
-            }
-            */
-
-            // llama.cpp local call integration:
-            const prompt = tempMessages && tempMessages.length > 1 ? tempMessages[1].content : (tempMessages && tempMessages[0] ? tempMessages[0].content : "");
-            llmStart = Date.now();
-            const completion = await llama.chat.completions.create({
-              model: "Qwen3-4B-Instruct-Q4_K_M",
-              messages: [
-                {
-                  role: "system",
-                  content: "You are EduMate AI, a helpful university assistant."
-                },
-                {
-                  role: "user",
-                  content: prompt
-                }
-              ],
-              temperature: 0.3,
-              max_tokens: 512,
-            });
-
-            let reply = "";
-            if (completion && completion.choices && completion.choices[0] && completion.choices[0].message) {
-                reply = completion.choices[0].message.content;
-            } else {
-                reply = String(completion || "");
-            }
-            textResponse = reply;
-            llmDuration += Date.now() - llmStart;
-            activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
-            sourceLabel = SOURCE_LABELS.WEB;
-            provider = "llama";
-
-            if (onChunk) {
-                onChunk(reply);
-            }
-            fallbackDone = true;
-        }
-
-        // Fallback 5: General AI completion (no search context)
-        if (!fallbackDone) {
-            console.log("[FALLBACK GENERAL AI] Executing general AI fallback...");
-            const tempMessages = promptService.buildPromptMessages({
-                question: rewrittenQuery,
-                intent,
-                retrievedChunks: [],
-                universitySiteResults: [],
-                webResults: [],
-                historyText,
-                user: activeUser,
-                questionType: QUESTION_TYPES.GENERAL_KNOWLEDGE,
-                isRepeat,
-                activeTopic: resolvedActiveTopic,
-                language,
-                studentProfile
-            });
-
-            // Gemini/Groq call commented out:
-            /*
-            if (onChunk) {
-                textResponse = "STREAMING_PLACEHOLDER";
-                activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
-                sourceLabel = SOURCE_LABELS.WEB;
-                provider = process.env.LLM_PROVIDER || "groq";
-                finalMessages = tempMessages;
-            } else {
-                llmStart = Date.now();
-                textResponse = await llmService.generateCompletion(tempMessages, { maxOutputTokens: 800 });
-                llmDuration += Date.now() - llmStart;
-                activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
-                sourceLabel = SOURCE_LABELS.WEB;
-                provider = process.env.LLM_PROVIDER || "groq";
-                finalMessages = tempMessages;
-            }
-            */
-
-            // llama.cpp local call integration:
-            const prompt = tempMessages && tempMessages.length > 1 ? tempMessages[1].content : (tempMessages && tempMessages[0] ? tempMessages[0].content : "");
-            llmStart = Date.now();
-            const completion = await llama.chat.completions.create({
-              model: "Qwen3-4B-Instruct-Q4_K_M",
-              messages: [
-                {
-                  role: "system",
-                  content: "You are EduMate AI, a helpful university assistant."
-                },
-                {
-                  role: "user",
-                  content: prompt
-                }
-              ],
-              temperature: 0.3,
-              max_tokens: 512,
-            });
-
-            let reply = "";
-            if (completion && completion.choices && completion.choices[0] && completion.choices[0].message) {
-                reply = completion.choices[0].message.content;
-            } else {
-                reply = String(completion || "");
-            }
-            textResponse = reply;
-            llmDuration += Date.now() - llmStart;
-            activeQuestionType = QUESTION_TYPES.GENERAL_KNOWLEDGE;
-            sourceLabel = SOURCE_LABELS.WEB;
-            provider = "llama";
-
-            if (onChunk) {
-                onChunk(reply);
-            }
-            fallbackDone = true;
-        }
-
-        // Debug Logs exactly matching required production keys
-        console.log("\n[RAG]");
-        console.log(`Query: ${rawQuestion}`);
-        console.log(`Normalized Query: ${normalizedQuestion}`);
-        console.log(`Retrieved Chunk Count: 0`);
-        console.log(`Top Similarity: 0`);
-        console.log(`Categories Returned: none`);
-        console.log(`Sources Used: []`);
-        console.log(`Retrieval Time: 0 ms`);
-        console.log(`Rerank Time: 0 ms`);
-        console.log(`Total Time: ${Date.now() - startedAt} ms\n`);
+        activeQuestionType = QUESTION_TYPES.UNIVERSITY_SPECIFIC;
+        sourceLabel = SOURCE_LABELS.UNIVERSITY;
+        provider = "system";
     }
 
     // Format citations
-        const sources = citationService.formatCitations(retrievedChunks, universitySiteResults, webResults);
+    const sources = citationService.formatCitations(retrievedChunks, universitySiteResults, webResults);
 
-        // Enrich citations with signed download URLs
-        const docIds = sources
-            .filter(src => src.type === "document" && src.metadata?.documentId)
-            .map(src => src.metadata.documentId);
+    // Enrich citations with signed download URLs
+    const docIds = sources
+        .filter(src => src.type === "document" && src.metadata?.documentId)
+        .map(src => src.metadata.documentId);
 
-        let signedUrlsMap = {};
-        if (docIds.length > 0) {
-            try {
-                const Document = require("../../models/Document");
-                const supabase = require("../../config/supabase");
-                const BUCKET = process.env.SUPABASE_STORAGE_BUCKET || process.env.SUPABASE_BUCKET;
+    let signedUrlsMap = {};
+    if (docIds.length > 0) {
+        try {
+            const Document = require("../../models/Document");
+            const supabase = require("../../config/supabase");
+            const BUCKET = process.env.SUPABASE_STORAGE_BUCKET || process.env.SUPABASE_BUCKET;
 
+            if (BUCKET && supabase?.storage) {
                 const docs = await Document.find({ _id: { $in: docIds } }).lean();
                 const paths = docs.map(d => d.storagePath).filter(Boolean);
                 
@@ -975,148 +796,134 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
                         });
                     }
                 }
-            } catch (enrichError) {
-                console.error("Failed to enrich citations with signed URLs:", enrichError);
+            }
+        } catch (enrichError) {
+            console.error("Failed to enrich citations with signed URLs:", enrichError.message);
+        }
+    }
+
+    // Attach download/view URLs to sources
+    sources.forEach(src => {
+        if (src.type === "document" && src.metadata?.documentId) {
+            const url = signedUrlsMap[src.metadata.documentId.toString()];
+            if (url) {
+                src.downloadUrl = url;
             }
         }
+    });
 
-        // Attach download/view URLs to sources
-        sources.forEach(src => {
-            if (src.type === "document" && src.metadata?.documentId) {
-                const url = signedUrlsMap[src.metadata.documentId.toString()];
-                if (url) {
-                    src.downloadUrl = url;
-                }
-            }
-        });
-
-        // Call Unified LLM Service if streaming is active (commented out for llama.cpp local server)
-        /*
-        if (onChunk && finalMessages.length > 0) {
-            textResponse = "";
-            llmStart = Date.now();
-            textResponse = await llmService.generateStream(finalMessages, (chunk) => {
-                onChunk(chunk);
-            }, { signal, maxOutputTokens });
-            llmDuration += Date.now() - llmStart;
-            provider = process.env.LLM_PROVIDER || "groq";
-        }
-        */
-
-        if (!textResponse) {
-            formatted = responseFormattingService.formatUnavailable({
-                reason: "The requested details are not available in university documents, official website pages, or trusted web search."
-            });
+    if (!textResponse) {
+        if (routeChosen === "CONVERSATIONAL") {
+            const greeting = deterministicGreeting(activeUser, language);
+            textResponse = greeting.answer;
+        } else if (routeChosen === "GENERAL_KNOWLEDGE") {
+            textResponse = `EduMate AI: Here is what you asked regarding "${normalizedQuestion}". Please ask follow-up questions for more specific detail.`;
         } else {
-            // Validate response
-            const validation = responseValidator.validateResponse({
-                intent,
-                retrievedContext: { chunks: retrievedChunks, sources },
-                generatedAnswer: textResponse,
-                providerSuccess: provider === "llama",
-                questionType: activeQuestionType
-            });
-
-            formatted = validation.valid
-                ? responseFormattingService.formatAnswer({
-                    answer: textResponse,
-                    confidence: validation.confidence,
-                    sources,
-                    sourceLabel
-                })
-                : responseFormattingService.formatUnavailable({ reason: validation.reason });
+            textResponse = "I couldn't find matching information in the university knowledge base for that request. Please verify with the official admissions desk.";
         }
+    }
+
+    // ==========================================
+    // STAGE 11: RESPONSE VALIDATOR OUTPUT
+    // ==========================================
+    const validationResult = responseValidator.validateResponse({
+        question: normalizedQuestion,
+        intent: recPrimaryIntent || intent,
+        retrievedContext: { chunks: retrievedChunks },
+        generatedAnswer: textResponse,
+        providerSuccess: Boolean(textResponse),
+        questionType: activeQuestionType,
+        sources
+    });
+
+    console.log(`[STAGE 11: Response Validator Output]`, {
+        valid: validationResult.valid,
+        confidence: validationResult.confidence,
+        score: validationResult.score,
+        reason: validationResult.reason
+    });
+
+    formatted = responseFormattingService.formatAnswer({
+        answer: validationResult.groundedAnswer || textResponse,
+        confidence: hasStrongContext ? (validationResult.confidence || "high") : (routeChosen === "GENERAL_KNOWLEDGE" || routeChosen === "CONVERSATIONAL" ? "high" : "low"),
+        sources,
+        sourceLabel,
+        question: normalizedQuestion,
+        intent: recPrimaryIntent || intent,
+        queryPlan: chatQueryPlan
+    });
 
     // Save to Cache if appropriate
-    const shouldBypassCache = (decision.service === "map" || intent === "travel_route" || intent === "nearby");
-    if (!shouldBypassCache && formatted && formatted.answer) {
-        const cacheCategories = [];
-        if (retrievedChunks && retrievedChunks.length > 0) {
-            retrievedChunks.forEach(c => {
-                if (c.metadata?.category && !cacheCategories.includes(c.metadata.category)) {
-                    cacheCategories.push(c.metadata.category);
-                }
-            });
-        }
-        if (intent && typeof intent === "string") {
-            const cleanIntent = intent.trim().toLowerCase();
-            if (cleanIntent && cleanIntent !== "general_chat" && cleanIntent !== "unknown") {
-                if (!cacheCategories.includes(cleanIntent)) {
-                    cacheCategories.push(cleanIntent);
-                }
+    if (hasStrongContext && formatted && formatted.answer) {
+        try {
+            const cacheCategories = [];
+            if (retrievedChunks && retrievedChunks.length > 0) {
+                retrievedChunks.forEach(c => {
+                    if (c.metadata?.category && !cacheCategories.includes(c.metadata.category)) {
+                        cacheCategories.push(c.metadata.category);
+                    }
+                });
             }
+            const isDynamic = false;
+            const cacheType = resolvedType || detectedType || "all";
+            const cacheDept = resolvedDept || detectedDept || "all";
+            const resolvedQueryMode = queryMode || "targeted";
+            await cacheService.set(normalizedQuestion, formatted, cacheCategories, isDynamic, cacheType, cacheDept, resolvedQueryMode);
+        } catch (cacheErr) {
+            console.warn("[Cache Set Warning]:", cacheErr.message);
         }
-        const isDynamic = (activeQuestionType === QUESTION_TYPES.GENERAL_KNOWLEDGE || String(normalizedQuestion).toLowerCase().includes("weather") || String(normalizedQuestion).toLowerCase().includes("today") || String(normalizedQuestion).toLowerCase().includes("current"));
-        const cacheType = resolvedType || detectedType || "all";
-        const cacheDept = resolvedDept || detectedDept || "all";
-        const resolvedQueryMode = (retrievalTelemetry && retrievalTelemetry.queryMode) || queryMode || "targeted";
-        await cacheService.set(normalizedQuestion, formatted, cacheCategories, isDynamic, cacheType, cacheDept, resolvedQueryMode);
     }
 
     const responseTimeMs = Date.now() - startedAt;
-    console.log(`[Observability] Cache MISS | Qdrant Search Duration: ${qdrantDuration}ms | Chunks Retrieved: ${adminDocsCount} | LLM Generation Duration: ${llmDuration}ms | Total Response Duration: ${responseTimeMs}ms`);
-    if (retrievalTelemetry) {
-        console.log(`[Retrieval] Mode: ${retrievalTelemetry.queryMode} | Initial K: ${retrievalTelemetry.initialK} | Final K: ${retrievalTelemetry.finalK} | Candidates Before Dedup: ${retrievalTelemetry.candidatesBeforeDedup} | Candidates After Dedup: ${retrievalTelemetry.candidatesAfterDedup} | Final Chunks: ${retrievalTelemetry.finalCandidatesCount} | Tokens: ${retrievalTelemetry.finalTokens}`);
+
+    // Save conversation turn to database
+    let chat = null;
+    const stopSaveMongoTimer = tracker.startTimer("mongo");
+    try {
+        chat = await conversationService.saveMessageTurn({
+            user: activeUser,
+            conversationId,
+            question: normalizedQuestion,
+            response: formatted,
+            intent: Array.isArray(intent) ? intent.join(",") : String(intent || "unknown"),
+            confidence: hasStrongContext ? 0.95 : 0.4,
+            provider,
+            responseTimeMs,
+            userMessageId,
+            assistantMessageId,
+            parentId,
+            topic: resolvedActiveTopic,
+            entities: { ...entities, conversationContext: updatedContext },
+            retrievalContext: {
+                rewrittenQuery,
+                adminDocsFound: retrievedChunks ? retrievedChunks.length : 0
+            }
+        });
+    } catch (saveErr) {
+        console.warn("[Conversation Save Warning]:", saveErr.message);
     }
+    stopSaveMongoTimer();
 
-    // DEVELOPMENT DEBUG LOGGING
-    if (process.env.NODE_ENV === "development") {
-        const totalResults = (retrievedChunks ? retrievedChunks.length : 0) + (webResults ? webResults.length : 0);
-        const promptText = finalMessages.map(m => m.content).join("\n");
-        const contextLength = promptText ? promptText.length : 0;
-        const estimatedInputTokens = Math.ceil(contextLength / 4);
-        
-        console.log("\n[CHAT]");
-        console.log(normalizedQuestion);
-        console.log("\n[CONTEXT]");
-        console.log(resolvedActiveTopic || "None");
-        console.log("\n[QUERY]");
-        console.log(rewrittenQuery);
-        console.log("\n[RETRIEVAL]");
-        console.log(`Admin Documents: ${adminDocsCount} results`);
-        console.log(`Admin URLs: ${adminUrlsCount} results`);
-        console.log(`Internet: ${internetCount} results`);
-        console.log("\n[RERANK]");
-        console.log(`Selected Results: ${totalResults}`);
-        console.log("\n[LLM]");
-        console.log(`Context Length: ${contextLength} chars (~${estimatedInputTokens} input tokens)\n`);
+    // Finish tracking and log debug summary if enabled
+    tracker.finish();
+
+    // Generate Follow-up Suggestions
+    let suggestions = [];
+    try {
+        suggestions = await suggestionsService.generateSuggestions({
+            question: normalizedQuestion,
+            answer: formatted.answer
+        });
+    } catch (suggErr) {
+        suggestions = [];
     }
-
-    // 6. Save conversation turn to database
-    const chat = await conversationService.saveMessageTurn({
-        user: activeUser,
-        conversationId,
-        question: normalizedQuestion,
-        response: formatted,
-        intent: Array.isArray(intent) ? intent.join(",") : String(intent || "unknown"),
-        confidence: intentResult.confidence,
-        provider,
-        responseTimeMs,
-        userMessageId,
-        assistantMessageId,
-        parentId,
-        topic: resolvedActiveTopic,
-        entities: { ...entities, conversationContext: updatedContext },
-        retrievalContext: {
-            rewrittenQuery,
-            adminDocsFound: adminDocsCount,
-            adminUrlsFound: adminUrlsCount,
-            internetResultsFound: internetCount
-        }
-    });
-
-    // 7. Generate Follow-up Suggestions
-    const suggestions = await suggestionsService.generateSuggestions({
-        question: normalizedQuestion,
-        answer: formatted.answer
-    });
 
     const finalResult = {
         conversationId: chat?._id || conversationId || null,
         mode: activeUser._id ? "authenticated" : "guest",
         message: formatted.answer,
         intent,
-        intentConfidence: intentResult.confidence,
+        intentConfidence: hasStrongContext ? 0.95 : 0.4,
         confidence: formatted.confidence,
         sources: formatted.sources,
         sourceLabel: formatted.sourceLabel || sourceLabel,
@@ -1127,13 +934,23 @@ const askQuestion = async ({ user, question, conversationId, onChunk, signal, la
         requiresLocationPermission: formatted.requiresLocationPermission || false
     };
 
+    // ==========================================
+    // STAGE 12: FINAL RESPONSE SENT TO FRONTEND
+    // ==========================================
+    console.log(`[STAGE 12: Final Response Sent to Frontend]`, {
+        messageLength: finalResult.message.length,
+        confidence: finalResult.confidence,
+        sourceLabel: finalResult.sourceLabel,
+        sourcesCount: finalResult.sources.length,
+        responseTimeMs: finalResult.responseTimeMs
+    });
+
     // Memory Safety: release temporary objects
     retrievedChunks = null;
     universitySiteResults = null;
     webResults = null;
     combinedDocChunks = null;
     retrievedChunksRaw = null;
-    cachedResult = null;
 
     return finalResult;
 };
@@ -1356,12 +1173,36 @@ const getSuggestedQuestions = async ({ user, conversationId }) => {
     });
 };
 
+const searchChats = async ({ user, query }) => {
+    if (!user?._id) {
+        throw new Error("User authentication required.");
+    }
+    const q = String(query || "").trim();
+    if (!q) {
+        return listChats({ user });
+    }
+
+    const regex = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+    return Chat.find({
+        user: user._id,
+        status: "active",
+        $or: [
+            { title: regex },
+            { summary: regex },
+            { "messages.content": regex }
+        ]
+    })
+    .select("title summary status pinned createdAt updatedAt")
+    .sort({ pinned: -1, updatedAt: -1 });
+};
+
 module.exports = {
     askQuestion,
     listChats,
     getChatDetails,
     renameChat,
     deleteChat,
+    searchChats,
     regenerateResponse,
     getSuggestedQuestions
 };

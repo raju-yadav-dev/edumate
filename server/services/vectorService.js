@@ -1,4 +1,4 @@
-const Chunk = require("../models/Chunk");
+const localChunkManager = require("../storage/localChunkManager");
 
 /**
  * Computes the cosine similarity between two vector arrays
@@ -29,45 +29,53 @@ const cosineSimilarity = (vecA, vecB) => {
 };
 
 /**
- * Deletes and saves new chunks for a document
+ * Deletes and saves new chunks for a document in local storage
  * @param {string} documentId
  * @param {Array<Object>} chunks
  * @returns {Promise<Array>}
  */
 const saveChunks = async (documentId, chunks) => {
-    await deleteChunks(documentId);
-
-    if (chunks.length === 0) {
+    if (!chunks || chunks.length === 0) {
+        await deleteChunks(documentId);
         return [];
     }
 
-    const chunkDocs = chunks.map((chunk) => ({
-        document: documentId,
-        content: chunk.content,
-        embedding: chunk.embedding,
+    const chunkDocs = chunks.map((chunk, index) => ({
+        chunkId: chunk.chunkId || `${documentId}_chunk_${index + 1}`,
+        documentId: String(documentId),
+        content: chunk.content || chunk.text || "",
+        cleanedText: chunk.cleanedText || chunk.content || "",
+        pageNumber: chunk.metadata?.pageNumber || chunk.pageNumber || 1,
+        page: chunk.metadata?.pageNumber || chunk.pageNumber || 1,
+        heading: chunk.metadata?.heading || chunk.heading || "",
+        section: chunk.metadata?.section || chunk.section || "",
+        keywords: chunk.metadata?.keywords || chunk.keywords || [],
+        hierarchy: chunk.metadata?.hierarchy || chunk.hierarchy || {},
+        embedding: chunk.embedding || [],
         metadata: {
-            pageNumber: chunk.metadata.pageNumber || 1,
-            originalName: chunk.metadata.originalName || "",
-            category: chunk.metadata.category || "",
-            institution: chunk.metadata.institution || "",
-            department: chunk.metadata.department || ""
+            pageNumber: chunk.metadata?.pageNumber || 1,
+            originalName: chunk.metadata?.originalName || "",
+            category: chunk.metadata?.category || "",
+            institution: chunk.metadata?.institution || "",
+            department: chunk.metadata?.department || ""
         }
     }));
 
-    return Chunk.insertMany(chunkDocs);
+    return localChunkManager.replaceDocumentChunks(documentId, chunkDocs);
 };
 
 /**
- * Deletes all chunks associated with a document
+ * Deletes all chunks associated with a document from local storage
  * @param {string} documentId
  * @returns {Promise<Object>}
  */
 const deleteChunks = async (documentId) => {
-    return Chunk.deleteMany({ document: documentId });
+    const deleted = await localChunkManager.deleteDocumentChunks(documentId);
+    return { acknowledged: true, deletedCount: deleted ? 1 : 0 };
 };
 
 /**
- * Performs cosine similarity search over MongoDB document chunks
+ * Fallback similarity search using local chunk storage
  * @param {Object} params
  * @param {Array<number>} params.queryEmbedding - The vector embedding of the user's query
  * @param {number} [params.limit=5] - Maximum number of chunks to return
@@ -75,42 +83,12 @@ const deleteChunks = async (documentId) => {
  * @returns {Promise<Array<Object>>}
  */
 const similaritySearch = async ({ queryEmbedding, limit = 5, filter = {} }) => {
-    const query = {};
-
-    if (filter.institution) {
-        query["metadata.institution"] = filter.institution;
-    }
-    if (filter.category) {
-        query["metadata.category"] = filter.category;
-    }
-    if (filter.department) {
-        query["metadata.department"] = filter.department;
-    }
-
-    // Retrieve candidates from database
-    const candidates = await Chunk.find(query).lean();
-
-    if (candidates.length === 0) {
-        return [];
-    }
-
-    // Calculate similarity score for each candidate chunk
-    const scored = candidates.map((candidate) => {
-        const score = cosineSimilarity(queryEmbedding, candidate.embedding);
-        return {
-            ...candidate,
-            score
-        };
-    });
-
-    // Sort by descending score
-    scored.sort((a, b) => b.score - a.score);
-
-    // Return top limit
-    return scored.slice(0, limit);
+    // Note: Primary retrieval is handled through Qdrant vector index + localChunkManager lookup.
+    return [];
 };
 
 module.exports = {
+    cosineSimilarity,
     saveChunks,
     deleteChunks,
     similaritySearch

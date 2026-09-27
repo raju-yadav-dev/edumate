@@ -1,4 +1,7 @@
 const AI_CONSTANTS = require("../constants/aiConstants");
+const DocumentTextCleaner = require("./documentTextCleaner");
+const StructureAwareChunker = require("./structureAwareChunker");
+const { validateChunks } = require("./chunkValidator");
 
 class RecursiveCharacterTextSplitter {
     constructor({
@@ -109,11 +112,11 @@ class RecursiveCharacterTextSplitter {
  * @returns {Array<string>}
  */
 const chunkDocument = (text) => {
-    const splitter = new RecursiveCharacterTextSplitter();
-    return splitter.splitText(text);
+    const splitter = new StructureAwareChunker();
+    return validateChunks(splitter.splitText(DocumentTextCleaner.cleanText(text))).validChunks;
 };
 
 module.exports = {
-    RecursiveCharacterTextSplitter,
+    RecursiveCharacterTextSplitter: StructureAwareChunker,
     chunkDocument
 };

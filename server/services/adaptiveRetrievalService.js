@@ -1,5 +1,5 @@
 const SearchManager = require("../knowledge/SearchManager");
-const Chunk = require("../models/Chunk");
+const localChunkManager = require("../storage/localChunkManager");
 const Document = require("../models/Document");
 const courseRegistry = require("../constants/courseRegistry.json");
 const { countTokens } = require("../ai/utils/tokenizer");
@@ -100,19 +100,17 @@ const retrieveAdaptiveChunks = async (query, user, queryType, profile = null) =>
                     const isFeeOrAdmissionDoc = doc.category === "fees" || doc.category === "admissions" || doc.originalName.toLowerCase().includes("fee") || doc.originalName.toLowerCase().includes("eligib") || doc.originalName.toLowerCase().includes("course");
                     if (isFeeOrAdmissionDoc) {
                         console.log(`[ADAPTIVE] Fee structure detected. Fetching all chunks of "${doc.originalName}" to ensure table continuity.`);
-                        const docChunks = await Chunk.find({ document: documentId })
-                            .sort({ "metadata.pageNumber": 1, "metadata.chunkIndex": 1 })
-                            .lean();
+                        const docChunks = await localChunkManager.getDocumentChunks(documentId);
                         
                         chunks = docChunks.map(c => ({
-                            id: c._id.toString(),
-                            content: c.content,
+                            id: c.chunkId || c.id || String(c._id),
+                            content: c.content || c.cleanedText || "",
                             metadata: {
                                 documentId: documentId,
                                 originalName: doc.originalName,
                                 filename: doc.originalName,
-                                pageNumber: c.metadata?.pageNumber || 1,
-                                page: c.metadata?.pageNumber || 1,
+                                pageNumber: c.metadata?.pageNumber || c.pageNumber || 1,
+                                page: c.metadata?.pageNumber || c.pageNumber || 1,
                                 category: c.metadata?.category || doc.category || "",
                                 department: c.metadata?.department || doc.department || "",
                                 institution: c.metadata?.institution || doc.institution || "",

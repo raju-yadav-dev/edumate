@@ -281,7 +281,7 @@ export default function SettingsPage({
                         </div>
                         <div className="settings-card-body">
                             <div className="m-row" style={{ padding: "8px 0" }}><span>MongoDB Atlas Cluster:</span> <strong style={{ color: "#10b981" }}>Connected (Healthy)</strong></div>
-                            <div className="m-row" style={{ padding: "8px 0" }}><span>Supabase Storage Bucket:</span> <strong style={{ color: "#06b6d4" }}>Connected (Quota: 25 GB)</strong></div>
+                            <div className="m-row" style={{ padding: "8px 0" }}><span>Local Storage Root:</span> <strong style={{ color: "#06b6d4" }}>storage/ (Active)</strong></div>
                             <div className="m-row" style={{ padding: "8px 0" }}><span>Qdrant Vector Store:</span> <strong style={{ color: "#a855f7" }}>{storageStats?.qdrant?.vectors !== undefined && storageStats?.qdrant?.vectors !== null ? storageStats.qdrant.vectors.toLocaleString() : "-"} Vectors Indexed</strong></div>
                         </div>
                         <div className="settings-card-foot">

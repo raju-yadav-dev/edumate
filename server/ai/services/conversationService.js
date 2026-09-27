@@ -64,6 +64,11 @@ const getRecentMemory = async ({ userId, conversationId, maxTokens = 500, parent
         currentId = msg.parentId;
     }
 
+    // If branch traversal returned empty but messages exist, fallback to chat.messages
+    if (branchMessages.length === 0 && chat.messages.length > 0) {
+        branchMessages.push(...chat.messages);
+    }
+
     // Map DB messages to simple role/content pairs
     const rawHistory = branchMessages.map((m) => ({
         role: m.role === "assistant" ? "assistant" : "user",
@@ -95,19 +100,40 @@ const getRecentMemory = async ({ userId, conversationId, maxTokens = 500, parent
         };
     }
 
-    // Trim history to stay within memory limits
-    const recentOnly = rawHistory.slice(-4);
-    const trimmed = tokenizer.trimToContextLimit(recentOnly, Math.min(maxTokens, Number(process.env.RAG_HISTORY_MAX_TOKENS) || 500));
+    // Trim history to stay within memory limits: Keep last 4–6 messages + auto-summarize older turns
+    const recentWindowSize = 6;
+    const recentOnly = rawHistory.slice(-recentWindowSize);
+    let historyText = "";
 
-    const historyText = trimmed
-        .map((msg) => `${msg.role}: ${msg.content}`)
-        .join("\n");
+    if (rawHistory.length > recentWindowSize) {
+        let storedSummary = chat.summary || "";
+        if (!storedSummary) {
+            const olderMessages = rawHistory.slice(0, -recentWindowSize);
+            storedSummary = olderMessages
+                .map(m => `${m.role === "assistant" ? "AI" : "User"}: ${String(m.content || "").slice(0, 60)}`)
+                .join(" | ")
+                .slice(0, 200);
+        }
+
+        const recentDialogue = recentOnly
+            .map((msg) => `${msg.role === "assistant" ? "Assistant" : "User"}: ${msg.content}`)
+            .join("\n");
+
+        historyText = `[Conversation Summary: ${storedSummary}]\n${recentDialogue}`;
+    } else {
+        historyText = recentOnly
+            .map((msg) => `${msg.role === "assistant" ? "Assistant" : "User"}: ${msg.content}`)
+            .join("\n");
+    }
+
+    const trimmed = tokenizer.trimToContextLimit(recentOnly, Math.min(maxTokens, Number(process.env.RAG_HISTORY_MAX_TOKENS) || 500));
 
     return {
         historyText,
         rawHistory: trimmed,
         activeTopic,
-        conversationContext
+        conversationContext,
+        summary: chat.summary || ""
     };
 };
 
@@ -189,6 +215,7 @@ const saveMessageTurn = async ({ user, conversationId, question, response, inten
         });
 
         const finalIntent = Array.isArray(intent) ? intent.join(",") : String(intent || "unknown");
+        const sources = (response && Array.isArray(response.sources)) ? response.sources : [];
 
         chat.messages.push({
             id: uMsgId,
@@ -208,15 +235,50 @@ const saveMessageTurn = async ({ user, conversationId, question, response, inten
             role: "assistant",
             content: (response && typeof response.answer === "string") ? response.answer : String(response || ""),
             intent: finalIntent,
-            confidence: response.confidence === "high" ? 0.9 : response.confidence === "medium" ? 0.65 : 0.25,
-            sources: response.sources || [],
+            confidence: response?.confidence === "high" ? 0.9 : response?.confidence === "medium" ? 0.65 : 0.25,
+            sources,
             provider,
             responseTimeMs,
-            mapData: response.mapData || null,
+            mapData: response?.mapData || null,
             topic: topic || "",
             entities: entities || {},
             retrievalContext: retrievalContext || null
         });
+
+        // Store aggregated retrieved sources on the Chat document
+        if (sources.length > 0) {
+            chat.retrievedSources = chat.retrievedSources || [];
+            const existingKeys = new Set(chat.retrievedSources.map(s => `${s.title}-${s.reference}`));
+            sources.forEach(src => {
+                const title = src.documentTitle || src.title || "University Document";
+                const reference = src.reference || "";
+                const key = `${title}-${reference}`;
+                if (!existingKeys.has(key)) {
+                    existingKeys.add(key);
+                    chat.retrievedSources.push({
+                        type: src.type || "document",
+                        title,
+                        reference,
+                        metadata: src.metadata || {}
+                    });
+                }
+            });
+        }
+
+        // Set chat title from first query if still default
+        if (chat.title === "New chat" && question) {
+            chat.title = question.slice(0, 80);
+        }
+
+        // Auto-summarize older messages separately into chat.summary when message count grows
+        if (chat.messages.length > 6) {
+            const olderTurns = chat.messages.slice(0, -6);
+            const summarySnippet = olderTurns
+                .map(m => `${m.role === "user" ? "User asked about" : "Discussed"} ${String(m.content || "").slice(0, 40)}`)
+                .slice(-6)
+                .join("; ");
+            chat.summary = summarySnippet.slice(0, 300);
+        }
 
         chat.updatedBy = user._id;
         await chat.save();

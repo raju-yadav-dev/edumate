@@ -7,6 +7,7 @@ const {
     getChatDetails,
     renameChat,
     deleteChat,
+    searchChats,
     regenerateResponse,
     getSuggestedQuestions
 } = require("../controllers/chatController");
@@ -18,6 +19,9 @@ router.post("/ask", optionalAuthenticate, askQuestion);
 
 // Get suggested questions for guest or user
 router.get("/:id/suggested-questions", optionalAuthenticate, getSuggestedQuestions);
+
+// Search chat history (must come before /:id)
+router.get("/search", authenticate, searchChats);
 
 // Authenticated user chat history endpoints
 router.get("/", authenticate, listChats);

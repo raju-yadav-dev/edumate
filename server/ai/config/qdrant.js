@@ -23,7 +23,11 @@ if (globalThis.fetch) {
     }
 }
 
-const { QdrantClient } = require("@qdrant/js-client-rest");
+let QdrantClientClass = null;
+try {
+    QdrantClientClass = require("@qdrant/js-client-rest").QdrantClient;
+} catch (e) {}
+
 const { withTimeoutAndRetry } = require("../../utils/fetchHelper");
 
 const qdrantUrl = process.env.QDRANT_URL || "http://127.0.0.1:6333";
@@ -36,7 +40,14 @@ let rawClient = null;
 const client = new Proxy({}, {
     get(target, prop) {
         if (!rawClient) {
-            rawClient = new QdrantClient({
+            if (!QdrantClientClass) {
+                try {
+                    QdrantClientClass = require("@qdrant/js-client-rest").QdrantClient;
+                } catch (err) {
+                    throw new Error("@qdrant/js-client-rest is not installed or unavailable.");
+                }
+            }
+            rawClient = new QdrantClientClass({
                 url: qdrantUrl,
                 apiKey: qdrantApiKey,
                 checkCompatibility: false
@@ -110,11 +121,20 @@ Status: FAIL
         if (
             vectorsConfig &&
             typeof vectorsConfig === "object" &&
+            qdrantVectorName &&
             vectorsConfig[qdrantVectorName] &&
             vectorsConfig[qdrantVectorName].size
         ) {
             qdrantDimension = vectorsConfig[qdrantVectorName].size;
             vectorName = qdrantVectorName;
+        } else if (
+            vectorsConfig &&
+            typeof vectorsConfig === "object" &&
+            vectorsConfig[""] &&
+            vectorsConfig[""].size
+        ) {
+            qdrantDimension = vectorsConfig[""].size;
+            vectorName = "";
         } else if (
             vectorsConfig &&
             typeof vectorsConfig === "object" &&
@@ -129,7 +149,13 @@ Status: FAIL
             vectorsConfig.size
         ) {
             qdrantDimension = vectorsConfig.size;
-            vectorName = "unnamed";
+            vectorName = "";
+        } else if (vectorsConfig && typeof vectorsConfig === "object") {
+            const firstKey = Object.keys(vectorsConfig)[0];
+            if (firstKey !== undefined && vectorsConfig[firstKey]?.size) {
+                qdrantDimension = vectorsConfig[firstKey].size;
+                vectorName = firstKey;
+            }
         }
 
         if (!qdrantDimension) {

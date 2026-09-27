@@ -2,29 +2,13 @@ const path = require("path");
 const Document = require("../models/Document");
 const SearchManager = require("../knowledge/SearchManager");
 const llmService = require("../ai/services/llmService");
-const supabase = require("../config/supabase");
-
-const BUCKET = process.env.SUPABASE_STORAGE_BUCKET || process.env.SUPABASE_BUCKET;
 const DOCUMENT_KEYWORDS = /\b(document|documents|pdf|pdfs|file|files|official document|source document|official documents|source documents)\b/i;
 
 /**
- * Generates a secure signed URL for the document.
+ * Generates download URL for the document.
  */
-const getSignedUrl = async (storagePath) => {
-    try {
-        const ttl = Number(process.env.SUPABASE_SIGNED_URL_TTL_SECONDS) || 315360000;
-        const { data, error } = await supabase.storage
-            .from(BUCKET)
-            .createSignedUrl(storagePath, ttl);
-        if (error) {
-            console.error(`[DocumentDelivery] Supabase error creating signed URL for ${storagePath}:`, error.message);
-            return "";
-        }
-        return data?.signedUrl || "";
-    } catch (e) {
-        console.error(`[DocumentDelivery] Error generating signed URL for ${storagePath}:`, e);
-        return "";
-    }
+const getDocumentDownloadUrl = (doc) => {
+    return `/api/documents/${doc._id}/download`;
 };
 
 /**
@@ -201,21 +185,21 @@ const handleDocumentDelivery = async ({ user, question, conversationId, parentId
         };
     }
 
-    // 9. Found matching documents, generate signed URLs
+    // 9. Found matching documents, generate download URLs
     const sources = [];
     const answerLines = ["These Admin documents match your request:\n"];
 
     for (let i = 0; i < matchedDocs.length; i++) {
         const doc = matchedDocs[i];
-        const signedUrl = await getSignedUrl(doc.storagePath);
+        const downloadUrl = getDocumentDownloadUrl(doc);
         
-        answerLines.push(`${i + 1}. [${doc.originalName}](${signedUrl})`);
+        answerLines.push(`${i + 1}. [${doc.originalName}](${downloadUrl})`);
 
         sources.push({
             type: "document",
             title: doc.originalName,
             reference: doc.storagePath,
-            downloadUrl: signedUrl,
+            downloadUrl,
             metadata: {
                 documentId: doc._id.toString(),
                 originalName: doc.originalName,

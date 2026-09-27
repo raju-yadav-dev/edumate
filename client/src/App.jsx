@@ -11,6 +11,8 @@ import Profile from "./pages/Profile/Profile";
 import Chat from "./pages/Chat/Chat";
 import AdminLogin from "./Admin/Login/AdminLogin";
 import AdminConsole from "./Admin/Console/AdminConsole";
+import Unauthorized from "./pages/Unauthorized/Unauthorized";
+import ProtectedRoute from "./components/common/ProtectedRoute";
 
 function TitleUpdater() {
     const location = useLocation();
@@ -31,6 +33,8 @@ function TitleUpdater() {
             title = "Edumate | Reset Password";
         } else if (path === "/profile") {
             title = "Edumate | Profile";
+        } else if (path === "/unauthorized") {
+            title = "Edumate | Access Denied";
         } else if (path.startsWith("/admin/panel")) {
             title = "Edumate | Admin Panel";
         } else if (path.startsWith("/admin")) {
@@ -44,59 +48,50 @@ function TitleUpdater() {
 }
 
 function App() {
-
     return (
-
         <BrowserRouter>
             <TitleUpdater />
 
             <Routes>
+                {/* Public Routes */}
+                <Route path="/" element={<Home />} />
+                <Route path="/login" element={<Login />} />
+                <Route path="/register" element={<Register />} />
+                <Route path="/forgot-password" element={<ForgotPassword />} />
+                <Route path="/unauthorized" element={<Unauthorized />} />
+                <Route path="/admin" element={<AdminLogin />} />
 
-                <Route
-                    path="/"
-                    element={<Home />}
-                />
-
+                {/* Protected Student / General User Routes */}
                 <Route
                     path="/chat"
-                    element={<Chat />}
-                />
-
-                <Route
-                    path="/login"
-                    element={<Login />}
-                />
-
-                <Route
-                    path="/register"
-                    element={<Register />}
-                />
-                <Route
-                    path="/forgot-password"
-                    element={<ForgotPassword />}
+                    element={
+                        <ProtectedRoute>
+                            <Chat />
+                        </ProtectedRoute>
+                    }
                 />
 
                 <Route
                     path="/profile"
-                    element={<Profile />}
+                    element={
+                        <ProtectedRoute>
+                            <Profile />
+                        </ProtectedRoute>
+                    }
                 />
 
-                <Route
-                    path="/admin"
-                    element={<AdminLogin />}
-                />
-
+                {/* Protected Admin Console Route (Admin & Super Admin) */}
                 <Route
                     path="/admin/panel"
-                    element={<AdminConsole />}
+                    element={
+                        <ProtectedRoute requiredRoles={["admin", "super_admin"]}>
+                            <AdminConsole />
+                        </ProtectedRoute>
+                    }
                 />
-
             </Routes>
-
         </BrowserRouter>
-
     );
-
 }
 
 export default App;

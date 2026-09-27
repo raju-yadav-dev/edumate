@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState } from "react";
 import { 
     FiX, FiVolume2, FiVolumeX, FiRefreshCw, FiMic, FiMicOff, FiGlobe, 
-    FiCheck, FiSmile, FiAlertCircle 
+    FiCheck, FiSmile, FiAlertCircle, FiSquare 
 } from "react-icons/fi";
 import AudioAnalyserService from "../../services/voice/AudioAnalyserService";
 import "./Voice.css";
@@ -26,6 +26,9 @@ export default function VoiceUIComponent({
     activeLang,
     isMuted,
     isContinuousMode,
+    startListening,
+    stopListening,
+    stopResponse,
     stopConversation,
     toggleMute,
     setLanguage,
@@ -34,6 +37,8 @@ export default function VoiceUIComponent({
 }) {
     const [isLangDropdownOpen, setIsLangDropdownOpen] = useState(false);
     const canvasRef = useRef(null);
+
+    const isMicActive = (voiceState === "listening" || voiceState === "user_speaking" || voiceState === "waiting_for_silence");
 
     // Auto-close dropdown when active language changes
     useEffect(() => {
@@ -85,9 +90,9 @@ export default function VoiceUIComponent({
             const height = canvas.height;
             const centerY = height / 2;
 
-            const isMicActive = (voiceState === "listening" || voiceState === "user_speaking" || voiceState === "waiting_for_silence");
+            const isRecording = (voiceState === "listening" || voiceState === "user_speaking" || voiceState === "waiting_for_silence");
 
-            if (isMicActive) {
+            if (isRecording) {
                 // Real-time Mic Waveform Analysis
                 const data = AudioAnalyserService.getWaveformData();
                 ctx.lineWidth = 3;
@@ -101,9 +106,8 @@ export default function VoiceUIComponent({
                     let x = 0;
 
                     for (let i = 0; i < data.length; i++) {
-                        // Normalized value between -1.0 and 1.0
-                        const v = (data[i] - 128.0) / 128.0;
-                        const y = centerY + v * centerY * 0.9;
+                        const v = data[i] / 128.0; // 0..2
+                        const y = (v * height) / 2;
 
                         if (i === 0) {
                             ctx.moveTo(x, y);
@@ -112,43 +116,41 @@ export default function VoiceUIComponent({
                         }
                         x += sliceWidth;
                     }
-                } else {
-                    ctx.moveTo(0, centerY);
                     ctx.lineTo(width, centerY);
+                } else {
+                    // Fallback animated sine wave for listening state
+                    phase += 0.08;
+                    for (let x = 0; x < width; x++) {
+                        const edgeClamp = Math.sin(x * Math.PI / width);
+                        const y = centerY + Math.sin(x * 0.04 + phase) * 14 * edgeClamp;
+                        if (x === 0) ctx.moveTo(x, y);
+                        else ctx.lineTo(x, y);
+                    }
                 }
                 ctx.stroke();
 
             } else if (voiceState === "speaking") {
-                // Siri/Gemini Style Procedural Sine Waves
+                // Energetic Blue Speech Wave
                 phase += 0.12;
-                ctx.shadowBlur = 0; // Disable shadow for speed and overlap overlap
-                
-                const waves = [
-                    { amplitude: 22, frequency: 0.025, color: "rgba(59, 130, 246, 0.75)", phaseOffset: 0 },
-                    { amplitude: 14, frequency: 0.045, color: "rgba(96, 165, 250, 0.5)", phaseOffset: Math.PI / 2 },
-                    { amplitude: 8, frequency: 0.065, color: "rgba(147, 197, 253, 0.35)", phaseOffset: Math.PI }
-                ];
+                ctx.shadowBlur = 12;
+                ctx.shadowColor = "rgba(59, 130, 246, 0.5)";
+                ctx.lineWidth = 3;
+                ctx.strokeStyle = "#38bdf8";
+                ctx.beginPath();
 
-                waves.forEach((w, idx) => {
-                    ctx.beginPath();
-                    ctx.lineWidth = idx === 0 ? 3 : 1.5;
-                    ctx.strokeStyle = w.color;
-
-                    for (let x = 0; x < width; x++) {
-                        // Math.sin(x * Math.PI / width) dampens wave at borders for a clean transition
-                        const edgeClamp = Math.sin(x * Math.PI / width);
-                        const y = centerY + Math.sin(x * w.frequency + phase + w.phaseOffset) * w.amplitude * edgeClamp;
-                        
-                        if (x === 0) {
-                            ctx.moveTo(x, y);
-                        } else {
-                            ctx.lineTo(x, y);
-                        }
+                for (let x = 0; x < width; x++) {
+                    const edgeClamp = Math.sin(x * Math.PI / width);
+                    const y = centerY + Math.sin(x * 0.03 + phase) * Math.cos(x * 0.015 + phase) * 22 * edgeClamp;
+                    
+                    if (x === 0) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        ctx.lineTo(x, y);
                     }
-                    ctx.stroke();
-                });
+                }
+                ctx.stroke();
 
-            } else if (voiceState === "thinking") {
+            } else if (voiceState === "thinking" || voiceState === "searching_knowledge_base" || voiceState === "building_context" || voiceState === "generating_response") {
                 // Pulsating Yellow Amber loader line
                 phase += 0.06;
                 ctx.shadowBlur = 8;
@@ -196,16 +198,26 @@ export default function VoiceUIComponent({
         return null;
     }
 
+    const isGeneratingOrSpeaking = 
+        voiceState === "searching_knowledge_base" || 
+        voiceState === "building_context" || 
+        voiceState === "generating_response" || 
+        voiceState === "speaking" || 
+        voiceState === "thinking" || 
+        voiceState === "processing_speech";
+
     // Determine Avatar Emotion State based on Voice State & Transcript content
     let emotion = "happy"; // default
-    if (voiceState === "thinking" || voiceState === "waiting_for_silence") {
+    if (voiceState === "thinking" || voiceState === "waiting_for_silence" || voiceState === "searching_knowledge_base" || voiceState === "building_context" || voiceState === "processing_speech") {
         emotion = "thinking";
     } else if (voiceState === "listening" || voiceState === "user_speaking") {
         emotion = "listening";
-    } else if (voiceState === "speaking") {
+    } else if (voiceState === "speaking" || voiceState === "generating_response") {
         emotion = "speaking";
     } else if (voiceState === "paused") {
         emotion = "neutral";
+    } else if (voiceState === "permission_denied" || voiceState === "error") {
+        emotion = "error";
     }
 
     // Detect error signals inside transcript
@@ -217,10 +229,17 @@ export default function VoiceUIComponent({
         idle: "Ready",
         listening: "Listening...",
         user_speaking: "Speaking...",
-        waiting_for_silence: "Processing...",
-        thinking: "Thinking...",
+        processing_speech: "Processing Speech...",
+        waiting_for_silence: "Processing Speech...",
+        searching_knowledge_base: "Searching Knowledge Base...",
+        building_context: "Building Context...",
+        generating_response: "Generating Response...",
+        thinking: "Generating Response...",
         speaking: "Speaking...",
+        completed: "Completed",
+        error: "Error",
         paused: "Paused",
+        permission_denied: "Mic Permission Required",
         interrupted: "Interrupted",
         ended: "Goodbye!"
     };
@@ -229,10 +248,17 @@ export default function VoiceUIComponent({
         idle: "state-idle",
         listening: "state-listening",
         user_speaking: "state-listening",
+        processing_speech: "state-thinking",
         waiting_for_silence: "state-thinking",
+        searching_knowledge_base: "state-thinking",
+        building_context: "state-thinking",
+        generating_response: "state-speaking",
         thinking: "state-thinking",
         speaking: "state-speaking",
+        completed: "state-completed",
+        error: "state-permission_denied",
         paused: "state-paused",
+        permission_denied: "state-permission_denied",
         interrupted: "state-ended",
         ended: "state-ended"
     };
@@ -260,7 +286,7 @@ export default function VoiceUIComponent({
     const activeRightEyebrow = eyebrowD[emotion]?.right || eyebrowD.neutral.right;
 
     return (
-        <div className={`edu-voice-overlay ${stateClasses[voiceState]}`} onClick={voiceState === "speaking" ? userInterruption : undefined}>
+        <div className={`edu-voice-overlay ${stateClasses[voiceState] || "state-idle"}`} onClick={voiceState === "speaking" ? userInterruption : undefined}>
             <div className="edu-voice-card" onClick={(e) => e.stopPropagation()}>
                 {/* Header */}
                 <header className="edu-voice-header">
@@ -385,7 +411,20 @@ export default function VoiceUIComponent({
                         </svg>
                     </div>
 
-                    <div className="status-label">{stateLabels[voiceState]}</div>
+                    <div className="status-label">{stateLabels[voiceState] || "Ready"}</div>
+
+                    {/* Microphone Permission Warning Banner */}
+                    {voiceState === "permission_denied" && (
+                        <div className="voice-permission-banner">
+                            <FiAlertCircle className="icon text-red-400 text-xl" />
+                            <p>Microphone access was blocked. Please enable microphone permission in your browser address bar to talk with EduMate.</p>
+                            {startListening && (
+                                <button type="button" className="voice-permission-retry-btn" onClick={startListening}>
+                                    Try Again
+                                </button>
+                            )}
+                        </div>
+                    )}
 
                     {/* Canvas Live Waveform Visualizer */}
                     <div className="canvas-visualizer-wrapper">
@@ -429,11 +468,48 @@ export default function VoiceUIComponent({
                         {isMuted ? <FiVolumeX /> : <FiVolume2 />}
                     </button>
 
+                    {/* Start / Stop Listening Controls */}
+                    {isMicActive ? (
+                        <button
+                            type="button"
+                            className="listening-toggle-btn is-listening"
+                            onClick={stopListening}
+                            title="Pause Listening"
+                        >
+                            <FiMicOff /> Stop
+                        </button>
+                    ) : (
+                        <button
+                            type="button"
+                            className="listening-toggle-btn is-stopped"
+                            onClick={startListening}
+                            title="Start Listening"
+                        >
+                            <FiMic /> Listen
+                        </button>
+                    )}
+
+                    {isGeneratingOrSpeaking && (
+                        <button
+                            type="button"
+                            className="action-btn stop-response-btn"
+                            onClick={stopResponse}
+                            title="Stop Response"
+                            style={{
+                                backgroundColor: "rgba(239, 68, 68, 0.15)",
+                                color: "#ef4444",
+                                border: "1px solid rgba(239, 68, 68, 0.3)"
+                            }}
+                        >
+                            <FiSquare style={{ fill: "currentColor" }} />
+                        </button>
+                    )}
+
                     <button
                         type="button"
                         className="action-btn"
                         onClick={replayResponse}
-                        disabled={voiceState === "thinking" || voiceState === "listening"}
+                        disabled={isGeneratingOrSpeaking || voiceState === "listening"}
                         title="Replay Response"
                     >
                         <FiRefreshCw />

@@ -16,6 +16,7 @@
     "clean": "node scripts/clean.js",
     "format": "node scripts/format.js",
     "start": "node server/server.js",
+    "chunking": "node server/scripts/runChunkingWorker.js",
     "reset": "node scripts/reset.js",
     "reindex": "node scripts/migrateToJina.js"
   },

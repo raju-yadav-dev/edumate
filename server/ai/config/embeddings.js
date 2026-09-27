@@ -224,6 +224,22 @@ const embedText = async (text, options = {}) => {
         throw new Error("Input text must be a valid non-empty string.");
     }
 
+    const smartCacheHub = require("../../services/cache/SmartCacheHub");
+
+    // 1. Layer 3 (Memory Embedding Cache) Check
+    const cachedMemory = smartCacheHub.l3.getEmbedding(text, options);
+    if (cachedMemory) {
+        return cachedMemory;
+    }
+
+    // 2. Layer 10 (Persistent Disk Cache) Check
+    const diskKey = smartCacheHub.l3._buildKey(text, options);
+    const cachedDisk = smartCacheHub.l10.get("embeddings", diskKey);
+    if (cachedDisk && Array.isArray(cachedDisk)) {
+        smartCacheHub.l3.setEmbedding(text, cachedDisk, options, options.categories || []);
+        return cachedDisk;
+    }
+
     const provider = getEmbeddingProvider();
 
     if (provider === "jina") {
@@ -266,6 +282,11 @@ const embedText = async (text, options = {}) => {
             }
 
             console.log(`[Embedding API] Success - Returned vector dimension: ${embedding.length}, Qdrant Dim: ${qdrantDim}`);
+
+            // Cache in Layer 3 (Memory) and Layer 10 (Persistent Disk)
+            smartCacheHub.l3.setEmbedding(text, embedding, options, options.categories || []);
+            smartCacheHub.l10.set("embeddings", diskKey, embedding, 86400 * 30, options.categories || []);
+
             return embedding;
         } catch (err) {
             console.error(`[Embedding API] Failure - Jina embedding error: ${err.message}`);
@@ -294,6 +315,33 @@ const embedTexts = async (texts, options = {}) => {
         return [];
     }
 
+    const smartCacheHub = require("../../services/cache/SmartCacheHub");
+
+    // Check Layer 3 & Layer 10 for all texts in batch
+    const results = new Array(sanitized.length).fill(null);
+    const missingIndices = [];
+
+    sanitized.forEach((text, idx) => {
+        const mem = smartCacheHub.l3.getEmbedding(text, options);
+        if (mem) {
+            results[idx] = mem;
+            return;
+        }
+        const diskKey = smartCacheHub.l3._buildKey(text, options);
+        const disk = smartCacheHub.l10.get("embeddings", diskKey);
+        if (disk && Array.isArray(disk)) {
+            smartCacheHub.l3.setEmbedding(text, disk, options, options.categories || []);
+            results[idx] = disk;
+            return;
+        }
+        missingIndices.push(idx);
+    });
+
+    if (missingIndices.length === 0) {
+        return results;
+    }
+
+    const missingTexts = missingIndices.map(i => sanitized[i]);
     const provider = getEmbeddingProvider();
 
     if (provider === "jina") {
@@ -307,12 +355,13 @@ const embedTexts = async (texts, options = {}) => {
 
         const qdrantDim = await getQdrantDimension();
         const batchSize = 16;
-        const results = [];
-        const totalBatches = Math.ceil(sanitized.length / batchSize);
+        const totalBatches = Math.ceil(missingTexts.length / batchSize);
 
-        for (let i = 0; i < sanitized.length; i += batchSize) {
+        for (let i = 0; i < missingTexts.length; i += batchSize) {
             const batchNum = Math.floor(i / batchSize) + 1;
-            const subBatch = sanitized.slice(i, i + batchSize);
+            const subBatch = missingTexts.slice(i, i + batchSize);
+            const subBatchOriginalIndices = missingIndices.slice(i, i + batchSize);
+
             console.log(`[Embedding API] Batch ${batchNum}/${totalBatches} - Provider: ${provider}, Model: ${modelName}, Task: ${task}, Chunks: ${subBatch.length}, Qdrant Dim: ${qdrantDim}`);
 
             await acquireSlot();
@@ -343,10 +392,18 @@ const embedTexts = async (texts, options = {}) => {
                 }
 
                 const sorted = [...embeddingsData].sort((a, b) => a.index - b.index);
-                const batchVectors = sorted.map((item) => item.embedding);
-                results.push(...batchVectors);
+                sorted.forEach((item, itemIdx) => {
+                    const originalIdx = subBatchOriginalIndices[itemIdx];
+                    const vector = item.embedding;
+                    results[originalIdx] = vector;
 
-                console.log(`[Embedding API] Batch ${batchNum}/${totalBatches} Success - Returned vector dimension: ${batchVectors[0]?.length || "Unknown"}`);
+                    const originalText = sanitized[originalIdx];
+                    const diskKey = smartCacheHub.l3._buildKey(originalText, options);
+                    smartCacheHub.l3.setEmbedding(originalText, vector, options, options.categories || []);
+                    smartCacheHub.l10.set("embeddings", diskKey, vector, 86400 * 30, options.categories || []);
+                });
+
+                console.log(`[Embedding API] Batch ${batchNum}/${totalBatches} Success - Returned vector dimension: ${sorted[0]?.embedding?.length || "Unknown"}`);
             } catch (batchError) {
                 console.error(`[Embedding API] Batch ${batchNum}/${totalBatches} Failure - Jina batch request failed: ${batchError.message}`);
                 throw batchError;

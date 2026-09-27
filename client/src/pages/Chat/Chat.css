@@ -1435,62 +1435,108 @@
 
 .edu-chat-message-actions button svg{ width:15px; height:15px; }
 
-.edu-chat-citation{
+.edu-chat-citation-card{
     width:100%;
     min-width:0;
-    display:grid;
-    grid-template-columns:auto minmax(0, 1fr) auto;
-    align-items:center;
-    gap:10px;
-    padding:11px 12px;
-    border:1px solid rgba(148,163,184,.24);
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+    padding:10px 14px;
+    border:1px solid rgba(148,163,184,.22);
     border-radius:10px;
     background:rgba(7,14,23,.66);
     color:#eef6ff;
     text-align:left;
+    cursor:pointer;
+    transition:all 0.2s ease-in-out;
 }
 
-.edu-chat-citation:hover{
+.edu-chat-citation-card:hover{
     border-color:rgba(216,255,31,.58);
-    background:rgba(216,255,31,.075);
+    background:rgba(216,255,31,.05);
+}
+
+.edu-chat-citation-card.is-expanded{
+    border-color:rgba(216,255,31,.65);
+    background:rgba(12,20,33,.85);
+    box-shadow:0 4px 16px rgba(0,0,0,0.25);
+}
+
+.edu-chat-citation-header{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    min-width:0;
 }
 
 .edu-chat-citation-icon{
-    width:30px;
-    height:30px;
+    width:32px;
+    height:32px;
     display:grid;
     place-items:center;
     border-radius:8px;
     background:rgba(216,255,31,.12);
     color:#d8ff1f;
+    flex-shrink:0;
+}
+
+.edu-chat-citation-icon.is-web{
+    background:rgba(59,130,246,.15);
+    color:#60a5fa;
 }
 
 .edu-chat-citation-icon svg{ width:16px; height:16px; }
 
-.edu-chat-citation-body{
+.edu-chat-citation-main-info{
     min-width:0;
-    display:grid;
-    gap:3px;
+    flex:1;
+    display:flex;
+    flex-direction:column;
+    gap:2px;
 }
 
-.edu-chat-citation-body strong{
+.citation-title{
     overflow:hidden;
     color:#f6f9ff;
     font-size:13px;
+    font-weight:600;
     text-overflow:ellipsis;
     white-space:nowrap;
 }
 
-.edu-chat-citation-body span{
+.citation-submeta{
     overflow:hidden;
     color:#9fadc0;
     font-size:12px;
     text-overflow:ellipsis;
     white-space:nowrap;
+    display:flex;
+    align-items:center;
+    gap:6px;
+}
+
+.citation-page-badge{
+    font-weight:600;
+    color:#d8ff1f;
+}
+
+.citation-section-badge{
+    color:#94a3b8;
+}
+
+.citation-web-url{
+    color:#60a5fa;
+}
+
+.edu-chat-citation-header-right{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    flex-shrink:0;
 }
 
 .edu-chat-citation-score{
-    padding:4px 7px;
+    padding:3px 7px;
     border-radius:999px;
     background:rgba(216,255,31,.12);
     color:#d8ff1f;
@@ -1498,37 +1544,185 @@
     font-weight:700;
 }
 
-[data-theme="light"] .edu-chat-message-actions button{
-    color:#59657d;
-    background:#fff;
-    border-color:#e0e4ef;
+.citation-expand-btn{
+    background:none;
+    border:none;
+    color:#94a3b8;
+    cursor:pointer;
+    display:flex;
+    align-items:center;
+    padding:2px;
+    transition:color 0.15s ease;
 }
 
-[data-theme="light"] .edu-chat-message-actions button:hover{
-    color:#655bf0;
-    border-color:#9087ff;
-    background:#f4f2ff;
+.citation-expand-btn:hover{
+    color:#d8ff1f;
 }
 
-[data-theme="light"] .edu-chat-citation{
+.edu-chat-citation-badges{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    flex-wrap:wrap;
+    padding-left:42px;
+}
+
+.citation-badge{
+    display:inline-flex;
+    align-items:center;
+    font-size:11px;
+    font-weight:500;
+    padding:2px 8px;
+    border-radius:4px;
+    letter-spacing:0.2px;
+}
+
+.citation-badge.category-badge{
+    background:rgba(99,102,241,.15);
+    color:#a5b4fc;
+    border:1px solid rgba(99,102,241,.25);
+}
+
+.citation-badge.dept-badge{
+    background:rgba(245,158,11,.15);
+    color:#fcd34d;
+    border:1px solid rgba(245,158,11,.25);
+}
+
+.edu-chat-citation-expanded-body{
+    margin-top:6px;
+    padding-top:8px;
+    border-top:1px solid rgba(148,163,184,.14);
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+}
+
+.citation-snippet-box{
+    background:rgba(0,0,0,0.25);
+    border-left:3px solid #d8ff1f;
+    padding:8px 10px;
+    border-radius:4px;
+}
+
+.citation-snippet-label{
+    display:block;
+    font-size:10px;
+    font-weight:700;
+    text-transform:uppercase;
+    color:#d8ff1f;
+    margin-bottom:3px;
+    letter-spacing:0.5px;
+}
+
+.citation-snippet-text{
+    margin:0;
+    font-size:12px;
+    color:#cbd5e1;
+    line-height:1.45;
+    font-style:italic;
+}
+
+.citation-expanded-actions{
+    display:flex;
+    align-items:center;
+    justify-content:flex-end;
+    gap:8px;
+}
+
+.citation-preview-link-btn{
+    display:inline-flex;
+    align-items:center;
+    padding:5px 12px;
+    border-radius:6px;
+    background:rgba(216,255,31,.15);
+    border:1px solid rgba(216,255,31,.4);
+    color:#d8ff1f;
+    font-size:12px;
+    font-weight:600;
+    cursor:pointer;
+    transition:all 0.15s ease;
+}
+
+.citation-preview-link-btn:hover{
+    background:rgba(216,255,31,.25);
+    transform:translateY(-1px);
+}
+
+.citation-meta-note{
+    font-size:11px;
+    color:#94a3b8;
+}
+
+/* No source notice */
+.edu-chat-no-source-notice{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    font-size:11px;
+    color:#94a3b8;
+    background:rgba(148,163,184,.08);
+    border:1px dashed rgba(148,163,184,.2);
+    padding:4px 10px;
+    border-radius:6px;
+    margin-top:6px;
+}
+
+.no-source-dot{
+    width:6px;
+    height:6px;
+    border-radius:50%;
+    background:#94a3b8;
+    opacity:0.6;
+}
+
+[data-theme="light"] .edu-chat-citation-card{
     color:#172033;
     background:#fff;
     border-color:#e0e4ef;
 }
 
-[data-theme="light"] .edu-chat-citation:hover{
+[data-theme="light"] .edu-chat-citation-card:hover{
     border-color:#9087ff;
     background:#f8f7ff;
 }
 
-[data-theme="light"] .edu-chat-citation-icon,
+[data-theme="light"] .edu-chat-citation-card.is-expanded{
+    border-color:#655bf0;
+    background:#ffffff;
+    box-shadow:0 4px 14px rgba(101,91,240,0.12);
+}
+
+[data-theme="light"] .edu-chat-citation-icon{
+    color:#655bf0;
+    background:#f0eeff;
+}
+
 [data-theme="light"] .edu-chat-citation-score{
     color:#655bf0;
     background:#f0eeff;
 }
 
-[data-theme="light"] .edu-chat-citation-body strong{ color:#172033; }
-[data-theme="light"] .edu-chat-citation-body span{ color:#65708a; }
+[data-theme="light"] .citation-title{ color:#172033; }
+[data-theme="light"] .citation-submeta{ color:#65708a; }
+[data-theme="light"] .citation-page-badge{ color:#655bf0; }
+[data-theme="light"] .citation-section-badge{ color:#64748b; }
+[data-theme="light"] .citation-snippet-box{
+    background:#f8fafc;
+    border-left-color:#655bf0;
+}
+[data-theme="light"] .citation-snippet-label{ color:#655bf0; }
+[data-theme="light"] .citation-snippet-text{ color:#334155; }
+[data-theme="light"] .citation-preview-link-btn{
+    background:#f0eeff;
+    border-color:#655bf0;
+    color:#655bf0;
+}
+[data-theme="light"] .edu-chat-no-source-notice{
+    color:#64748b;
+    background:#f1f5f9;
+    border-color:#cbd5e1;
+}
 
 /* Global paragraph color must not override the bright user-message bubble. */
 .edu-chat-message-user .edu-chat-markdown,

@@ -212,10 +212,55 @@ body,
 
 
 
+/* PASSWORD BOX & TOGGLE */
+
+.admin-password-box {
+    position: relative;
+    width: 100%;
+    display: flex;
+    align-items: center;
+}
+
+.admin-password-box input {
+    width: 100%;
+    padding-right: 50px;
+}
+
+.admin-password-toggle {
+    position: absolute;
+    right: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: transparent !important;
+    border: none !important;
+    outline: none !important;
+    color: #94a3b8;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px;
+    border-radius: 8px;
+    font-size: 18px;
+    line-height: 1;
+    width: auto !important;
+    height: auto !important;
+    box-shadow: none !important;
+    transition: color 0.2s ease, transform 0.2s ease;
+    z-index: 2;
+}
+
+.admin-password-toggle:hover {
+    color: #9dff3e;
+    transform: translateY(-50%) scale(1.08);
+}
+
+
 /* BUTTON */
 
 
-.admin-auth-form button{
+.admin-auth-form button[type="submit"],
+.admin-auth-submit-btn{
 
 
     width:100%;
@@ -257,7 +302,8 @@ body,
 
 
 
-.admin-auth-form button:hover{
+.admin-auth-form button[type="submit"]:hover,
+.admin-auth-submit-btn:hover{
 
 
     transform:translateY(-2px);
@@ -266,6 +312,14 @@ body,
     box-shadow:
     0 0 20px rgba(34,230,239,.45);
 
+}
+
+.admin-auth-form button[type="submit"]:disabled,
+.admin-auth-submit-btn:disabled{
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
 }
 
 

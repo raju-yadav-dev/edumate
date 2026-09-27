@@ -51,17 +51,17 @@ export default function DatabaseHealth({ storageStats = {} }) {
             showProgressBar: false
         },
         {
-            id: "supabase",
-            name: "Supabase Storage",
-            status: systemStatus.supabase === "connected" || supabase.used ? "Healthy" : "Healthy",
+            id: "localstorage",
+            name: "Local Storage (storage/)",
+            status: systemStatus.supabase === "connected" || supabase.used || systemStatus.localStorage === "connected" ? "Healthy" : "Healthy",
             icon: HardDrive,
             brandColor: "#06b6d4",
             brandIconBg: "rgba(6, 182, 212, 0.15)",
             metrics: [
-                { label: "Buckets", value: "4" },
+                { label: "Root Folder", value: "storage/" },
                 { label: "Storage Used", value: supabaseUsedStr },
                 { label: "Files", value: String(supabaseFilesCount) },
-                { label: "Bandwidth", value: "2.3 GB" }
+                { label: "Status", value: "Active", isBadge: true }
             ],
             showProgressBar: false
         },

@@ -543,3 +543,168 @@ export async function rebuildAllEmbeddings() {
     });
     return parseResponse(response, "Unable to rebuild embeddings.");
 }
+
+// Mission 9.1 Folder & Placeholder
+export async function createPlaceholderDocument({ name, category, department, program }) {
+    const token = getAdminAccessToken();
+    const response = await fetch(`${DOCUMENT_API_BASE_URL}/placeholder`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({ name, category, department, program })
+    });
+    return parseResponse(response, "Unable to create placeholder document.");
+}
+
+export async function renameAdminFolder({ oldPath, newPath }) {
+    const token = getAdminAccessToken();
+    const response = await fetch(`${DOCUMENT_API_BASE_URL}/folder/rename`, {
+        method: "PUT",
+        headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({ oldPath, newPath })
+    });
+    return parseResponse(response, "Unable to rename folder.");
+}
+
+export async function deleteAdminFolder(folderPath) {
+    const token = getAdminAccessToken();
+    const response = await fetch(`${DOCUMENT_API_BASE_URL}/folder`, {
+        method: "DELETE",
+        headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({ folderPath })
+    });
+    return parseResponse(response, "Unable to delete folder.");
+}
+
+export async function bulkRestoreAdminDocuments(ids) {
+    const token = getAdminAccessToken();
+    const response = await fetch(`${DOCUMENT_API_BASE_URL}/bulk-restore`, {
+        method: "PUT",
+        headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({ ids })
+    });
+    return parseResponse(response, "Unable to restore documents.");
+}
+
+// Mission 9.2 & 9.3 Chunking Queue
+export async function getChunkingQueueStatus() {
+    const token = getAdminAccessToken();
+    const response = await fetch(`${DOCUMENT_API_BASE_URL}/queue/status?_t=${Date.now()}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    return parseResponse(response, "Unable to fetch queue status.");
+}
+
+export async function pauseChunkingQueue() {
+    const token = getAdminAccessToken();
+    const response = await fetch(`${DOCUMENT_API_BASE_URL}/queue/pause`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    return parseResponse(response, "Unable to pause queue.");
+}
+
+export async function resumeChunkingQueue() {
+    const token = getAdminAccessToken();
+    const response = await fetch(`${DOCUMENT_API_BASE_URL}/queue/resume`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    return parseResponse(response, "Unable to resume queue.");
+}
+
+export async function enqueueChunkingDocuments(documentIds, options = {}) {
+    const token = getAdminAccessToken();
+    const response = await fetch(`${DOCUMENT_API_BASE_URL}/queue/enqueue`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({ documentIds, options })
+    });
+    return parseResponse(response, "Unable to enqueue documents.");
+}
+
+export async function retryFailedChunkingQueue() {
+    const token = getAdminAccessToken();
+    const response = await fetch(`${DOCUMENT_API_BASE_URL}/queue/retry-failed`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    return parseResponse(response, "Unable to retry failed queue items.");
+}
+
+export async function cancelChunkingDocument(documentId) {
+    const token = getAdminAccessToken();
+    const response = await fetch(`${DOCUMENT_API_BASE_URL}/${documentId}/cancel`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    return parseResponse(response, "Unable to cancel document processing.");
+}
+
+export async function resumeChunkingDocument(documentId) {
+    const token = getAdminAccessToken();
+    const response = await fetch(`${DOCUMENT_API_BASE_URL}/${documentId}/resume`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    return parseResponse(response, "Unable to resume document processing.");
+}
+
+export async function retryChunkingDocument(documentId) {
+    const token = getAdminAccessToken();
+    const response = await fetch(`${DOCUMENT_API_BASE_URL}/${documentId}/retry`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    return parseResponse(response, "Unable to retry document processing.");
+}
+
+// Mission 9.5 Chunk Preview & Integrity
+export async function getDocumentChunks(documentId) {
+    const token = getAdminAccessToken();
+    const response = await fetch(`${DOCUMENT_API_BASE_URL}/${documentId}/chunks?_t=${Date.now()}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    return parseResponse(response, "Unable to retrieve document chunks.");
+}
+
+export async function getIntegrityReport() {
+    const token = getAdminAccessToken();
+    const response = await fetch(`${DOCUMENT_API_BASE_URL}/integrity/report?_t=${Date.now()}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    return parseResponse(response, "Unable to generate integrity report.");
+}
+
+export async function repairAdminDocument(documentId) {
+    const token = getAdminAccessToken();
+    const response = await fetch(`${DOCUMENT_API_BASE_URL}/${documentId}/repair`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    return parseResponse(response, "Unable to repair document.");
+}
+
+export async function repairAllAdminDocuments() {
+    const token = getAdminAccessToken();
+    const response = await fetch(`${DOCUMENT_API_BASE_URL}/integrity/repair-all`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    return parseResponse(response, "Unable to run auto-repair for all documents.");
+}
+

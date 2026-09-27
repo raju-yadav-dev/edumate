@@ -2,11 +2,9 @@ const crypto = require("crypto");
 const path = require("path");
 const AdmZip = require("adm-zip");
 const Document = require("../models/Document");
-const supabase = require("../config/supabase");
+const localStorageManager = require("../storage/localStorageManager");
 const indexingService = require("../ai/services/indexingService");
 const cacheService = require("./cacheService");
-
-const BUCKET = process.env.SUPABASE_STORAGE_BUCKET || process.env.SUPABASE_BUCKET;
 
 const DOCUMENT_CATEGORIES = Object.freeze([
     "admissions",
@@ -35,6 +33,7 @@ const DOCUMENT_CATEGORIES = Object.freeze([
     "contact",
     "crawled",
     "crawle",
+    "campus_navigation",
     "others"
 ]);
 
@@ -54,32 +53,20 @@ const getChecksum = (buffer) => crypto.createHash("sha256").update(buffer).diges
 
 const getSafeExtension = (originalName) => {
     const extension = path.extname(originalName || "").toLowerCase();
-
     return extension.replace(/[^a-z0-9.]/g, "") || ".bin";
 };
 
-const getSignedUrlForDoc = async (storagePath, isCrawlerDoc = false) => {
-    try {
-        const { crawlerSupabase } = require("../config/supabase");
-        const client = isCrawlerDoc && crawlerSupabase ? crawlerSupabase : supabase;
-        const bucketName = isCrawlerDoc 
-            ? (process.env.CRAWLER_SUPABASE_STORAGE_BUCKET || "edumate-crawler")
-            : BUCKET;
-        const ttl = isCrawlerDoc 
-            ? (Number(process.env.CRAWLER_SUPABASE_SIGNED_URL_TTL_SECONDS) || 3600)
-            : (Number(process.env.SUPABASE_SIGNED_URL_TTL_SECONDS) || 315360000);
-
-        const { data, error } = await client.storage
-            .from(bucketName)
-            .createSignedUrl(storagePath, ttl);
-        return data?.signedUrl || "";
-    } catch (e) {
-        console.error("Error creating signed URL:", e);
-        return "";
+const getSignedUrlForDoc = async (storagePath, docId = null) => {
+    if (docId) {
+        return `/api/documents/download/${docId}`;
     }
+    if (storagePath) {
+        return `/api/documents/raw/${encodeURIComponent(storagePath)}`;
+    }
+    return "";
 };
 
-const uploadToSupabase = async (file, category) => {
+const saveToLocalStorage = async (file, category) => {
     let extension = getSafeExtension(file.originalname);
     const isImage = file.mimetype && file.mimetype.startsWith("image/");
     if (isImage) {
@@ -88,18 +75,7 @@ const uploadToSupabase = async (file, category) => {
     const uniqueName = `${Date.now()}-${crypto.randomUUID()}${extension}`;
     const storagePath = `${category}/${uniqueName}`;
 
-    const uploadMimeType = isImage ? "image/png" : file.mimetype;
-
-    const { error } = await supabase.storage
-        .from(BUCKET)
-        .upload(storagePath, file.buffer, {
-            contentType: uploadMimeType,
-            upsert: false
-        });
-
-    if (error) {
-        throw error;
-    }
+    await localStorageManager.saveFile(storagePath, file.buffer);
 
     return {
         storedName: uniqueName,
@@ -143,6 +119,9 @@ const uploadDocument = async ({ file, body, user }) => {
     const uniqueName = `${Date.now()}-${crypto.randomUUID()}${extension}`;
     const storagePath = `${category}/${uniqueName}`;
 
+    // Write file directly to edumate/storage/<category>/<uniqueName>
+    await localStorageManager.saveFile(storagePath, file.buffer);
+
     const document = await Document.create({
         originalName: file.originalname,
         storedName: uniqueName,
@@ -174,55 +153,17 @@ const uploadDocument = async ({ file, body, user }) => {
 
     cacheService.invalidateCategory(category);
 
-    // Run Supabase upload and indexing in the background asynchronously
-    (async () => {
-        try {
-            const isImage = file.mimetype && file.mimetype.startsWith("image/");
-            const uploadMimeType = isImage ? "image/png" : file.mimetype;
+    // Trigger background indexing with the in-memory buffer
+    indexingService.indexDocumentBackground(document._id, file.buffer).catch((err) => {
+        console.error(`Failed to trigger background indexing for ${document._id}:`, err);
+    });
 
-            // Trigger background indexing immediately with the buffer first!
-            indexingService.indexDocumentBackground(document._id, file.buffer).catch((err) => {
-                console.error(`Failed to trigger background indexing for ${document._id}:`, err);
-            });
-
-            const { error: uploadError } = await supabase.storage
-                .from(BUCKET)
-                .upload(storagePath, file.buffer, {
-                    contentType: uploadMimeType,
-                    upsert: false
-                });
-
-            if (uploadError) {
-                throw uploadError;
-            }
-        } catch (uploadErr) {
-            console.error(`Failed to upload ${document._id} to Supabase in background:`, uploadErr);
-            const currentDoc = await Document.findById(document._id);
-            if (currentDoc && currentDoc.embeddingStatus !== "indexed" && currentDoc.embeddingStatus !== "processing") {
-                currentDoc.embeddingStatus = "failed";
-                currentDoc.metadata = {
-                    ...(currentDoc.metadata || {}),
-                    error: `Background upload failed: ${uploadErr.message}`,
-                    notes: (currentDoc.metadata?.notes || "") + `\n[Upload Error: ${uploadErr.message}]`
-                };
-                await currentDoc.save();
-            } else if (currentDoc) {
-                currentDoc.metadata = {
-                    ...(currentDoc.metadata || {}),
-                    notes: (currentDoc.metadata?.notes || "") + `\n[Upload Error: ${uploadErr.message}]`
-                };
-                await currentDoc.save();
-            }
-        }
-    })();
-
-    // Respond immediately with a placeholder signedUrl (real signedUrl is generated on listDocuments dynamically)
+    const signedUrl = `/api/documents/download/${document._id}`;
     return {
         ...document.toObject(),
-        signedUrl: ""
+        signedUrl
     };
 };
-
 
 const listDocuments = async ({ query, user }) => {
     const page = Math.max(Number(query.page || 1), 1);
@@ -311,28 +252,9 @@ const listDocuments = async ({ query, user }) => {
         Document.countDocuments(filter)
     ]);
 
-    const paths = documents.map(d => d.storagePath).filter(Boolean);
-    let signedUrlsMap = {};
-    if (paths.length > 0) {
-        try {
-            const { data, error } = await supabase.storage
-                .from(BUCKET)
-                .createSignedUrls(paths, Number(process.env.SUPABASE_SIGNED_URL_TTL_SECONDS) || 315360000);
-            if (!error && data) {
-                data.forEach(item => {
-                    if (item.signedUrl) {
-                        signedUrlsMap[item.path] = item.signedUrl;
-                    }
-                });
-            }
-        } catch (e) {
-            console.error("Error creating signed URLs in batch:", e);
-        }
-    }
-
     const documentsWithUrls = documents.map(doc => {
         const docObj = doc.toObject();
-        docObj.signedUrl = signedUrlsMap[doc.storagePath] || "";
+        docObj.signedUrl = `/api/documents/download/${doc._id}`;
         return docObj;
     });
 
@@ -389,7 +311,7 @@ const replaceDocument = async ({ documentId, file, body, user }) => {
     const category = sanitizeCategory(body.category || document.category);
 
     if (file) {
-        const uploadResult = await uploadToSupabase(file, category);
+        const uploadResult = await saveToLocalStorage(file, category);
         storedName = uploadResult.storedName;
         storagePath = uploadResult.storagePath;
         fileSize = file.size;
@@ -398,22 +320,19 @@ const replaceDocument = async ({ documentId, file, body, user }) => {
         originalName = file.originalname;
 
         try {
-            await supabase.storage.from(BUCKET).remove([document.storagePath]);
+            await localStorageManager.deleteFile(document.storagePath);
         } catch (storageErr) {
-            console.error(`Failed to delete old file ${document.storagePath} from Supabase:`, storageErr);
+            console.error(`Failed to delete old file ${document.storagePath} from local storage:`, storageErr);
         }
     } else if (body.category && body.category !== document.category) {
         const uniqueName = document.storedName;
         const newStoragePath = `${category}/${uniqueName}`;
 
-        const { error } = await supabase.storage
-            .from(BUCKET)
-            .move(document.storagePath, newStoragePath);
-
-        if (error) {
-            console.error(`Failed to move file from ${document.storagePath} to ${newStoragePath} in Supabase:`, error);
-        } else {
+        try {
+            await localStorageManager.moveFile(document.storagePath, newStoragePath);
             storagePath = newStoragePath;
+        } catch (error) {
+            console.error(`Failed to move file from ${document.storagePath} to ${newStoragePath} in local storage:`, error);
         }
     }
 
@@ -462,12 +381,11 @@ const replaceDocument = async ({ documentId, file, body, user }) => {
             console.error(`Failed to trigger re-indexing on document replacement for ${document._id}:`, err);
         });
     } else {
-        // Metadata changed. Force a full index rebuild to align metadatas in Qdrant.
         await indexingService.deleteDocumentIndex(document._id);
         indexingService.indexDocumentBackground(document._id).catch(() => {});
     }
 
-    const signedUrl = await getSignedUrlForDoc(storagePath);
+    const signedUrl = `/api/documents/download/${document._id}`;
     return {
         ...document.toObject(),
         signedUrl
@@ -497,11 +415,10 @@ const renameDocument = async ({ documentId, originalName, user }) => {
     await document.save();
     cacheService.invalidateCategory(document.category);
 
-    // Rebuild index in Qdrant to update originalName metadata
     await indexingService.deleteDocumentIndex(document._id);
     indexingService.indexDocumentBackground(document._id).catch(() => {});
 
-    const signedUrl = await getSignedUrlForDoc(document.storagePath);
+    const signedUrl = `/api/documents/download/${document._id}`;
     return {
         ...document.toObject(),
         signedUrl
@@ -523,7 +440,7 @@ const moveDocument = async ({ documentId, category, user }) => {
     }
 
     if (document.category === targetCategory) {
-        const signedUrl = await getSignedUrlForDoc(document.storagePath);
+        const signedUrl = `/api/documents/download/${document._id}`;
         return {
             ...document.toObject(),
             signedUrl
@@ -533,14 +450,10 @@ const moveDocument = async ({ documentId, category, user }) => {
     const oldStoragePath = document.storagePath;
     const newStoragePath = `${targetCategory}/${document.storedName}`;
 
-    const { error } = await supabase.storage
-        .from(BUCKET)
-        .move(oldStoragePath, newStoragePath);
-
-    if (error && error.message !== "The resource was not found") {
-        const err = new Error(`Failed to move file in storage: ${error.message}`);
-        err.statusCode = 500;
-        throw err;
+    try {
+        await localStorageManager.moveFile(oldStoragePath, newStoragePath);
+    } catch (error) {
+        console.warn(`Local file move warning for ${oldStoragePath} -> ${newStoragePath}:`, error.message);
     }
 
     document.category = targetCategory;
@@ -550,7 +463,7 @@ const moveDocument = async ({ documentId, category, user }) => {
     cacheService.invalidateCategory(document.category);
     cacheService.invalidateCategory(targetCategory);
 
-    // Update metadata in Qdrant payloads without rebuilding index or generating new embeddings
+    // Update metadata in Qdrant payloads
     try {
         const { client: qdrantClient, collectionName: qdrantCollection } = require("../ai/config/qdrant");
         await qdrantClient.setPayload(qdrantCollection, {
@@ -572,7 +485,7 @@ const moveDocument = async ({ documentId, category, user }) => {
         console.error("Failed to update Qdrant payload on move:", qdrantErr.message);
     }
 
-    const signedUrl = await getSignedUrlForDoc(newStoragePath);
+    const signedUrl = `/api/documents/download/${document._id}`;
     return {
         ...document.toObject(),
         signedUrl
@@ -597,14 +510,10 @@ const copyDocument = async ({ documentId, category, user }) => {
     const uniqueName = `${Date.now()}-${crypto.randomUUID()}${extension}`;
     const newStoragePath = `${targetCategory}/${uniqueName}`;
 
-    const { error } = await supabase.storage
-        .from(BUCKET)
-        .copy(document.storagePath, newStoragePath);
-
-    if (error) {
-        const err = new Error(`Failed to copy file in storage: ${error.message}`);
-        err.statusCode = 500;
-        throw err;
+    try {
+        await localStorageManager.copyFile(document.storagePath, newStoragePath);
+    } catch (error) {
+        console.warn(`Local file copy warning for ${document.storagePath} -> ${newStoragePath}:`, error.message);
     }
 
     const newDocument = await Document.create({
@@ -637,12 +546,11 @@ const copyDocument = async ({ documentId, category, user }) => {
 
     cacheService.invalidateCategory(targetCategory);
 
-    // Rebuild index in Qdrant
     indexingService.indexDocumentBackground(newDocument._id).catch((err) => {
         console.error(`Failed to trigger background indexing for copied document ${newDocument._id}:`, err);
     });
 
-    const signedUrl = await getSignedUrlForDoc(newStoragePath);
+    const signedUrl = `/api/documents/download/${newDocument._id}`;
     return {
         ...newDocument.toObject(),
         signedUrl
@@ -662,7 +570,6 @@ const indexDocumentBackground = async (documentId, fileBuffer = null) => {
 };
 
 const bulkReindex = async ({ category, ids, user }) => {
-    // Only allow manual indexing of specific document IDs (NO Global Reindex)
     if (!ids || !Array.isArray(ids) || ids.length === 0) {
         return { count: 0, scope: ids?.length ? "files" : category === "root" ? "root" : "folder" };
     }
@@ -771,10 +678,14 @@ const permanentDeleteDocument = async ({ documentId, user }) => {
         throw error;
     }
     try {
-        await supabase.storage.from(BUCKET).remove([document.storagePath]);
+        await localStorageManager.deleteFile(document.storagePath);
     } catch (storageErr) {
-        console.error(`Failed to delete file ${document.storagePath} from Supabase:`, storageErr);
+        console.error(`Failed to delete file ${document.storagePath} from local storage:`, storageErr);
     }
+    try {
+        const localChunkManager = require("../storage/localChunkManager");
+        await localChunkManager.deleteDocumentChunks(documentId);
+    } catch (_) {}
     document.status = "deleted";
     document.updatedBy = user._id;
     await document.save();
@@ -796,14 +707,10 @@ const duplicateDocument = async ({ documentId, user }) => {
     const uniqueName = `${Date.now()}-${crypto.randomUUID()}${ext}`;
     const newStoragePath = `${document.category}/${uniqueName}`;
 
-    const { error } = await supabase.storage
-        .from(BUCKET)
-        .copy(document.storagePath, newStoragePath);
-
-    if (error) {
-        const err = new Error(`Failed to duplicate file in storage: ${error.message}`);
-        err.statusCode = 500;
-        throw err;
+    try {
+        await localStorageManager.copyFile(document.storagePath, newStoragePath);
+    } catch (error) {
+        console.warn(`Local file duplication copy warning for ${document.storagePath} -> ${newStoragePath}:`, error.message);
     }
 
     const newDocument = await Document.create({
@@ -821,7 +728,6 @@ const duplicateDocument = async ({ documentId, user }) => {
     });
 
     cacheService.invalidateCategory(document.category);
-
     indexingService.indexDocumentBackground(newDocument._id).catch(() => {});
     return newDocument;
 };
@@ -869,20 +775,10 @@ const bulkDelete = async ({ ids, user }) => {
 };
 
 const getDocumentBuffer = async (doc) => {
-    const isCrawler = doc.metadata?.isCrawler || doc.category === "crawled" || doc.category === "crawle";
-    const { crawlerSupabase } = require("../config/supabase");
-    const client = isCrawler && crawlerSupabase ? crawlerSupabase : supabase;
-    const bucketName = isCrawler
-        ? (process.env.CRAWLER_SUPABASE_STORAGE_BUCKET || "edumate-crawler")
-        : (process.env.SUPABASE_STORAGE_BUCKET || process.env.SUPABASE_BUCKET || "edumate-docs");
-
-    const { data, error } = await client.storage.from(bucketName).download(doc.storagePath);
-    if (error || !data) {
-        throw new Error(`Failed to download ${doc.originalName} (${doc.storagePath}) from storage: ${error?.message || "Data not found"}`);
+    if (!doc.storagePath) {
+        throw new Error(`Document ${doc.originalName} does not have a storagePath`);
     }
-
-    const arrayBuffer = await data.arrayBuffer();
-    return Buffer.from(arrayBuffer);
+    return localStorageManager.readFile(doc.storagePath);
 };
 
 const downloadZip = async ({ category, ids }) => {
@@ -913,7 +809,7 @@ const downloadZip = async ({ category, ids }) => {
     const filePathsCount = {};
 
     for (const doc of documents) {
-        await new Promise(resolve => setImmediate(resolve)); // Yield to keep Express responsive (Requirement 4)
+        await new Promise(resolve => setImmediate(resolve));
         try {
             const buffer = await getDocumentBuffer(doc);
             const docCategory = (doc.category || "others").trim().toLowerCase();
@@ -967,6 +863,140 @@ const downloadZip = async ({ category, ids }) => {
     return { zipBuffer, filename };
 };
 
+const createPlaceholderDocument = async ({ name, category, department, program, user }) => {
+    const cleanName = (name || "").trim();
+    if (!cleanName) {
+        const err = new Error("File name is required.");
+        err.statusCode = 400;
+        throw err;
+    }
+    const safeCategory = sanitizeCategory(category);
+    const placeholderContent = Buffer.from(`# ${cleanName}\n\n[Placeholder knowledge document created by ${user?.name || "admin"}]\n`);
+    const checksum = getChecksum(placeholderContent);
+
+    const uniqueName = `${Date.now()}-${crypto.randomUUID()}.txt`;
+    const storagePath = `${safeCategory}/${uniqueName}`;
+
+    try {
+        await localStorageManager.saveFile(storagePath, placeholderContent);
+    } catch (e) {
+        console.warn("[Placeholder] Local storage save warning:", e.message);
+    }
+
+    const doc = await Document.create({
+        originalName: cleanName.endsWith(".txt") || cleanName.endsWith(".md") || cleanName.includes(".") ? cleanName : `${cleanName}.txt`,
+        storedName: uniqueName,
+        category: safeCategory,
+        institution: user?.institution || "",
+        department: department || user?.department || "General",
+        program: program || "General",
+        mimeType: "text/plain",
+        fileSize: placeholderContent.length,
+        checksum,
+        storagePath,
+        uploadedBy: user?.userId || user?._id,
+        status: "active",
+        embeddingStatus: "pending",
+        progress: 0,
+        currentStage: "Pending",
+        chunksCount: 0
+    });
+
+    return doc;
+};
+
+const renameFolder = async ({ oldPath, newPath, user }) => {
+    if (!oldPath || !newPath) {
+        const err = new Error("Both oldPath and newPath are required.");
+        err.statusCode = 400;
+        throw err;
+    }
+    const cleanOld = sanitizeCategory(oldPath);
+    const cleanNew = sanitizeCategory(newPath);
+
+    if (cleanOld === cleanNew) return { modifiedCount: 0 };
+
+    try {
+        await localStorageManager.moveFile(cleanOld, cleanNew);
+    } catch (err) {
+        console.warn(`Local directory rename warning for ${cleanOld} -> ${cleanNew}:`, err.message);
+    }
+
+    const docs = await Document.find({
+        status: { $ne: "deleted" },
+        $or: [
+            { category: cleanOld },
+            { category: new RegExp(`^${cleanOld}/`) }
+        ]
+    });
+
+    let count = 0;
+    for (const doc of docs) {
+        let updatedCategory = doc.category;
+        if (doc.category === cleanOld) {
+            updatedCategory = cleanNew;
+        } else if (doc.category.startsWith(`${cleanOld}/`)) {
+            updatedCategory = `${cleanNew}${doc.category.slice(cleanOld.length)}`;
+        }
+        doc.category = updatedCategory;
+        if (doc.storagePath && doc.storagePath.startsWith(`${cleanOld}/`)) {
+            doc.storagePath = `${cleanNew}/${doc.storagePath.slice(cleanOld.length + 1)}`;
+        }
+        await doc.save();
+        count++;
+    }
+
+    return { modifiedCount: count, oldCategory: cleanOld, newCategory: cleanNew };
+};
+
+const deleteFolder = async ({ folderPath, user }) => {
+    if (!folderPath) {
+        const err = new Error("folderPath is required.");
+        err.statusCode = 400;
+        throw err;
+    }
+    const cleanPath = sanitizeCategory(folderPath);
+
+    try {
+        await localStorageManager.deleteFolder(cleanPath);
+    } catch (err) {
+        console.warn(`Local directory delete warning for ${cleanPath}:`, err.message);
+    }
+
+    const docs = await Document.find({
+        status: { $ne: "deleted" },
+        $or: [
+            { category: cleanPath },
+            { category: new RegExp(`^${cleanPath}/`) }
+        ]
+    });
+
+    const docIds = docs.map(d => d._id);
+    if (docIds.length > 0) {
+        await Document.updateMany(
+            { _id: { $in: docIds } },
+            { $set: { status: "deleted", deletedAt: new Date() } }
+        );
+    }
+
+    return { deletedCount: docIds.length, folderPath: cleanPath, deletedIds: docIds };
+};
+
+const bulkRestore = async ({ ids, user }) => {
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+        const err = new Error("List of document IDs is required.");
+        err.statusCode = 400;
+        throw err;
+    }
+
+    const result = await Document.updateMany(
+        { _id: { $in: ids } },
+        { $set: { status: "active", deletedAt: null } }
+    );
+
+    return { restoredCount: result.modifiedCount };
+};
+
 module.exports = {
     uploadDocument,
     listDocuments,
@@ -988,6 +1018,11 @@ module.exports = {
     bulkMove,
     bulkCopy,
     bulkDelete,
+    bulkRestore,
+    createPlaceholderDocument,
+    renameFolder,
+    deleteFolder,
     downloadZip,
+    getDocumentBuffer,
     DOCUMENT_CATEGORIES
 };

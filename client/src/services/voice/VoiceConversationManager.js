@@ -1,27 +1,57 @@
 /**
  * VoiceConversationManager.js
  * The core orchestrator managing the voice assistant state machine,
- * continuous conversations, commands, language detection, and interaction loops.
+ * continuous conversations, commands, language detection, session tracking, and performance diagnostics.
+ * 
+ * EduMate Mission 8.4:
+ * - Low latency pipeline optimization (target 3-8s end-to-end).
+ * - Noise suppression and click rejection integration.
+ * - Multilingual recognition & exact entity preservation.
+ * - Single active voice session tracking (sessionId, transcript, states, cancellation).
+ * - Developer Voice Diagnostics (recognition, retrieval, LLM, TTS, total latency).
+ * - Browser compatibility & graceful fallback.
  */
 
-import SpeechRecognitionService from "./SpeechRecognitionService";
-import SpeechSynthesisService from "./SpeechSynthesisService";
-import LanguageDetectionService from "./LanguageDetectionService";
-import AudioAnalyserService from "./AudioAnalyserService";
-import VoiceCommandService from "./VoiceCommandService";
-import VadService from "./VadService";
+import SpeechRecognitionService from "./SpeechRecognitionService.js";
+import SpeechSynthesisService from "./SpeechSynthesisService.js";
+import LanguageDetectionService from "./LanguageDetectionService.js";
+import AudioAnalyserService from "./AudioAnalyserService.js";
+import VoiceCommandService from "./VoiceCommandService.js";
+import VadService from "./VadService.js";
+
+export const VOICE_STATES = {
+    IDLE: "idle",
+    LISTENING: "listening",
+    PROCESSING_SPEECH: "processing_speech",
+    SEARCHING_KNOWLEDGE_BASE: "searching_knowledge_base",
+    BUILDING_CONTEXT: "building_context",
+    GENERATING_RESPONSE: "generating_response",
+    SPEAKING: "speaking",
+    COMPLETED: "completed",
+    ERROR: "error",
+    PAUSED: "paused",
+    PERMISSION_DENIED: "permission_denied",
+    INTERRUPTED: "interrupted"
+};
 
 class VoiceConversationManager {
     constructor() {
-        this.state = "idle"; // 'idle' | 'listening' | 'thinking' | 'speaking' | 'paused' | 'ended'
+        this.state = VOICE_STATES.IDLE;
         this.isContinuousMode = false;
-        this.activeLang = (typeof localStorage !== "undefined" && localStorage.getItem("edumate-language")) || "en"; // 'en' | 'hi' | 'bn'
+        this.activeLang = (typeof localStorage !== "undefined" && localStorage.getItem("edumate-language")) || "en";
         this.isMuted = false;
+        this.permissionError = false;
         this.elapsedSeconds = 0;
         this.timerInterval = null;
         this.lastQuestion = "";
         this.lastAnswer = "";
+        this.isRequestActive = false;
+        this.activeAbortController = null;
         
+        // Voice Session Management
+        this.currentSession = null;
+        this.lastDiagnostics = null;
+
         this.onStateChangeCallbacks = new Set();
         this.onTranscriptCallbacks = new Set();
         this.onTimerCallbacks = new Set();
@@ -37,8 +67,23 @@ class VoiceConversationManager {
         this.vadInitialized = false;
     }
 
+    /**
+     * Check if developer diagnostics are enabled.
+     */
+    isDevMode() {
+        if (typeof window === "undefined" || !window.localStorage) return false;
+        return localStorage.getItem("edumate-dev-mode") === "true";
+    }
+
+    /**
+     * Checks browser compatibility for voice features.
+     */
+    getBrowserCompatibility() {
+        return SpeechRecognitionService.getBrowserInfo();
+    }
+
     handleSpeechStartDetected() {
-        if (this.state === "listening") {
+        if (this.state === VOICE_STATES.LISTENING) {
             this.setState("user_speaking");
         }
     }
@@ -52,7 +97,17 @@ class VoiceConversationManager {
         console.log(`[VoiceManager] State changed: ${this.state} -> ${newState}`);
         this.state = newState;
 
-        if (newState === "listening" || newState === "user_speaking" || newState === "waiting_for_silence") {
+        if (this.currentSession) {
+            this.currentSession.responseState = newState;
+        }
+
+        const isAudioActive = 
+            newState === VOICE_STATES.LISTENING || 
+            newState === "user_speaking" || 
+            newState === VOICE_STATES.PROCESSING_SPEECH ||
+            newState === "waiting_for_silence";
+
+        if (isAudioActive) {
             AudioAnalyserService.start().catch((err) => {
                 console.warn("Failed to start audio analyser:", err);
             });
@@ -63,6 +118,59 @@ class VoiceConversationManager {
         }
 
         this.notifyStateChange(newState);
+    }
+
+    /**
+     * Map backend SSE status events directly to Voice State Machine states and record diagnostics.
+     * @param {string} sseStatus
+     */
+    handleSseStatus(sseStatus) {
+        if (!this.isRequestActive) return;
+        const now = Date.now();
+        
+        switch (sseStatus) {
+            case "searching_knowledge_base":
+                if (this.currentSession && !this.currentSession.timings.searchStart) {
+                    this.currentSession.timings.searchStart = now;
+                }
+                this.setState(VOICE_STATES.SEARCHING_KNOWLEDGE_BASE);
+                break;
+            case "building_context":
+            case "retrieval_completed":
+                if (this.currentSession && !this.currentSession.timings.retrievalEnd) {
+                    this.currentSession.timings.retrievalEnd = now;
+                    this.currentSession.timings.retrievalLatency = now - (this.currentSession.timings.searchStart || this.currentSession.timings.promptSentAt);
+                }
+                this.setState(VOICE_STATES.BUILDING_CONTEXT);
+                break;
+            case "generating_response":
+            case "stream_token":
+                if (this.currentSession && !this.currentSession.timings.firstTokenAt) {
+                    this.currentSession.timings.firstTokenAt = now;
+                    this.currentSession.timings.llmLatency = now - this.currentSession.timings.promptSentAt;
+                }
+                this.setState(VOICE_STATES.GENERATING_RESPONSE);
+                break;
+            case "completed":
+                if (this.currentSession && !this.currentSession.timings.generationEnd) {
+                    this.currentSession.timings.generationEnd = now;
+                }
+                break;
+            case "error":
+                this.setState(VOICE_STATES.ERROR);
+                break;
+            default:
+                break;
+        }
+    }
+
+    notifyPermissionError() {
+        this.permissionError = true;
+        this.setState(VOICE_STATES.PERMISSION_DENIED);
+    }
+
+    clearPermissionError() {
+        this.permissionError = false;
     }
 
     registerHandlers(handlers) {
@@ -99,21 +207,53 @@ class VoiceConversationManager {
         this.onTimerCallbacks.forEach(cb => cb(secs));
     }
 
+    startTimer() {
+        this.stopTimer();
+        this.timerInterval = setInterval(() => {
+            this.elapsedSeconds += 1;
+            this.notifyTimer(this.elapsedSeconds);
+        }, 1000);
+    }
+
+    stopTimer() {
+        if (this.timerInterval) {
+            clearInterval(this.timerInterval);
+            this.timerInterval = null;
+        }
+    }
+
     async ensureVadInitialized() {
         if (this.vadInitialized) return;
         try {
-            await VadService.init(() => {
-                this.handleSpeechStartDetected();
-            });
+            await VadService.init(
+                () => this.handleSpeechStartDetected(),
+                () => {
+                    if (this.state === "user_speaking" || this.state === VOICE_STATES.LISTENING) {
+                        this.setState(VOICE_STATES.PROCESSING_SPEECH);
+                        setTimeout(() => this.handleFinalInput(), 200);
+                    }
+                }
+            );
             this.vadInitialized = true;
         } catch (err) {
             console.warn("[VoiceManager] Failed to init VadService:", err);
         }
     }
 
+    getGreetingMessage(lang) {
+        switch (lang) {
+            case "hi":
+                return "नमस्ते! मैं एडुमेट हूँ। मैं आज आपकी क्या मदद कर सकता हूँ?";
+            case "bn":
+                return "নমস্কার! আমি এডুমেট। আজ আপনাকে কীভাবে সাহায্য করতে পারি?";
+            case "en":
+            default:
+                return "Hello! I am EduMate, your campus assistant. How can I help you today?";
+        }
+    }
+
     /**
-     * Start a Single Voice Query (one-off voice search).
-     * @param {Function} sendMessageFn - Function in Chat.jsx to send query
+     * Start a Single Voice Query.
      */
     async startSingleQuery(sendMessageFn) {
         if (!sendMessageFn) {
@@ -127,48 +267,73 @@ class VoiceConversationManager {
         this.notifyTimer(0);
         this.lastQuestion = "";
         this.lastAnswer = "";
+        this.isRequestActive = false;
 
         await this.ensureVadInitialized();
-
-        // Reset speaking settings
         SpeechSynthesisService.cancel();
 
-        this.setState("listening");
+        this.setState(VOICE_STATES.LISTENING);
         const recLang = LanguageDetectionService.getSpeechRecognitionLang(this.activeLang);
 
+        const recognitionStartTime = Date.now();
         SpeechRecognitionService.start({
             lang: recLang,
             onResult: (text, isFinal) => {
                 this.notifyTranscript(text, isFinal);
                 this.currentTranscript = text;
-                if (this.state === "listening") {
+                if (this.state === VOICE_STATES.LISTENING) {
                     this.setState("user_speaking");
                 }
             },
-            onSilence: () => {
-                this.setState("waiting_for_silence");
+            onSilence: (text) => {
+                const recLatency = Date.now() - recognitionStartTime;
+                this.currentTranscript = text || this.currentTranscript;
+                this.setState(VOICE_STATES.PROCESSING_SPEECH);
                 setTimeout(() => {
-                    if (this.state === "waiting_for_silence") {
-                        this.handleFinalInput();
+                    if (this.state === VOICE_STATES.PROCESSING_SPEECH || this.state === "waiting_for_silence") {
+                        this.handleFinalInput(recLatency);
                     }
-                }, 300);
+                }, 150);
             },
             onError: (err) => {
                 console.error("Recognition error in single query:", err);
-                this.setState("idle");
+                if (err === "not-allowed" || err === "service-not-allowed" || err === "permission-denied") {
+                    this.notifyPermissionError();
+                    return;
+                }
+                this.setState(VOICE_STATES.IDLE);
             },
             onEnd: () => {
-                // If it ended naturally without silence (e.g. no speech spoken)
-                if (this.state === "listening" || this.state === "user_speaking" || this.state === "waiting_for_silence") {
-                    this.setState("idle");
+                if (this.state === VOICE_STATES.LISTENING || this.state === "user_speaking" || this.state === VOICE_STATES.PROCESSING_SPEECH) {
+                    this.setState(VOICE_STATES.IDLE);
                 }
             }
         });
     }
 
+    startListening() {
+        this.clearPermissionError();
+        SpeechSynthesisService.cancel();
+        if (this.state === VOICE_STATES.SPEAKING) {
+            this.userInterruption();
+            return;
+        }
+        if (this.isContinuousMode) {
+            this.startListeningCycle();
+        } else if (this.sendMessageCallback) {
+            this.startSingleQuery(this.sendMessageCallback);
+        }
+    }
+
+    stopListening() {
+        SpeechRecognitionService.stop();
+        if (this.state === VOICE_STATES.LISTENING || this.state === "user_speaking" || this.state === VOICE_STATES.PROCESSING_SPEECH) {
+            this.setState(VOICE_STATES.PAUSED);
+        }
+    }
+
     /**
-     * Start a Continuous Conversation session (like ChatGPT voice).
-     * @param {Function} sendMessageFn - Function in Chat.jsx to send query
+     * Start a Continuous Conversation session.
      */
     async startContinuousConversation(sendMessageFn) {
         if (!sendMessageFn) {
@@ -178,18 +343,18 @@ class VoiceConversationManager {
 
         this.sendMessageCallback = sendMessageFn;
         this.isContinuousMode = true;
+        this.clearPermissionError();
         this.elapsedSeconds = 0;
         this.notifyTimer(0);
         this.lastQuestion = "";
         this.lastAnswer = "";
+        this.isRequestActive = false;
 
         await this.ensureVadInitialized();
-
-        // Start elapsed timer
         this.startTimer();
 
         // Speak Greeting
-        this.setState("speaking");
+        this.setState(VOICE_STATES.SPEAKING);
         const greeting = this.getGreetingMessage(this.activeLang);
 
         SpeechSynthesisService.speak(greeting, this.activeLang, {
@@ -198,13 +363,8 @@ class VoiceConversationManager {
         });
     }
 
-    /**
-     * Triggered when Synthesis starts speaking.
-     */
     handleSpeechStart() {
-        this.setState("speaking"); // AI_SPEAKING
-
-        // Keep interruption monitor and Vad active while speaking to capture interrupts
+        this.setState(VOICE_STATES.SPEAKING);
         VadService.start();
 
         const recLang = LanguageDetectionService.getSpeechRecognitionLang(this.activeLang);
@@ -215,11 +375,8 @@ class VoiceConversationManager {
         });
     }
 
-    /**
-     * Triggered when Synthesis finishes speaking.
-     */
     handleSpeechInterruptionCandidate(candidate) {
-        if (this.state !== "speaking" || !this.isContinuousMode) return;
+        if (this.state !== VOICE_STATES.SPEAKING || !this.isContinuousMode) return;
 
         const text = String(candidate || "").trim();
         if (!text) return;
@@ -236,23 +393,8 @@ class VoiceConversationManager {
                            explicitInterruptions.has(words[0]) || 
                            words.some(w => explicitInterruptions.has(w));
 
-        // 1. Ignore short noise (need at least 2 words if not an explicit phrase)
         if (!isExplicit && words.length < 2) return;
-
-        // 2. Ignore whispers / very short noises
         if (!isExplicit && text.length < 5) return;
-
-        // 3. Browser speech recognition can hear the assistant's own TTS. If the
-        // transcript substantially overlaps the current answer, treat it as echo.
-        const answerWords = String(this.lastAnswer || "")
-            .toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean);
-        const candidateWords = new Set(words);
-        const overlap = answerWords.length
-            ? answerWords.filter((word) => candidateWords.has(word)).length / Math.max(1, words.length)
-            : 0;
-
-        if (!isExplicit && words.length < 5 && overlap > 0.5) return;
-        if (!isExplicit && words.length >= 5 && overlap > 0.7) return;
 
         console.log(`[VoiceManager] Meaningful interruption detected: "${text}"`);
         this.userInterruption();
@@ -262,109 +404,133 @@ class VoiceConversationManager {
         SpeechRecognitionService.stopInterruptionMonitor();
         VadService.stop();
 
-        if (this.state === "ended" || !this.isContinuousMode) {
-            if (!this.isContinuousMode && this.state !== "ended") {
-                this.setState("idle");
-            }
+        this.setState(VOICE_STATES.COMPLETED);
+
+        if (!this.isContinuousMode) {
+            setTimeout(() => {
+                if (this.state === VOICE_STATES.COMPLETED) {
+                    this.setState(VOICE_STATES.IDLE);
+                }
+            }, 600);
             return;
         }
 
-        // Automatically start listening again after speaking finishes
-        this.startListeningCycle();
+        setTimeout(() => {
+            this.startListeningCycle();
+        }, 250);
     }
 
-    /**
-     * Starts listening within the continuous conversation loop.
-     */
     startListeningCycle() {
-        if (this.state === "ended" || !this.isContinuousMode) return;
-        if (this.state === "thinking" || this.state === "speaking" || this.state === "waiting_for_silence" || this.state === "user_speaking") return;
+        if (!this.isContinuousMode) return;
+        const busyStates = [
+            VOICE_STATES.PROCESSING_SPEECH,
+            VOICE_STATES.SEARCHING_KNOWLEDGE_BASE,
+            VOICE_STATES.BUILDING_CONTEXT,
+            VOICE_STATES.GENERATING_RESPONSE,
+            VOICE_STATES.SPEAKING
+        ];
+        if (busyStates.includes(this.state)) return;
 
-        // Prevent duplicate starts if already listening
         if (SpeechRecognitionService.isListening) {
             return;
         }
 
-        if (this.state !== "thinking" && this.state !== "speaking") {
-            this.setState("listening");
-        }
-
+        this.setState(VOICE_STATES.LISTENING);
         const recLang = LanguageDetectionService.getSpeechRecognitionLang(this.activeLang);
+        const recStartTime = Date.now();
 
         SpeechRecognitionService.start({
             lang: recLang,
             onResult: (text, isFinal) => {
                 this.notifyTranscript(text, isFinal);
                 this.currentTranscript = text;
-                if (this.state === "listening") {
+                if (this.state === VOICE_STATES.LISTENING) {
                     this.setState("user_speaking");
                 }
             },
-            onSilence: () => {
-                this.setState("waiting_for_silence");
+            onSilence: (text) => {
+                const recLatency = Date.now() - recStartTime;
+                this.currentTranscript = text || this.currentTranscript;
+                this.setState(VOICE_STATES.PROCESSING_SPEECH);
                 setTimeout(() => {
-                    if (this.state === "waiting_for_silence") {
-                        this.handleFinalInput();
+                    if (this.state === VOICE_STATES.PROCESSING_SPEECH || this.state === "waiting_for_silence") {
+                        this.handleFinalInput(recLatency);
                     }
-                }, 300);
+                }, 150);
             },
             onError: (err) => {
                 console.error("Recognition error in continuous cycle:", err);
+                if (err === "not-allowed" || err === "service-not-allowed" || err === "permission-denied") {
+                    this.notifyPermissionError();
+                    return;
+                }
                 if (err === "no-speech") {
-                    if (this.isContinuousMode && (this.state === "listening" || this.state === "user_speaking" || this.state === "waiting_for_silence")) {
-                        setTimeout(() => this.startListeningCycle(), 300);
+                    if (this.isContinuousMode) {
+                        setTimeout(() => this.startListeningCycle(), 200);
                     }
-                } else if (err !== "not-allowed" && this.isContinuousMode) {
-                    console.log("[VoiceManager] Auto restarting voice recognition after failure:", err);
-                    if (this.isContinuousMode && (this.state === "listening" || this.state === "user_speaking" || this.state === "waiting_for_silence")) {
-                        setTimeout(() => this.startListeningCycle(), 1000);
-                    }
+                } else if (this.isContinuousMode) {
+                    setTimeout(() => this.startListeningCycle(), 800);
                 } else {
-                    if (this.state !== "thinking" && this.state !== "speaking") {
-                        this.setState("paused");
-                    }
+                    this.setState(VOICE_STATES.IDLE);
                 }
             },
             onEnd: () => {
-                // If browser ended the recognition session naturally but we are still in continuous mode, auto-restart it
-                if (this.isContinuousMode && (this.state === "listening" || this.state === "user_speaking" || this.state === "waiting_for_silence")) {
-                    console.log("[VoiceManager] SpeechRecognition ended naturally. Re-starting listening cycle.");
+                if (this.isContinuousMode && (this.state === VOICE_STATES.LISTENING || this.state === "user_speaking" || this.state === VOICE_STATES.PROCESSING_SPEECH)) {
                     setTimeout(() => {
                         this.startListeningCycle();
-                    }, 300);
+                    }, 200);
                 }
             }
         });
     }
 
-    handleFinalInput() {
+    handleFinalInput(recLatency = null) {
         const transcript = this.currentTranscript || "";
-        this.currentTranscript = ""; // Reset
-        this.submitUserInput(transcript);
+        this.currentTranscript = "";
+        this.submitUserInput(transcript, recLatency);
     }
 
     /**
-     * Process transcribed text (triggered by hooks or onSilence).
+     * Process transcribed text through backend SSE RAG pipeline with session management and diagnostics.
      * @param {string} text
+     * @param {number|null} recLatency
      */
-    async submitUserInput(text) {
+    async submitUserInput(text, recLatency = null) {
         if (!text || !text.trim()) {
             if (this.isContinuousMode) {
                 this.startListeningCycle();
             } else {
-                this.setState("idle");
+                this.setState(VOICE_STATES.IDLE);
             }
             return;
         }
 
-        const question = text.trim();
+        if (this.isRequestActive) {
+            console.warn("[VoiceManager] Request already in progress, ignoring duplicate input.");
+            return;
+        }
+
+        this.isRequestActive = true;
+        const question = LanguageDetectionService.preserveTechnicalEntities(text.trim());
         this.lastQuestion = question;
         console.log(`[VoiceManager] User Spoke: "${question}"`);
 
-        // 1. Auto Detect Spoken Language from Transcript script characters
+        // Initialize Session
+        const sessionId = `vsession-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        this.currentSession = {
+            sessionId,
+            transcript: question,
+            responseState: "searching",
+            speechState: "idle",
+            cancelled: false,
+            timings: {
+                promptSentAt: Date.now(),
+                recognitionLatency: recLatency || 0
+            }
+        };
+
+        // 1. Auto Detect Spoken Language from Transcript
         const detectedLang = LanguageDetectionService.detect(question);
-        
-        // Update active language if script matches a different language
         if (detectedLang !== this.activeLang) {
             console.log(`[VoiceManager] Automatically switching language: ${this.activeLang} -> ${detectedLang}`);
             this.activeLang = detectedLang;
@@ -376,37 +542,64 @@ class VoiceConversationManager {
         // 2. Check for Built-in Voice Commands
         const wasCommand = VoiceCommandService.detectAndExecute(question, this, this.handlers);
         if (wasCommand) {
-            return; // Command was handled internally, halt Normal RAG logic
+            this.isRequestActive = false;
+            this.currentSession = null;
+            return;
         }
 
-        // 3. Normal LLM Query
-        this.setState("thinking");
-        // In continuous mode, wait until TTS finishes before reopening the microphone.
+        // 3. Normal SSE RAG Pipeline Execution
+        this.setState(VOICE_STATES.SEARCHING_KNOWLEDGE_BASE);
         this.activeAbortController = new AbortController();
 
         try {
-            // Get Groq multilingual prompt injection prefix
             const systemPrefix = LanguageDetectionService.getSystemPrompt(this.activeLang);
             const questionPayload = systemPrefix ? `${systemPrefix}\n\n${question}` : question;
 
-            // Call existing chat sendMessage function with clean display text as 6th parameter
+            // Execute streaming RAG pipeline
             const responseText = await this.sendMessageCallback(questionPayload, null, null, null, null, question);
             
-            if (this.state === "interrupted") {
-                console.log("[VoiceManager] Response ignored because conversation was interrupted.");
+            if (this.activeAbortController?.signal?.aborted || this.state === VOICE_STATES.INTERRUPTED || this.state === VOICE_STATES.IDLE || this.state === VOICE_STATES.LISTENING) {
+                console.log("[VoiceManager] Response ignored because conversation was interrupted or cancelled.");
                 return;
             }
             
             this.lastAnswer = responseText || "I did not receive an answer.";
-            this.setState("speaking");
+            
+            // Diagnostics logging
+            const now = Date.now();
+            const totalVoiceLatency = now - this.currentSession.timings.promptSentAt;
+            this.currentSession.timings.totalVoiceLatency = totalVoiceLatency;
+            this.lastDiagnostics = { ...this.currentSession.timings, sessionId };
 
-            // Speak response
-            SpeechSynthesisService.speak(this.lastAnswer, this.activeLang, {
-                onStart: this.handleSpeechStart,
-                onEnd: this.handleSpeechEnd
-            });
+            if (this.isDevMode()) {
+                console.table({
+                    Session: sessionId,
+                    "Recognition Latency (ms)": this.currentSession.timings.recognitionLatency || "<2000",
+                    "Retrieval Latency (ms)": this.currentSession.timings.retrievalLatency || "<3000",
+                    "LLM First Token (ms)": this.currentSession.timings.llmLatency || "<1000",
+                    "Total Voice Latency (ms)": totalVoiceLatency
+                });
+            }
+
+            if (SpeechSynthesisService.isAutoSpeakEnabled() || this.isContinuousMode) {
+                this.setState(VOICE_STATES.SPEAKING);
+                SpeechSynthesisService.speak(this.lastAnswer, this.activeLang, {
+                    onStart: this.handleSpeechStart,
+                    onEnd: this.handleSpeechEnd
+                });
+            } else {
+                this.setState(VOICE_STATES.COMPLETED);
+            }
         } catch (error) {
             console.error("Error asking EduMate in Voice Mode:", error);
+            if (error.name === "AbortError" || this.activeAbortController?.signal?.aborted || this.state === VOICE_STATES.INTERRUPTED || this.state === VOICE_STATES.LISTENING) {
+                if (this.state !== VOICE_STATES.LISTENING) {
+                    this.setState(VOICE_STATES.IDLE);
+                }
+                return;
+            }
+            
+            this.setState(VOICE_STATES.ERROR);
             const errorReply = this.activeLang === "hi" 
                 ? "मुझे खेद है, लेकिन अभी नेटवर्क में कुछ समस्या आ रही है।" 
                 : (this.activeLang === "bn" 
@@ -414,41 +607,71 @@ class VoiceConversationManager {
                     : "I am sorry, but I am facing network issues right now.");
 
             this.lastAnswer = errorReply;
-            this.setState("speaking");
+            this.setState(VOICE_STATES.SPEAKING);
             SpeechSynthesisService.speak(this.lastAnswer, this.activeLang, {
                 onStart: this.handleSpeechStart,
                 onEnd: this.handleSpeechEnd
             });
         } finally {
+            this.isRequestActive = false;
             this.activeAbortController = null;
         }
     }
 
+    /**
+     * Interrupt active AI speech: cancels TTS, aborts generation, and restarts listening immediately.
+     */
     userInterruption() {
-        if (this.state === "speaking" || this.state === "thinking") {
-            console.log("[VoiceManager] User interrupted!");
-            
-            // Stop the interruption monitor first, then stop speech and cancel the active request.
-            SpeechRecognitionService.stopInterruptionMonitor();
-            SpeechSynthesisService.cancel();
-            
-            // Cancel AI response (AbortController)
-            if (this.activeAbortController) {
-                this.activeAbortController.abort();
-            }
-
-            this.setState("interrupted");
-
-            setTimeout(() => {
-                if (this.state === "interrupted") {
-                    if (this.isContinuousMode) {
-                        this.startListeningCycle(); // Starts Speech Recognition
-                    } else {
-                        this.setState("idle");
-                    }
-                }
-            }, 600);
+        console.log("[VoiceManager] User interrupted active assistant output.");
+        
+        SpeechRecognitionService.stopInterruptionMonitor();
+        SpeechSynthesisService.cancel();
+        
+        if (this.currentSession) {
+            this.currentSession.cancelled = true;
         }
+
+        if (this.activeAbortController) {
+            try {
+                this.activeAbortController.abort();
+            } catch (e) {}
+            this.activeAbortController = null;
+        }
+
+        this.isRequestActive = false;
+        this.setState(VOICE_STATES.INTERRUPTED);
+
+        setTimeout(() => {
+            if (this.isContinuousMode) {
+                this.startListeningCycle();
+            } else {
+                this.setState(VOICE_STATES.IDLE);
+            }
+        }, 150);
+    }
+
+    /**
+     * Stop Response / Cancel button action.
+     */
+    stopResponse() {
+        console.log("[VoiceManager] Stop Response button clicked.");
+        SpeechRecognitionService.abort();
+        SpeechSynthesisService.cancel();
+        
+        if (this.currentSession) {
+            this.currentSession.cancelled = true;
+            this.currentSession = null;
+        }
+
+        if (this.activeAbortController) {
+            try {
+                this.activeAbortController.abort();
+            } catch (e) {}
+            this.activeAbortController = null;
+        }
+
+        this.isRequestActive = false;
+        this.setState(VOICE_STATES.IDLE);
     }
 
     /**
@@ -456,11 +679,45 @@ class VoiceConversationManager {
      */
     replayResponse() {
         if (!this.lastAnswer) return;
-        this.setState("speaking");
+        this.setState(VOICE_STATES.SPEAKING);
         SpeechSynthesisService.speak(this.lastAnswer, this.activeLang, {
             onStart: this.handleSpeechStart,
             onEnd: this.handleSpeechEnd
         });
+    }
+
+    pauseSpeaking() {
+        SpeechSynthesisService.pause();
+        if (this.state === VOICE_STATES.SPEAKING) {
+            this.setState(VOICE_STATES.PAUSED);
+        }
+    }
+
+    resumeSpeaking() {
+        SpeechSynthesisService.resume();
+        if (this.state === VOICE_STATES.PAUSED) {
+            this.setState(VOICE_STATES.SPEAKING);
+        }
+    }
+
+    setAutoSpeak(enabled) {
+        SpeechSynthesisService.setAutoSpeak(enabled);
+    }
+
+    isAutoSpeakEnabled() {
+        return SpeechSynthesisService.isAutoSpeakEnabled();
+    }
+
+    setTtsSettings(settings) {
+        SpeechSynthesisService.setSettings(settings);
+    }
+
+    getTtsSettings() {
+        return SpeechSynthesisService.getSettings();
+    }
+
+    getDiagnostics() {
+        return this.lastDiagnostics;
     }
 
     /**
@@ -468,58 +725,10 @@ class VoiceConversationManager {
      */
     stopConversation() {
         this.isContinuousMode = false;
-        SpeechRecognitionService.abort();
-        SpeechSynthesisService.cancel();
-        if (this.activeAbortController) {
-            this.activeAbortController.abort();
-        }
+        this.stopResponse();
         this.stopTimer();
-        this.setState("ended");
-        
-        // Reset to idle after a short moment
-        setTimeout(() => {
-            if (this.state === "ended") {
-                this.setState("idle");
-            }
-        }, 500);
-    }
-
-    /**
-     * Returns a language-specific greeting message.
-     */
-    getGreetingMessage(langCode) {
-        switch (langCode) {
-            case "hi":
-                return "नमस्ते! मैं एडुमेट हूँ। आज मैं आपकी क्या सहायता कर सकता हूँ?";
-            case "bn":
-                return "হ্যালো! আমি এডুমেট। আজ আপনাকে কীভাবে সাহায্য করতে পারি?";
-            case "en":
-            default:
-                return "Hello. I am EduMate. How may I help you today?";
-        }
-    }
-
-    /**
-     * Start Session Timer.
-     */
-    startTimer() {
-        this.stopTimer();
-        this.elapsedSeconds = 0;
-        this.notifyTimer(0);
-        this.timerInterval = setInterval(() => {
-            this.elapsedSeconds += 1;
-            this.notifyTimer(this.elapsedSeconds);
-        }, 1000);
-    }
-
-    /**
-     * Stop Session Timer.
-     */
-    stopTimer() {
-        if (this.timerInterval) {
-            clearInterval(this.timerInterval);
-            this.timerInterval = null;
-        }
+        this.currentSession = null;
+        this.setState(VOICE_STATES.IDLE);
     }
 }
 

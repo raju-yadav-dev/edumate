@@ -12,14 +12,26 @@ const fetch = (() => {
 const withTimeoutAndRetry = async (fn, timeoutMs = 20000, retries = 3, delay = 1000, operationName = "Operation") => {
     let lastErr;
     for (let i = 0; i < retries; i++) {
+        let timeoutId;
+        let isSettled = false;
         try {
-            let timeoutId;
             const timeoutPromise = new Promise((_, reject) => {
-                timeoutId = setTimeout(() => reject(new Error(`${operationName} timed out after ${timeoutMs}ms`)), timeoutMs);
+                timeoutId = setTimeout(() => {
+                    if (!isSettled) {
+                        reject(new Error(`${operationName} timed out after ${timeoutMs}ms`));
+                    }
+                }, timeoutMs);
             });
-            const result = await Promise.race([fn(), timeoutPromise]).finally(() => clearTimeout(timeoutId));
+            const result = await Promise.race([
+                Promise.resolve().then(() => fn()),
+                timeoutPromise
+            ]);
+            isSettled = true;
+            if (timeoutId) clearTimeout(timeoutId);
             return result;
         } catch (err) {
+            isSettled = true;
+            if (timeoutId) clearTimeout(timeoutId);
             lastErr = err;
             console.warn(`[RETRY] ${operationName} failed (attempt ${i + 1}/${retries}): ${err.message}`);
             if (i < retries - 1) {
@@ -29,6 +41,7 @@ const withTimeoutAndRetry = async (fn, timeoutMs = 20000, retries = 3, delay = 1
     }
     throw lastErr;
 };
+
 
 /**
  * Fetch HTTP wrapper with timeout and retry support.

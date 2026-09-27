@@ -83,8 +83,24 @@ const startDev = async () => {
     console.log();
     */
 
+    // 4. Auto-launch Local LLM if configured for llama.cpp / local model
+    const llmProvider = (process.env.LLM_PROVIDER || "llama.cpp").toLowerCase();
+    if (llmProvider === "llama.cpp" || llmProvider === "llama" || llmProvider === "local") {
+        try {
+            console.log(logger.cyan("🤖 Initializing Local LLM (llama.cpp)..."));
+            const llamaProcessManager = require("../server/services/llamaProcessManager");
+            const result = await llamaProcessManager.startServer({ silent: false });
+            if (result.success) {
+                console.log(logger.green("✓ Local LLM server is ready and operational.\n"));
+            } else {
+                console.log(logger.yellow(`ℹ️ Local LLM auto-spawn status: ${result.error || result.code || "Offline"}\n`));
+            }
+        } catch (llmErr) {
+            console.log(logger.yellow(`⚠️ Local LLM startup note: ${llmErr.message}\n`));
+        }
+    }
 
-    // 8. Print Dashboard
+    // 5. Print Dashboard
     printDashboard({
         env: process.env.NODE_ENV || "development",
         backendUrl: `http://localhost:${process.env.PORT || "5000"}`,

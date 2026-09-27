@@ -1,6 +1,5 @@
 const User = require("../models/User");
 const { verifyAccessToken } = require("../utils/tokenizer");
-const { sendError } = require("../utils/response");
 
 const authenticate = async (req, res, next) => {
     try {
@@ -8,25 +7,58 @@ const authenticate = async (req, res, next) => {
         const [scheme, token] = authHeader.split(" ");
 
         if (scheme !== "Bearer" || !token) {
-            return sendError(res, 401, "Authentication token is required.");
+            return res.status(401).json({
+                success: false,
+                code: "MISSING_TOKEN",
+                message: "Authentication token is required."
+            });
         }
 
-        const decoded = verifyAccessToken(token);
+        let decoded;
+        try {
+            decoded = verifyAccessToken(token);
+        } catch (error) {
+            if (error.name === "TokenExpiredError") {
+                return res.status(401).json({
+                    success: false,
+                    code: "TOKEN_EXPIRED",
+                    message: "Access token has expired."
+                });
+            }
+            return res.status(401).json({
+                success: false,
+                code: "INVALID_TOKEN",
+                message: "Invalid access token."
+            });
+        }
+
         const user = await User.findById(decoded.id).select("-password");
 
         if (!user) {
-            return sendError(res, 401, "Authenticated user no longer exists.");
+            return res.status(401).json({
+                success: false,
+                code: "USER_NOT_FOUND",
+                message: "Authenticated user no longer exists."
+            });
+        }
+
+        if (user.isLocked && user.isLocked()) {
+            return res.status(403).json({
+                success: false,
+                code: "ACCOUNT_LOCKED",
+                message: "Your account is temporarily locked due to repeated failed attempts. Please try again later."
+            });
         }
 
         req.user = user;
         return next();
     } catch (error) {
-        if (error.name === "TokenExpiredError") {
-            console.warn(`[Auth] Token expired at ${error.expiredAt}`);
-        } else {
-            console.error(`[Auth] Token verification failed: ${error.message}`);
-        }
-        return sendError(res, 401, "Invalid or expired authentication token.");
+        console.error(`[Auth] Authentication middleware error: ${error.message}`);
+        return res.status(401).json({
+            success: false,
+            code: "INVALID_TOKEN",
+            message: "Authentication failed."
+        });
     }
 };
 

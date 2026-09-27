@@ -154,7 +154,6 @@ const startServer = async () => {
 
                 // Campus Navigation startup migration and reindexing
                 const Document = require("./models/Document");
-                const Chunk = require("./models/Chunk");
                 const indexingService = require("./ai/services/indexingService");
 
                 try {
@@ -184,6 +183,7 @@ const startServer = async () => {
 
                 // RAG Indexing startup check
                 try {
+                    const Chunk = require("./models/Chunk");
                     const count = await Chunk.countDocuments({ "metadata.sourceType": "campus_navigation" });
                     const campusDocs = await Document.find({ status: "active", category: /^campus_navigation/ });
                     
@@ -216,14 +216,9 @@ const startServer = async () => {
                     // AI services check (llama.cpp probe)
                     (async () => {
                         try {
-                            const fetch = (() => {
-                                try { return require("node-fetch"); } catch { return global.fetch; }
-                            })();
-                            const probeRes = await Promise.race([
-                                fetch("http://127.0.0.1:8080/v1/models"),
-                                new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 3000))
-                            ]);
-                            return { llmAvailable: probeRes.ok };
+                            const { checkLlmHealth } = require("./config/llm");
+                            const isHealthy = await checkLlmHealth(3000);
+                            return { llmAvailable: isHealthy };
                         } catch (e) {
                             return { llmAvailable: false };
                         }
@@ -346,21 +341,35 @@ const startServer = async () => {
                 
                 dashboard.push("");
                 
-                const supabaseStatusText = supabaseConnected ? "✓ Connected" : "❌ Disconnected";
-                const supabaseStorageText = supabaseConnected ? "✓ Available" : "⚠️ Unavailable";
-                dashboard.push(makeSectionHeader("SUPABASE"));
-                dashboard.push(padLine("Status", supabaseStatusText, 12, 60, supabaseConnected ? colors.green : colors.red));
-                dashboard.push(padLine("Service", "Supabase Storage", 12));
-                dashboard.push(padLine("Storage", supabaseStorageText, 12, 60, supabaseConnected ? colors.green : colors.red));
-                dashboard.push(borderSingle);
+                // Storage section based on configured provider
+                const storageProvider = process.env.STORAGE_PROVIDER || "local";
+                if (storageProvider === "supabase") {
+                    const supabaseStatusText = supabaseConnected ? "✓ Connected" : "❌ Disconnected";
+                    const supabaseStorageText = supabaseConnected ? "✓ Available" : "⚠️ Unavailable";
+                    dashboard.push(makeSectionHeader("SUPABASE STORAGE"));
+                    dashboard.push(padLine("Status", supabaseStatusText, 12, 60, supabaseConnected ? colors.green : colors.red));
+                    dashboard.push(padLine("Service", "Supabase Storage", 12));
+                    dashboard.push(padLine("Storage", supabaseStorageText, 12, 60, supabaseConnected ? colors.green : colors.red));
+                    dashboard.push(borderSingle);
+                } else {
+                    const localPath = process.env.LOCAL_STORAGE_PATH || "./storage";
+                    dashboard.push(makeSectionHeader("LOCAL STORAGE"));
+                    dashboard.push(padLine("Status", "✓ Ready", 12, 60, colors.green));
+                    dashboard.push(padLine("Provider", "Local Filesystem", 12));
+                    dashboard.push(padLine("Path", localPath, 12));
+                    dashboard.push(borderSingle);
+                }
                 
                 dashboard.push("");
                 
+                const { getLlmConfig } = require("./config/llm");
+                const llmConfig = getLlmConfig();
+
                 const llamaStatusText = aiCheck.llmAvailable ? "✓ Connected" : "❌ Disconnected";
                 dashboard.push(makeSectionHeader("AI SERVICES"));
-                dashboard.push(padLine("Provider", "llama.cpp", 12));
-                dashboard.push(padLine("Model", "Qwen3-4B-Instruct-Q4_K_M.gguf", 12));
-                dashboard.push(padLine("Endpoint", "http://127.0.0.1:8080", 12));
+                dashboard.push(padLine("Provider", llmConfig.provider, 12));
+                dashboard.push(padLine("Model", llmConfig.model, 12));
+                dashboard.push(padLine("Endpoint", llmConfig.baseUrl, 12));
                 dashboard.push(padLine("Status", llamaStatusText, 12, 60, aiCheck.llmAvailable ? colors.green : colors.red));
                 dashboard.push(borderSingle);
                 
@@ -422,11 +431,18 @@ const startServer = async () => {
                 
                 console.log("\n" + dashboard.join("\n") + "\n");
 
-                console.log("AI Provider : llama.cpp");
-                console.log("Model       : Qwen3-4B-Instruct-Q4_K_M.gguf");
-                console.log("Endpoint    : http://127.0.0.1:8080");
+                console.log(`AI Provider : ${llmConfig.provider}`);
+                console.log(`Model       : ${llmConfig.model}`);
+                console.log(`Endpoint    : ${llmConfig.baseUrl}`);
                 console.log(`Status      : ${aiCheck.llmAvailable ? "Connected" : "Disconnected"}`);
                 console.log();
+
+                // Mission 14.1 — 10-Layer Smart Cache Architecture Report
+                try {
+                    const cacheService = require("./services/cacheService");
+                    console.log(cacheService.generateCacheReport());
+                    console.log();
+                } catch (_) {}
             });
     } catch (error) {
         console.error(error);

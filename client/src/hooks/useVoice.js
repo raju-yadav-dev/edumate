@@ -1,6 +1,6 @@
 /**
  * useVoice.js
- * React hook to expose Voice Assistant controls and states.
+ * React hook to expose Voice Assistant controls, playback methods, and settings.
  */
 
 import { useEffect, useState } from "react";
@@ -14,6 +14,8 @@ export default function useVoice() {
     const [elapsedSeconds, setElapsedSeconds] = useState(VoiceConversationManager.elapsedSeconds);
     const [activeLang, setActiveLang] = useState(VoiceConversationManager.activeLang);
     const [isMuted, setIsMuted] = useState(VoiceConversationManager.isMuted);
+    const [autoSpeak, setAutoSpeakState] = useState(() => SpeechSynthesisService.isAutoSpeakEnabled());
+    const [ttsSettings, setTtsSettingsState] = useState(() => SpeechSynthesisService.getSettings());
 
     const isSupported = SpeechRecognitionService.isSupported() && SpeechSynthesisService.isSupported();
 
@@ -23,6 +25,8 @@ export default function useVoice() {
         setElapsedSeconds(VoiceConversationManager.elapsedSeconds);
         setActiveLang(VoiceConversationManager.activeLang);
         setIsMuted(VoiceConversationManager.isMuted);
+        setAutoSpeakState(SpeechSynthesisService.isAutoSpeakEnabled());
+        setTtsSettingsState(SpeechSynthesisService.getSettings());
 
         // Subscribe to state modifications in Manager
         const unsubscribeState = VoiceConversationManager.subscribeState((state) => {
@@ -79,6 +83,36 @@ export default function useVoice() {
         VoiceConversationManager.replayResponse();
     };
 
+    const pauseSpeaking = () => {
+        VoiceConversationManager.pauseSpeaking();
+    };
+
+    const resumeSpeaking = () => {
+        VoiceConversationManager.resumeSpeaking();
+    };
+
+    const setAutoSpeak = (enabled) => {
+        VoiceConversationManager.setAutoSpeak(enabled);
+        setAutoSpeakState(enabled);
+    };
+
+    const setTtsSettings = (settings) => {
+        VoiceConversationManager.setTtsSettings(settings);
+        setTtsSettingsState(SpeechSynthesisService.getSettings());
+    };
+
+    const startListening = () => {
+        VoiceConversationManager.startListening();
+    };
+
+    const stopListening = () => {
+        VoiceConversationManager.stopListening();
+    };
+
+    const stopResponse = () => {
+        VoiceConversationManager.stopResponse();
+    };
+
     const userInterruption = () => {
         VoiceConversationManager.userInterruption();
     };
@@ -86,17 +120,27 @@ export default function useVoice() {
     return {
         isSupported,
         voiceState,
+        permissionError: VoiceConversationManager.permissionError,
         transcript,
         elapsedSeconds,
         activeLang,
         isMuted,
+        autoSpeak,
+        ttsSettings,
         isContinuousMode: VoiceConversationManager.isContinuousMode,
         startSingleQuery,
         startContinuousConversation,
+        startListening,
+        stopListening,
+        stopResponse,
         stopConversation,
         toggleMute,
         setLanguage,
         replayResponse,
+        pauseSpeaking,
+        resumeSpeaking,
+        setAutoSpeak,
+        setTtsSettings,
         userInterruption
     };
 }

@@ -11,12 +11,13 @@
 
 .table-head,
 .file-row {
-    width: max-content;
-    min-width: 1370px;
+    width: 100%;
+    min-width: 0;
     display: grid;
-    grid-template-columns: 34px 38px minmax(210px, 1.7fr) 72px 78px 112px 132px 132px 100px 176px;
+    grid-template-columns: 34px 38px minmax(0, 1.8fr) 72px 78px 105px 120px 120px 85px 120px;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
+    box-sizing: border-box;
 }
 
 .table-head {
@@ -29,11 +30,13 @@
     background: rgba(8, 14, 22, 0.94);
     border-bottom: 1px solid var(--admin-line);
     font-size: 10px;
+    box-sizing: border-box;
 }
 
 .file-rows {
     min-height: 0;
-    overflow-x: auto;
+    overflow-x: hidden;
+    overflow-y: auto;
     scrollbar-width: thin;
     scrollbar-color: rgba(168, 179, 207, 0.28) transparent;
 }

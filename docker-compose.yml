@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  # EduMate Backend Server
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: edumate_backend
+    restart: unless-stopped
+    ports:
+      - "${PORT:-5000}:5000"
+    environment:
+      - NODE_ENV=production
+      - PORT=5000
+      - MONGODB_URI=mongodb://mongodb:27017/edumate
+      - QDRANT_URL=http://qdrant:6333
+      - LLM_BASE_URL=http://host.docker.internal:8080
+      - LLM_PROVIDER=llama.cpp
+      - LLM_MODEL=${LLM_MODEL:-Qwen3-1.7B-Instruct-Q4_K_M.gguf}
+      - JWT_SECRET=${JWT_SECRET:-edumate_production_jwt_secret_key_secure_2026}
+    depends_on:
+      - mongodb
+      - qdrant
+    volumes:
+      - ./server/uploads:/app/server/uploads
+      - ./logs:/app/logs
+
+  # MongoDB Document Store
+  mongodb:
+    image: mongo:6.0
+    container_name: edumate_mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+
+  # Qdrant Vector Database
+  qdrant:
+    image: qdrant/qdrant:v1.7.4
+    container_name: edumate_qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+volumes:
+  mongodb_data:
+  qdrant_data:

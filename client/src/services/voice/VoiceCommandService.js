@@ -4,7 +4,7 @@
  * executing them locally, and generating simulated campus navigation maps and routing geometries.
  */
 
-import SpeechSynthesisService from "./SpeechSynthesisService";
+import SpeechSynthesisService from "./SpeechSynthesisService.js";
 
 // Map routing mock coordinates and geometries
 const CAMPUS_START = [22.7203, 88.4851]; // Main Gate

@@ -93,11 +93,33 @@ const runDoctor = async () => {
         }
         console.log();
 
-        // 8. Verify Groq API connectivity
-        const groqOk = await verifyGroq();
-        if (!groqOk) {
-            hasErrors = true;
-            logger.warn("💡 Suggestion: Confirm GROQ_API_KEY is active and correct in settings or environment.");
+        // 8. Verify AI / LLM Provider connectivity
+        const provider = (process.env.LLM_PROVIDER || "llama.cpp").toLowerCase();
+        let aiOk = true;
+        if (provider === "groq") {
+            aiOk = await verifyGroq();
+            if (!aiOk) {
+                hasErrors = true;
+                logger.warn("💡 Suggestion: Confirm GROQ_API_KEY is active and correct in settings or environment.");
+            }
+        } else if (provider === "gemini") {
+            const { verifyGemini } = require("./verifyGemini");
+            aiOk = await verifyGemini();
+            if (!aiOk) {
+                hasErrors = true;
+                logger.warn("💡 Suggestion: Confirm GEMINI_API_KEY is active and correct in settings or environment.");
+            }
+        } else {
+            // Local llama.cpp
+            const { getLlmConfig, inspectModelFile } = require("../server/config/llm");
+            const config = getLlmConfig();
+            const modelInspection = inspectModelFile(config.modelPath, config.model);
+            if (!modelInspection.exists) {
+                logger.error(`❌ Local LLM model file not found: ${config.model}`);
+                hasErrors = true;
+            } else {
+                logger.success(`✓ Local LLM model found (${config.model}, ${modelInspection.sizeFormatted})`);
+            }
         }
         console.log();
 

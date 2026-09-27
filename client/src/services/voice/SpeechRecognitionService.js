@@ -1,7 +1,16 @@
 /**
  * SpeechRecognitionService.js
- * Service wrapper for browser-native SpeechRecognition / webkitSpeechRecognition API.
+ * High-performance browser-native SpeechRecognition service with
+ * low latency silence detection, multilingual support, entity preservation, and browser compatibility.
+ * 
+ * EduMate Mission 8.4:
+ * - Low-latency speech recognition (< 2s silence timeout).
+ * - Multilingual support (en-IN, hi-IN, bn-IN).
+ * - Automatic technical entity preservation.
+ * - Browser compatibility checks (Chrome, Edge, Brave).
  */
+
+import LanguageDetectionService from "./LanguageDetectionService.js";
 
 const SpeechRecognition = typeof window !== "undefined" ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null;
 
@@ -10,12 +19,12 @@ class SpeechRecognitionService {
         this.recognition = null;
         this.isListening = false;
         this.silenceTimer = null;
-        this.silenceTimeoutMs = 1200; // Time of silence before triggering submission
+        this.silenceTimeoutMs = 1800; // Target < 2s for fast voice response
         this.onResultCallback = null;
         this.onSilenceCallback = null;
         this.onErrorCallback = null;
         this.onEndCallback = null;
-        this.activeLang = "en-US";
+        this.activeLang = "en-IN";
         this.hasSpeechDetected = false;
         this.hasFinalResult = false;
         this.sessionTranscript = "";
@@ -29,7 +38,36 @@ class SpeechRecognitionService {
      * @returns {boolean}
      */
     isSupported() {
-        return !!SpeechRecognition;
+        return typeof window !== "undefined" && !!(window.SpeechRecognition || window.webkitSpeechRecognition || (typeof globalThis !== "undefined" && globalThis.SpeechRecognition));
+    }
+
+    /**
+     * Returns browser support details.
+     */
+    getBrowserInfo() {
+        if (typeof window === "undefined" || !navigator?.userAgent) {
+            return { isSupported: false, browser: "unknown" };
+        }
+
+        const ua = navigator.userAgent;
+        const isBrave = typeof navigator.brave !== "undefined" || (navigator.brave && typeof navigator.brave.isBrave === "function");
+        const isEdge = ua.includes("Edg/");
+        const isChrome = ua.includes("Chrome") && !isEdge;
+        const isFirefox = ua.includes("Firefox");
+        const isSafari = ua.includes("Safari") && !isChrome && !isEdge;
+
+        let browserName = "Other";
+        if (isBrave) browserName = "Brave";
+        else if (isEdge) browserName = "Edge";
+        else if (isChrome) browserName = "Chrome";
+        else if (isFirefox) browserName = "Firefox";
+        else if (isSafari) browserName = "Safari";
+
+        return {
+            isSupported: this.isSupported(),
+            browser: browserName,
+            recommendedBrowsers: ["Chrome", "Edge", "Brave"]
+        };
     }
 
     /**
@@ -37,7 +75,7 @@ class SpeechRecognitionService {
      */
     init() {
         if (!this.isSupported()) {
-            console.error("Speech Recognition is not supported by this browser.");
+            console.warn("[SpeechRecognitionService] Speech Recognition is not supported by this browser.");
             return false;
         }
 
@@ -45,8 +83,13 @@ class SpeechRecognitionService {
             return true;
         }
 
-        const recognition = new SpeechRecognition();
-        recognition.continuous = false; // We use false and control restart loop manually for stability
+        const SpeechRecClass = typeof window !== "undefined" ? (window.SpeechRecognition || window.webkitSpeechRecognition || globalThis.SpeechRecognition) : (typeof globalThis !== "undefined" ? globalThis.SpeechRecognition : null);
+        if (!SpeechRecClass) {
+            return false;
+        }
+
+        const recognition = new SpeechRecClass();
+        recognition.continuous = false; // We control restart loops for maximum stability
         recognition.interimResults = true;
         recognition.maxAlternatives = 1;
         recognition.lang = this.activeLang;
@@ -77,7 +120,10 @@ class SpeechRecognitionService {
                 this.sessionTranscript = `${this.sessionTranscript} ${finalTranscript}`.trim();
             }
 
-            const currentTranscript = `${this.sessionTranscript}${interimTranscript ? ` ${interimTranscript}` : ""}`.trim();
+            let currentTranscript = `${this.sessionTranscript}${interimTranscript ? ` ${interimTranscript}` : ""}`.trim();
+
+            // Preserve technical terms (e.g. CSS dept, BCA fees)
+            currentTranscript = LanguageDetectionService.preserveTechnicalEntities(currentTranscript);
 
             if (this.mode === "interruption") {
                 this.clearSilenceTimer();
@@ -87,9 +133,8 @@ class SpeechRecognitionService {
                     if (candidate && this.onInterruptionCandidateCallback) {
                         this.onInterruptionCandidateCallback(candidate);
                     }
-                    // Reset the recognition session after evaluating the candidate.
                     this.stop();
-                }, 700);
+                }, 500);
                 return;
             }
 
@@ -97,12 +142,12 @@ class SpeechRecognitionService {
                 this.onResultCallback(currentTranscript, !!finalTranscript);
             }
 
-            // Only arm end-of-speech after actual speech is detected.
+            // Arm silence timer after speech is detected
             this.resetSilenceTimer();
         };
 
         recognition.onerror = (event) => {
-            console.warn("Speech Recognition Error:", event.error);
+            console.warn("[SpeechRecognitionService] Error:", event.error);
             if (this.onErrorCallback) {
                 this.onErrorCallback(event.error);
             }
@@ -114,7 +159,8 @@ class SpeechRecognitionService {
 
             const transcript = String(this.sessionTranscript || "").trim();
             if (this.hasSpeechDetected && transcript.length >= 1 && this.onSilenceCallback) {
-                this.onSilenceCallback(transcript);
+                const preserved = LanguageDetectionService.preserveTechnicalEntities(transcript);
+                this.onSilenceCallback(preserved);
             }
             this.hasSpeechDetected = false;
             this.hasFinalResult = false;
@@ -131,7 +177,6 @@ class SpeechRecognitionService {
 
     /**
      * Listen during TTS only for meaningful user interruptions.
-     * Short/background speech is ignored by design.
      */
     startInterruptionMonitor({ lang, onCandidate, onError } = {}) {
         if (!this.recognition) {
@@ -169,7 +214,6 @@ class SpeechRecognitionService {
                 this.recognition.start();
                 this.isListening = true;
             } catch (err) {
-                console.warn("[SpeechRecognitionService] Interruption start error:", err.message);
                 if (err.name === "InvalidStateError" || err.message?.includes("already started")) {
                     try { this.recognition.abort(); } catch(e){}
                     this.isListening = false;
@@ -180,7 +224,7 @@ class SpeechRecognitionService {
                         } catch (retryErr) {
                             if (onError) onError(retryErr.message || "start_error");
                         }
-                    }, 200);
+                    }, 150);
                 } else {
                     if (onError) onError(err.message || "start_error");
                 }
@@ -213,12 +257,6 @@ class SpeechRecognitionService {
 
     /**
      * Start listening.
-     * @param {Object} options
-     * @param {string} options.lang - BCP 47 language code (e.g. en-US, hi-IN, bn-IN)
-     * @param {Function} options.onResult - callback for results (text, isFinal)
-     * @param {Function} options.onSilence - callback when user stops speaking
-     * @param {Function} options.onError - callback on recognition errors
-     * @param {Function} options.onEnd - callback when session ends
      */
     start({ lang, onResult, onSilence, onError, onEnd }) {
         if (!this.recognition) {
@@ -244,7 +282,6 @@ class SpeechRecognitionService {
                 this.recognition.start();
                 this.isListening = true;
             } catch (err) {
-                console.error("[SpeechRecognitionService] Failed to start SpeechRecognition:", err);
                 if (err.name === "InvalidStateError" || err.message?.includes("already started")) {
                     try { this.recognition.abort(); } catch(e){}
                     this.isListening = false;
@@ -253,10 +290,9 @@ class SpeechRecognitionService {
                             this.recognition.start();
                             this.isListening = true;
                         } catch (retryErr) {
-                            console.error("[SpeechRecognitionService] Retry start failed:", retryErr);
                             if (onError) onError(retryErr.message || "start_error");
                         }
-                    }, 200);
+                    }, 150);
                 } else {
                     if (onError) onError(err.message || "start_error");
                 }
@@ -279,52 +315,36 @@ class SpeechRecognitionService {
         }
     }
 
-    /**
-     * Stop listening.
-     */
     stop() {
         this.clearSilenceTimer();
         if (this.recognition && this.isListening) {
             try {
                 this.recognition.stop();
-            } catch (err) {
-                console.warn("Error stopping SpeechRecognition:", err);
-            }
+            } catch (err) {}
         }
         this.isListening = false;
     }
 
-    /**
-     * Abort listening immediately.
-     */
     abort() {
         this.clearSilenceTimer();
         if (this.recognition && this.isListening) {
             try {
                 this.recognition.abort();
-            } catch (err) {
-                console.warn("Error aborting SpeechRecognition:", err);
-            }
+            } catch (err) {}
         }
         this.isListening = false;
     }
 
-    /**
-     * Reset the custom silence timer.
-     */
     resetSilenceTimer() {
         this.clearSilenceTimer();
         this.silenceTimer = setTimeout(() => {
             if (this.isListening && this.hasSpeechDetected) {
-                console.log("[SpeechRecognitionService] Silence detected, finishing...");
+                console.log("[SpeechRecognitionService] Silence detected, submitting speech.");
                 this.stop();
             }
         }, this.silenceTimeoutMs);
     }
 
-    /**
-     * Clear silence timer.
-     */
     clearSilenceTimer() {
         if (this.silenceTimer) {
             clearTimeout(this.silenceTimer);

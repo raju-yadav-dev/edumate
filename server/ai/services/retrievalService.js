@@ -1,6 +1,27 @@
 const { client, collectionName, vectorName } = require("../config/qdrant");
 const AI_CONSTANTS = require("../constants/aiConstants");
-const { detectTypeAndDepartment } = require("../utils/queryParser");
+const { detectTypeAndDepartment, detectQueryMode } = require("../utils/queryParser");
+const { planQuery } = require("../utils/queryPlanner");
+const embeddingService = require("./embeddingService");
+const { countTokens } = require("../utils/tokenizer");
+
+const localChunkManager = require("../../storage/localChunkManager");
+
+const COURSE_INFORMATION_TERMS = [
+    "eligibility",
+    "duration",
+    "semester",
+    "subjects",
+    "fees",
+    "curriculum",
+    "career",
+    "opportunities"
+];
+
+const isCompleteCourseQuery = (question, queryPlan) => {
+    if (!queryPlan?.programs?.length) return false;
+    return /\b(?:everything|complete|full|entire|overview|guide|details?|information|course)\b/i.test(String(question || ""));
+};
 
 /**
  * Builds Qdrant's nested filter format from flat metadata parameters
@@ -28,11 +49,85 @@ const buildQdrantFilter = (filter) => {
 };
 
 /**
- * Retrieves similar vector matches from the Qdrant database
+ * Builds Qdrant payload filters from Query Planner output for metadata-first retrieval.
+ */
+const buildPlannerQdrantFilter = ({ queryPlan, user, ignoreInstitution = false, filter = null, relaxHeading = false, relaxDocType = false }) => {
+    const must = [];
+
+    // 1. User institution constraint
+    if (user?.institution && user.institution !== "all" && !ignoreInstitution) {
+        must.push({
+            should: [
+                { key: "institution", match: { value: user.institution } },
+                { key: "institution", match: { value: "all" } },
+                { key: "institution", match: { value: "general" } },
+                { key: "institution", match: { value: "" } }
+            ]
+        });
+    }
+
+    // 2. SourceType filter
+    if (filter && filter.sourceType) {
+        must.push({ key: "sourceType", match: { value: filter.sourceType } });
+    }
+
+    if (!queryPlan) {
+        return must.length > 0 ? { must } : undefined;
+    }
+
+    // 3. Category filter
+    if (queryPlan.category) {
+        must.push({ key: "category", match: { value: queryPlan.category } });
+    }
+
+    // 4. Department filter (Never retrieve unrelated departments when department is known)
+    if (queryPlan.department) {
+        must.push({
+            should: [
+                { key: "department", match: { value: queryPlan.department } },
+                { key: "departments", match: { value: queryPlan.department } }
+            ]
+        });
+    }
+
+    // 5. Program / Course filter
+    if (queryPlan.program) {
+        must.push({
+            should: [
+                { key: "program", match: { value: queryPlan.program } },
+                { key: "course", match: { value: queryPlan.program } },
+                { key: "programs", match: { value: queryPlan.program } }
+            ]
+        });
+    }
+
+    // 6. DocumentType filter
+    if (queryPlan.documentType && !relaxDocType) {
+        must.push({ key: "documentType", match: { value: queryPlan.documentType } });
+    }
+
+    // 7. Heading filter
+    if (queryPlan.heading && !relaxHeading) {
+        must.push({
+            should: [
+                { key: "heading", match: { value: queryPlan.heading } },
+                { key: "parentHeading", match: { value: queryPlan.heading } },
+                { key: "parentSection", match: { value: queryPlan.heading } },
+                { key: "heading", match: { text: queryPlan.heading } }
+            ]
+        });
+    }
+
+    return must.length > 0 ? { must } : undefined;
+};
+
+/**
+ * Retrieves similar vector matches from Qdrant with payload filtering
  * @param {Object} params
  * @param {Array<number>} params.queryEmbedding - The vector embedding of the user question
  * @param {number} [params.limit=AI_CONSTANTS.DEFAULT_RETRIEVAL_LIMIT]
- * @param {Object} [params.filter={}] - Metadata filters (department, category, institution, documentId)
+ * @param {Object} [params.filter={}] - Metadata filters
+ * @param {boolean} [params.isRawFilter=false]
  * @returns {Promise<Array<Object>>} - Retrieved chunks with score and structured metadata
  */
 const retrieveRelevantChunks = async ({
@@ -41,147 +136,107 @@ const retrieveRelevantChunks = async ({
     filter = {},
     isRawFilter = false
 }) => {
-    try {
-        const { ensureCollection } = require("../config/qdrant");
-        await ensureCollection().catch(err => {
-            console.error("⚠️ Lazy Qdrant collection initialization failed:", err.message);
-        });
+    const { ensureCollection } = require("../config/qdrant");
+    await ensureCollection().catch(err => {
+        console.error("⚠️ Lazy Qdrant collection initialization failed:", err.message);
+    });
 
-        const qdrantFilter = isRawFilter ? filter : buildQdrantFilter(filter);
+    const qdrantFilter = isRawFilter ? filter : buildQdrantFilter(filter);
+    const smartCacheHub = require("../../services/cache/SmartCacheHub");
 
-        const results = await client.search(collectionName, {
-            vector: {
-                name: vectorName || "default",
-                vector: queryEmbedding
-            },
-            limit,
-            filter: qdrantFilter,
-            with_payload: true
-        });
+    // Check Layer 4 Vector Search Cache
+    const cachedVectorSearch = smartCacheHub.l4.getVectorSearch(queryEmbedding, qdrantFilter, limit, collectionName);
+    if (cachedVectorSearch && Array.isArray(cachedVectorSearch)) {
+        return cachedVectorSearch;
+    }
 
-        // Detailed RAG debug logging for Qdrant retrieval
-        console.log("\n[RAG DEBUG] ==================== QDRANT RETRIEVAL ====================");
-        console.log(`[RAG DEBUG] Query embedding dimension: ${queryEmbedding ? queryEmbedding.length : "N/A"}`);
-        console.log(`[RAG DEBUG] Qdrant top 10 results:`);
-        if (Array.isArray(results)) {
-            results.slice(0, 10).forEach((point, idx) => {
-                const payload = point.payload || {};
-                console.log(`  [Result ${idx + 1}]`);
-                console.log(`    similarity score : ${point.score}`);
-                console.log(`    documentId       : ${payload.documentId}`);
-                console.log(`    filename         : ${payload.originalName || payload.filename || "N/A"}`);
-                console.log(`    chunkId          : ${point.id}`);
-                console.log(`    chunk text       : ${payload.content ? payload.content.replace(/\n/g, " ").slice(0, 200) : "N/A"}...`);
-                console.log(`    metadata/source  : ${JSON.stringify(payload)}`);
+    const vectorParam = (vectorName && vectorName !== "unnamed" && vectorName !== "default" && vectorName !== "") 
+        ? { name: vectorName, vector: queryEmbedding } 
+        : queryEmbedding;
+
+    for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+            const results = await client.search(collectionName, {
+                vector: vectorParam,
+                limit,
+                filter: qdrantFilter,
+                with_payload: true
             });
-        } else {
-            console.log("  No results returned or results is not an array.");
-        }
-        console.log("[RAG DEBUG] ==========================================================\n");
 
-        if (!Array.isArray(results) || results.length === 0) {
+            if (!Array.isArray(results) || results.length === 0) {
+                return [];
+            }
+
+            const mappedResults = results.map((point) => {
+                const payload = point.payload || {};
+                const docId = payload.documentId || payload.sourceDocumentId || "";
+                const chunkId = payload.chunkId || point.id;
+
+                let content = payload.content || "";
+                let localMeta = {};
+                if (!content && docId) {
+                    const localChunk = localChunkManager.getChunk(docId, chunkId);
+                    if (localChunk) {
+                        content = localChunk.content || "";
+                        localMeta = localChunk.metadata || {};
+                    }
+                }
+
+                return {
+                    id: point.id,
+                    content,
+                    metadata: {
+                        documentId: docId,
+                        sourceDocumentId: docId,
+                        chunkId,
+                        originalName: payload.originalName || localMeta.originalName || payload.filename || "",
+                        filename: payload.filename || localMeta.originalName || payload.originalName || "",
+                        pageNumber: payload.pageNumber || localMeta.pageNumber || 1,
+                        page: payload.pageNumber || localMeta.pageNumber || 1,
+                        category: payload.category || localMeta.category || "",
+                        department: payload.department || localMeta.department || "",
+                        program: payload.program || localMeta.program || "",
+                        course: payload.course || payload.program || "",
+                        documentType: payload.documentType || localMeta.documentType || "",
+                        heading: payload.heading || localMeta.heading || "",
+                        parentHeading: payload.parentHeading || localMeta.parentHeading || "",
+                        parentSection: payload.parentSection || payload.parentHeading || "",
+                        sectionPath: payload.sectionPath || localMeta.sectionPath || "",
+                        chunkLevel: payload.chunkLevel || localMeta.chunkLevel || 5,
+                        institution: payload.institution || localMeta.institution || "",
+                        uploadedBy: payload.uploadedBy || "",
+                        chunkIndex: payload.chunkIndex || localMeta.chunkIndex || 0,
+                        chunkOrder: payload.chunkOrder || 1,
+                        createdAt: payload.createdAt || "",
+                        sourceType: payload.sourceType || (payload.uploadedFrom === "crawler" ? "url" : "document"),
+                        URL: payload.sourceUrl || "",
+                        keywords: payload.keywords || localMeta.keywords || []
+                    },
+                    score: point.score
+                };
+            });
+
+            // Cache in Layer 4
+            smartCacheHub.l4.setVectorSearch(queryEmbedding, qdrantFilter, limit, mappedResults, collectionName);
+
+            return mappedResults;
+        } catch (e) {
+            if (attempt === 1) {
+                console.warn(`[Retrieval Service] Transient Qdrant search failure on attempt 1 (${e.message}). Retrying in 300ms...`);
+                await new Promise(r => setTimeout(r, 300));
+                continue;
+            }
+            console.error("[Retrieval Service] Qdrant Similarity Search failed after retry:", e.message);
             return [];
         }
-
-        return results.map((point) => {
-            const payload = point.payload || {};
-            return {
-                id: point.id,
-                content: payload.content || "",
-                metadata: {
-                    documentId: payload.documentId || "",
-                    originalName: payload.originalName || "",
-                    filename: payload.originalName || "",
-                    pageNumber: payload.pageNumber || 1,
-                    page: payload.pageNumber || 1,
-                    category: payload.category || "",
-                    department: payload.department || "",
-                    institution: payload.institution || "",
-                    uploadedBy: payload.uploadedBy || "",
-                    chunkIndex: payload.chunkIndex || 0,
-                    createdAt: payload.createdAt || "",
-                    sourceType: payload.sourceType || (payload.uploadedFrom === "crawler" ? "url" : "document"),
-                    URL: payload.sourceUrl || ""
-                },
-                score: point.score // Qdrant cosine similarity score
-            };
-        });
-    } catch (e) {
-        console.error("Qdrant Similarity Search failed:", e.message);
-        return [];
     }
+    return [];
 };
 
-const embeddingService = require("./embeddingService");
+const jaccardDeduplicate = (chunks, threshold = 0.8) => {
+    if (!chunks || chunks.length <= 1) return chunks || [];
 
-const Chunk = require("../../models/Chunk");
-
-/**
- * High-level coordinate retrieval function that handles query embedding and user filters
- * @param {Object} params
- * @param {string} params.question
- * @param {Object} params.user
- * @param {number} [params.limit=AI_CONSTANTS.DEFAULT_RETRIEVAL_LIMIT]
- * @returns {Promise<Array<Object>>}
- */
-const evaluateRetrievalCoverage = ({ chunks, mode, currentK, maxK }) => {
-    if (currentK >= maxK) {
-        return { shouldExpand: false, reason: "Max K limit reached" };
-    }
-    if (chunks.length === 0) {
-        return { shouldExpand: false, reason: "No chunks found" };
-    }
-
-    const topScore = Math.max(...chunks.map(c => c.score));
-    
-    // If the top score is extremely low, do not expand further (no useful semantic signals)
-    if (topScore < 0.35) {
-        return { shouldExpand: false, reason: "Relevance score too low" };
-    }
-
-    // Filter chunks with reasonable similarity (relevance threshold)
-    const relevantChunks = chunks.filter(c => c.score >= 0.40);
-    if (relevantChunks.length === 0) {
-        return { shouldExpand: false, reason: "No relevant chunks above threshold" };
-    }
-
-    // 1. TARGETED queries
-    if (mode === "TARGETED") {
-        const strongMatches = chunks.filter(c => c.score >= 0.60);
-        if (strongMatches.length >= 1 || relevantChunks.length >= 3) {
-            return { shouldExpand: false, reason: "Targeted query sufficiently answered by strong matches" };
-        }
-    }
-
-    // 2. EXPLANATION / MULTI_PART queries
-    if (mode === "EXPLANATION" || mode === "MULTI_PART") {
-        if (relevantChunks.length >= currentK) {
-            const docIds = new Set(relevantChunks.map(c => c.metadata?.documentId));
-            if (docIds.size === 1 && relevantChunks.length >= 4) {
-                return { shouldExpand: false, reason: "Explanation query covered by a single document" };
-            }
-        }
-    }
-
-    // 3. COMPREHENSIVE_LIST / COMPLETE_DATASET
-    if (mode === "COMPREHENSIVE_LIST" || mode === "COMPLETE_DATASET") {
-        const lowestScore = chunks[chunks.length - 1]?.score || 0;
-        if (lowestScore < 0.45) {
-            return { shouldExpand: false, reason: "Comprehensive list coverage limit reached (relevance tail dropped)" };
-        }
-        return { shouldExpand: true, reason: "Comprehensive list requires maximum coverage" };
-    }
-
-    if (chunks.length < currentK) {
-        return { shouldExpand: false, reason: "No more matches available in database" };
-    }
-
-    return { shouldExpand: true, reason: "Default expansion criteria" };
-};
-
-const jaccardDeduplicate = (chunks) => {
-    const getWordSet = (text) => new Set(text.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(w => w.length > 2));
-    
+    const getWordSet = (text) => new Set(text.toLowerCase().split(/\s+/).filter(w => w.length > 3));
     const unique = [];
     const wordSets = [];
 
@@ -189,24 +244,15 @@ const jaccardDeduplicate = (chunks) => {
         const wordSet = getWordSet(chunk.content);
         let isDuplicate = false;
 
-        for (let i = 0; i < unique.length; i++) {
-            const existingSet = wordSets[i];
-            
-            let intersectionSize = 0;
+        for (const existingSet of wordSets) {
+            let intersection = 0;
             for (const word of wordSet) {
-                if (existingSet.has(word)) {
-                    intersectionSize++;
-                }
+                if (existingSet.has(word)) intersection++;
             }
-            const unionSize = wordSet.size + existingSet.size - intersectionSize;
-            const jaccard = unionSize > 0 ? intersectionSize / unionSize : 0;
-
-            if (jaccard >= 0.70) {
+            const union = wordSet.size + existingSet.size - intersection;
+            const similarity = union > 0 ? intersection / union : 0;
+            if (similarity > threshold) {
                 isDuplicate = true;
-                if (chunk.score > unique[i].score) {
-                    unique[i] = chunk;
-                    wordSets[i] = wordSet;
-                }
                 break;
             }
         }
@@ -220,105 +266,355 @@ const jaccardDeduplicate = (chunks) => {
     return unique;
 };
 
+/**
+ * Resolves Dynamic Top-K retrieval based on query classification.
+ * Rules:
+ * - Fact question -> 3 chunks
+ * - Admission/Fee -> 4 chunks
+ * - Faculty list -> 6 chunks
+ * - Long course guide -> 8 chunks
+ * - Large informational request -> maximum 10 chunks
+ */
+const resolveDynamicTopK = (question, queryPlan) => {
+    const q = String(question || "").toLowerCase();
+
+    // 1. Large informational request (max 10)
+    if (
+        /\b(?:compare|comparison|versus|vs\.?|difference|handbook|comprehensive|all\s+information|everything\s+about|full\s+overview)\b/i.test(q) ||
+        (queryPlan?.queryType === "Comparison" || queryPlan?.queryType === "Summary")
+    ) {
+        return { topK: 10, rule: "Large informational request (max 10)" };
+    }
+
+    // 2. Admission / Fee (4)
+    if (
+        queryPlan?.intent === "ADMISSION_QUERY" ||
+        queryPlan?.intent === "FEE_QUERY" ||
+        queryPlan?.category === "Admissions" ||
+        queryPlan?.documentType === "Fee Structure" ||
+        /\b(?:fee|fees|admission|admissions|tuition|eligibility|charges|cost|application\s+fee|semester\s+fee)\b/i.test(q)
+    ) {
+        return { topK: 4, rule: "Admission/Fee (4)" };
+    }
+
+    // 3. Faculty list (6)
+    if (
+        /\b(?:faculty\s+list|list\s+of\s+faculty|all\s+professors|all\s+teachers|faculty\s+members|department\s+faculty|professors\s+in|teachers\s+in|faculty\s+directory)\b/i.test(q) ||
+        (queryPlan?.intent === "FACULTY_QUERY" && (queryPlan?.queryType === "List" || /\b(?:list|all|directory|members)\b/i.test(q)))
+    ) {
+        return { topK: 6, rule: "Faculty list (6)" };
+    }
+
+    // 4. Long course guide (8)
+    if (
+        /\b(?:course\s+guide|program\s+guide|curriculum|syllabus|complete\s+bca|full\s+course|complete\s+course|entire\s+course|course\s+structure|subjects\s+list)\b/i.test(q) ||
+        (queryPlan?.intent === "SYLLABUS_QUERY" && /\b(?:all|complete|full|entire|overview)\b/i.test(q)) ||
+        isCompleteCourseQuery(question, queryPlan)
+    ) {
+        return { topK: 8, rule: "Long course guide (8)" };
+    }
+
+    // 5. Fact question (default: 3)
+    return { topK: 3, rule: "Fact question (3)" };
+};
+
+/**
+ * Signal 1: Semantic Similarity Score (normalized 0..1)
+ */
+const computeSemanticScore = (rawScore) => {
+    const s = Number(rawScore || 0);
+    if (isNaN(s)) return 0.5;
+    return Math.max(0, Math.min(1, s));
+};
+
+/**
+ * Signal 2: Keyword Overlap Score (normalized 0..1)
+ */
+const computeKeywordScore = (query, chunk, queryPlan) => {
+    const cleanQuery = String(query || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").trim();
+    const words = cleanQuery.split(/\s+/).filter(w => w.length > 2);
+    const stopWords = new Set(["what", "is", "the", "for", "tell", "me", "show", "who", "where", "when", "why", "which", "are", "am", "a", "an", "of", "in", "on", "at", "to", "with", "by", "from", "and", "or", "about"]);
+    const queryTerms = words.filter(w => !stopWords.has(w));
+
+    if (queryTerms.length === 0) return 0.5;
+
+    const content = String(chunk.content || "").toLowerCase();
+    const heading = String(chunk.metadata?.heading || "").toLowerCase();
+    const filename = String(chunk.metadata?.originalName || chunk.metadata?.filename || "").toLowerCase();
+    const chunkKeywords = Array.isArray(chunk.metadata?.keywords)
+        ? chunk.metadata.keywords.map(k => String(k).toLowerCase())
+        : [];
+
+    let matchedTerms = 0;
+    queryTerms.forEach(term => {
+        if (
+            content.includes(term) ||
+            heading.includes(term) ||
+            filename.includes(term) ||
+            chunkKeywords.some(k => k.includes(term))
+        ) {
+            matchedTerms++;
+        }
+    });
+
+    const termOverlapRatio = matchedTerms / queryTerms.length;
+
+    // Phrase match bonus
+    let phraseBonus = 0;
+    if (queryTerms.length >= 2) {
+        const fullPhrase = queryTerms.join(" ");
+        if (content.includes(fullPhrase)) {
+            phraseBonus = 0.20;
+        }
+    }
+
+    const rawKeywordScore = (termOverlapRatio * 0.80) + phraseBonus;
+    return Math.max(0, Math.min(1, rawKeywordScore));
+};
+
+/**
+ * Signal 3: Metadata Relevance Score (normalized 0..1)
+ */
+const computeMetadataScore = (queryPlan, chunk) => {
+    if (!queryPlan) return 0.5;
+
+    let score = 0;
+    let totalWeights = 0;
+
+    const metadata = chunk.metadata || {};
+    const chunkCat = String(metadata.category || "").toLowerCase();
+    const chunkDept = String(metadata.department || "").toLowerCase();
+    const chunkProg = String(metadata.program || metadata.course || "").toLowerCase();
+    const chunkDocType = String(metadata.documentType || "").toLowerCase();
+    const chunkHeading = String(metadata.heading || metadata.parentSection || "").toLowerCase();
+    const chunkKeywords = Array.isArray(metadata.keywords)
+        ? metadata.keywords.map(k => String(k).toLowerCase())
+        : [];
+
+    // Category match
+    if (queryPlan.category) {
+        totalWeights += 0.25;
+        if (chunkCat === queryPlan.category.toLowerCase()) {
+            score += 0.25;
+        }
+    }
+
+    // Department match
+    if (queryPlan.department) {
+        totalWeights += 0.30;
+        const targetDept = queryPlan.department.toLowerCase();
+        if (chunkDept === targetDept || (metadata.departments && metadata.departments.includes(queryPlan.department))) {
+            score += 0.30;
+        }
+    }
+
+    // Program / Course match
+    if (queryPlan.program) {
+        totalWeights += 0.25;
+        const targetProg = queryPlan.program.toLowerCase();
+        if (chunkProg === targetProg || (metadata.programs && metadata.programs.includes(queryPlan.program))) {
+            score += 0.25;
+        }
+    }
+
+    // DocumentType match
+    if (queryPlan.documentType) {
+        totalWeights += 0.20;
+        if (chunkDocType === queryPlan.documentType.toLowerCase()) {
+            score += 0.20;
+        }
+    }
+
+    // Heading / Section match
+    if (queryPlan.heading) {
+        totalWeights += 0.25;
+        const targetHeading = queryPlan.heading.toLowerCase();
+        if (chunkHeading.includes(targetHeading) || targetHeading.includes(chunkHeading)) {
+            score += 0.25;
+        }
+    }
+
+    // Planner Keywords match
+    if (queryPlan.keywords && queryPlan.keywords.length > 0) {
+        totalWeights += 0.15;
+        const kwMatches = queryPlan.keywords.filter(k => 
+            chunkKeywords.includes(k.toLowerCase()) || chunkHeading.includes(k.toLowerCase()) || chunkCat.includes(k.toLowerCase())
+        ).length;
+        score += (kwMatches / queryPlan.keywords.length) * 0.15;
+    }
+
+    if (totalWeights === 0) return 0.5;
+    return Math.max(0, Math.min(1, score / totalWeights));
+};
+
+/**
+ * Preference for chunks belonging to the same section as the top anchor chunk.
+ */
+const applySectionPreference = (candidates) => {
+    if (!Array.isArray(candidates) || candidates.length <= 1) return candidates;
+
+    // Anchor chunk is the one with highest base combined score
+    const anchor = candidates[0];
+    const anchorDoc = String(anchor.metadata?.documentId || anchor.metadata?.sourceDocumentId || "");
+    const anchorSection = String(anchor.metadata?.parentSection || anchor.metadata?.heading || anchor.metadata?.sectionPath || "").trim().toLowerCase();
+
+    candidates.forEach((cand, idx) => {
+        let sectionBoost = 0;
+        const candDoc = String(cand.metadata?.documentId || cand.metadata?.sourceDocumentId || "");
+        const candSection = String(cand.metadata?.parentSection || cand.metadata?.heading || cand.metadata?.sectionPath || "").trim().toLowerCase();
+
+        if (idx > 0 && anchorDoc && candDoc === anchorDoc) {
+            if (anchorSection && candSection && (candSection === anchorSection || candSection.includes(anchorSection) || anchorSection.includes(candSection))) {
+                sectionBoost = 0.12; // Same document & same section coherence bonus
+            } else {
+                sectionBoost = 0.05; // Same document bonus
+            }
+        }
+
+        cand.rankingSignals = cand.rankingSignals || {};
+        cand.rankingSignals.sectionBoost = sectionBoost;
+        cand.score = parseFloat(((cand.baseScore || cand.score || 0.5) + sectionBoost).toFixed(4));
+        cand.combinedScore = cand.score;
+    });
+
+    return candidates;
+};
+
+/**
+ * Metadata-First Hybrid Retrieval & Ranking Pipeline:
+ * User Query -> Query Planner -> Metadata Filter -> Qdrant Semantic Search -> Hybrid Ranking (Semantic + Keyword + Metadata + Section) -> Dynamic Top-K -> Rank Results
+ */
 const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL_LIMIT, ignoreInstitution = false, filter = null }) => {
+    const startTime = Date.now();
     let semanticCandidates = [];
     let keywordCandidates = [];
+
+    // 1. Query Planner Execution with Layer 2 Prompt/Query Cache
+    const smartCacheHub = require("../../services/cache/SmartCacheHub");
+    let queryPlan = smartCacheHub.l2.getQueryPlan(question);
+    if (!queryPlan) {
+        queryPlan = planQuery(question);
+        smartCacheHub.l2.setQueryPlan(question, queryPlan);
+    }
+
+    const { topK: dynamicK, rule: topKRule } = resolveDynamicTopK(question, queryPlan);
+    console.log(`[RAG PLANNER] Query: "${question}" | Intent: ${queryPlan.intent} | Dynamic Top-K: ${dynamicK} (${topKRule}) | Filters:`, queryPlan.filters);
+
+    // Check Layer 6 Retrieval Cache (10-minute TTL)
+    const cacheService = require("../../services/cacheService");
+    const userInst = user?.institution || "all";
+    const cachedRetrieval = await cacheService.getRetrievalCache(question, queryPlan.filters, userInst, dynamicK);
+    if (cachedRetrieval && Array.isArray(cachedRetrieval.candidates) && cachedRetrieval.candidates.length > 0) {
+        const cachedCandidates = cachedRetrieval.candidates;
+        const latencyMs = Date.now() - startTime;
+        cachedCandidates.statistics = {
+            matchedChunks: cachedCandidates.length,
+            filteredChunks: cachedRetrieval.retrievedChunkIds?.length || cachedCandidates.length,
+            latency: latencyMs,
+            latencyMs: latencyMs,
+            topKRule,
+            targetTopK: dynamicK,
+            filtersApplied: queryPlan.filters,
+            queryPlan,
+            cached: true
+        };
+        cachedCandidates.retrievalTelemetry = {
+            ...cachedCandidates.statistics,
+            queryMode: detectQueryMode(question),
+            totalTokens: 0
+        };
+        return cachedCandidates;
+    }
 
     let expandedQuestion = question;
     if (/\bcss\b/i.test(expandedQuestion)) {
         expandedQuestion = expandedQuestion.replace(/\bcss\b/gi, "computational sciences");
     }
 
-    console.log(`[RAG DEBUG] User query: "${question}"`);
-    if (expandedQuestion !== question) {
-        console.log(`[RAG DEBUG] Expanded query: "${expandedQuestion}"`);
+    const completeCourseQuery = isCompleteCourseQuery(question, queryPlan);
+    if (completeCourseQuery) {
+        expandedQuestion = expandedQuestion + " " + COURSE_INFORMATION_TERMS.join(" ");
     }
 
-    const { documentType: detectedType, department: detectedDept } = detectTypeAndDepartment(expandedQuestion);
-    console.log(`[RAG DEBUG] Query Analysis - Detected Type: "${detectedType || 'none'}", Detected Dept: "${detectedDept || 'none'}"`);
-
-    const { detectQueryMode } = require("../utils/queryParser");
     const queryMode = detectQueryMode(expandedQuestion);
-    console.log(`[RAG DEBUG] Query Analysis - Detected Retrieval Mode: "${queryMode}"`);
+    let currentFetchK = Math.max(dynamicK * 3, 12);
+    if (completeCourseQuery) currentFetchK = Math.max(currentFetchK, 16);
 
-    const initialKTargeted = Number(process.env.RAG_INITIAL_K_TARGETED) || 3;
-    const initialKExplanation = Number(process.env.RAG_INITIAL_K_EXPLANATION) || 5;
-    const initialKList = Number(process.env.RAG_INITIAL_K_LIST) || 8;
-    const maxK = Number(process.env.RAG_MAX_K) || 15;
-
-    let initialK = initialKTargeted;
-    if (queryMode === "EXPLANATION" || queryMode === "MULTI_PART") {
-        initialK = initialKExplanation;
-    } else if (queryMode === "COMPREHENSIVE_LIST" || queryMode === "COMPLETE_DATASET") {
-        initialK = initialKList;
-    }
-
-    let currentK = Math.min(limit, maxK);
-    let attemptsCount = 1;
-    let usedType = undefined;
-    let usedDept = undefined;
     let usedFilter = undefined;
+    let filteredCount = 0;
 
+    // 2. Metadata-First Qdrant Vector Search
     try {
         const queryEmbedding = await embeddingService.getQueryEmbedding(expandedQuestion);
-        
-        const baseMust = [];
-        if (user?.institution && user.institution !== "all" && !ignoreInstitution) {
-            baseMust.push({
-                should: [
-                    { key: "institution", match: { value: user.institution } },
-                    { key: "institution", match: { value: "all" } },
-                    { key: "institution", match: { value: "general" } },
-                    { key: "institution", match: { value: "" } }
-                ]
-            });
-        }
-        if (filter && filter.sourceType) {
-            baseMust.push({ key: "sourceType", match: { value: filter.sourceType } });
-        }
 
-        console.log(`[RAG DEBUG] Executing single global vector search (Limit: ${currentK})`);
-        const qdrantFilter = baseMust.length > 0 ? { must: baseMust } : undefined;
-        usedFilter = qdrantFilter;
-
-        semanticCandidates = await retrieveRelevantChunks({ 
-            queryEmbedding, 
-            limit: currentK, 
-            filter: qdrantFilter, 
-            isRawFilter: true 
+        // Build strict metadata filter first
+        const strictFilter = buildPlannerQdrantFilter({
+            queryPlan,
+            user,
+            ignoreInstitution,
+            filter
         });
 
+        usedFilter = strictFilter;
+        console.log(`[RAG DEBUG] Executing Metadata-Filtered Qdrant search. Filter:`, JSON.stringify(strictFilter));
+
+        semanticCandidates = await retrieveRelevantChunks({
+            queryEmbedding,
+            limit: currentFetchK,
+            filter: strictFilter,
+            isRawFilter: true
+        });
+
+        // Controlled relaxation: If strict filter with heading/documentType yields 0 results, relax heading/docType while strictly preserving department & category
+        if (semanticCandidates.length === 0 && (queryPlan.heading || queryPlan.documentType)) {
+            console.log(`[RAG DEBUG] Strict filter returned 0 results. Relaxing heading/docType constraints while preserving category & department.`);
+            const relaxedFilter = buildPlannerQdrantFilter({
+                queryPlan,
+                user,
+                ignoreInstitution,
+                filter,
+                relaxHeading: true,
+                relaxDocType: true
+            });
+            usedFilter = relaxedFilter;
+            semanticCandidates = await retrieveRelevantChunks({
+                queryEmbedding,
+                limit: currentFetchK,
+                filter: relaxedFilter,
+                isRawFilter: true
+            });
+        }
+
+        // Final semantic fallback: If filtered search still returns 0 results, search Qdrant by embedding
+        if (semanticCandidates.length === 0) {
+            console.log(`[RAG DEBUG] Filtered search returned 0 results. Falling back to semantic similarity vector search.`);
+            semanticCandidates = await retrieveRelevantChunks({
+                queryEmbedding,
+                limit: currentFetchK,
+                filter: (user?.institution && !ignoreInstitution && user.institution !== "all") ? {
+                    should: [
+                        { key: "institution", match: { value: user.institution } },
+                        { key: "institution", match: { value: "all" } },
+                        { key: "institution", match: { value: "general" } },
+                        { key: "institution", match: { value: "" } }
+                    ]
+                } : {},
+                isRawFilter: true
+            });
+        }
     } catch (vectorErr) {
         console.error("[Retrieval Service] Semantic search failed:", vectorErr.message);
     }
 
+    // 3. Mongo Keyword Search restricted to same metadata constraints
     try {
         const cleanQuery = question.toLowerCase().replace(/[^a-z0-9\s]/g, " ").trim();
         const words = cleanQuery.split(/\s+/).filter(w => w.length > 1);
-        
-        const stopWords = new Set([
-            "give", "details", "about", "what", "is", "the", "for", "tell", "me", "show", 
-            "how", "course", "program", "programme", "who", "where", "when", "why", "which",
-            "are", "am", "a", "an", "of", "in", "on", "at", "to", "with", "by", "from", 
-            "and", "or", "but", "about", "us", "you", "he", "she", "they", "them", "i", 
-            "we", "our", "their", "his", "her", "it", "its", "does", "do", "did", "has", "have", "had"
-        ]);
+        const stopWords = new Set(["what", "is", "the", "for", "tell", "me", "show", "who", "where", "when", "why", "which", "are", "am", "a", "an", "of", "in", "on", "at", "to", "with", "by", "from", "and", "or", "about"]);
         let keywords = words.filter(w => !stopWords.has(w));
 
-        if (cleanQuery.includes("faculty") || cleanQuery.includes("faculties") || cleanQuery.includes("teacher") || cleanQuery.includes("professor") || cleanQuery.includes("hod")) {
-            if (cleanQuery.includes("bca") || cleanQuery.includes("computational") || cleanQuery.includes("computer") || cleanQuery.includes("css")) {
-                if (!keywords.includes("computational")) keywords.push("computational");
-                if (!keywords.includes("sciences")) keywords.push("sciences");
-                if (!keywords.includes("faculty")) keywords.push("faculty");
-            }
-        }
-
         if (keywords.length > 0) {
-            const regexes = keywords.map(kw => {
-                const escaped = kw.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-                return new RegExp(`\\b${escaped}\\b`, "i");
-            });
-
+            const regexes = keywords.map(kw => new RegExp(`\\b${kw.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')}\\b`, "i"));
             const mustConditions = [
                 { $or: regexes.map(r => ({ content: r })) }
             ];
@@ -328,132 +624,153 @@ const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL
                     "metadata.institution": { $in: [user.institution, "all", "general", "", null] }
                 });
             }
-
-            if (filter && filter.sourceType) {
-                mustConditions.push({
-                    "metadata.sourceType": filter.sourceType
-                });
+            if (filter?.sourceType) {
+                mustConditions.push({ "metadata.sourceType": filter.sourceType });
             }
-
-            if (usedType) {
+            if (queryPlan.category) {
+                mustConditions.push({ "metadata.category": queryPlan.category });
+            }
+            if (queryPlan.department) {
                 mustConditions.push({
                     $or: [
-                        { "metadata.category": usedType },
-                        { "metadata.documentType": usedType }
+                        { "metadata.department": queryPlan.department },
+                        { "metadata.departments": queryPlan.department }
                     ]
                 });
             }
-            if (usedDept) {
-                mustConditions.push({ "metadata.department": usedDept });
-            }
-
-            const mongoQuery = { $and: mustConditions };
-            const matchedChunks = await Chunk.find(mongoQuery).limit(50).lean();
-
-            keywordCandidates = matchedChunks.map(c => {
-                let matches = 0;
-                const contentLower = c.content.toLowerCase();
-                keywords.forEach(kw => {
-                    if (contentLower.includes(kw)) {
-                        matches++;
-                    }
+            if (queryPlan.program) {
+                mustConditions.push({
+                    $or: [
+                        { "metadata.program": queryPlan.program },
+                        { "metadata.course": queryPlan.program },
+                        { "metadata.programs": queryPlan.program }
+                    ]
                 });
-                const densityScore = matches / keywords.length;
-                const score = 0.35 + (densityScore * 0.15);
+            }
 
-                return {
-                    id: c._id.toString(),
-                    content: c.content,
-                    metadata: {
-                        documentId: c.document?.toString() || "",
-                        originalName: c.metadata?.originalName || "",
-                        filename: c.metadata?.originalName || "",
-                        pageNumber: c.metadata?.pageNumber || 1,
-                        page: c.metadata?.pageNumber || 1,
-                        category: c.metadata?.category || "",
-                        department: c.metadata?.department || "",
-                        institution: c.metadata?.institution || "",
-                        university: c.metadata?.institution || "",
-                        uploadedBy: c.metadata?.uploadedBy || "",
-                        chunkIndex: c.metadata?.chunkIndex || 0,
-                        createdAt: c.createdAt || "",
-                        sourceType: "document",
-                        URL: ""
-                    },
-                    score
-                };
-            });
-
-            keywordCandidates.sort((a, b) => b.score - a.score);
+            keywordCandidates = localChunkManager.searchLocalChunks(
+                queryStr,
+                {
+                    category: queryPlan.category,
+                    department: queryPlan.department
+                },
+                30
+            );
         }
-    } catch (mongoSearchError) {
-        console.error("[Retrieval Service] MongoDB keyword search failed:", mongoSearchError.message);
+    } catch (searchErr) {
+        // Silently continue if local chunk search encountered warning
     }
 
-    const combined = [...semanticCandidates, ...keywordCandidates];
-    const seen = new Set();
-    const uniqueCandidates = [];
+    // 4. Multi-tier Deduplication
+    const rawPool = [...semanticCandidates, ...keywordCandidates];
+    filteredCount = rawPool.length;
 
-    for (const cand of combined) {
-        const contentSig = `${cand.metadata?.documentId}_${cand.content.trim().slice(0, 100)}`;
-        if (!seen.has(contentSig)) {
-            seen.add(contentSig);
-            if (cand.metadata) {
-                cand.metadata.university = cand.metadata.institution || cand.metadata.university || "";
-                cand.metadata.filename = cand.metadata.filename || cand.metadata.originalName || "";
-            }
-            uniqueCandidates.push(cand);
-        } else {
-            const existing = uniqueCandidates.find(c => `${c.metadata?.documentId}_${c.content.trim().slice(0, 100)}` === contentSig);
-            if (existing && cand.score > existing.score) {
-                existing.score = cand.score;
-                if (cand.initialScore) existing.initialScore = cand.initialScore;
-            }
-        }
+    const seenIds = new Set();
+    const seenSignatures = new Set();
+    const uniquePool = [];
+
+    for (const cand of rawPool) {
+        const chunkId = String(cand.id || cand.metadata?.chunkId || "");
+        const sig = `${cand.metadata?.documentId || cand.metadata?.sourceDocumentId}_${cand.content.trim().slice(0, 80)}`;
+
+        if (chunkId && seenIds.has(chunkId)) continue;
+        if (seenSignatures.has(sig)) continue;
+
+        if (chunkId) seenIds.add(chunkId);
+        seenSignatures.add(sig);
+        uniquePool.push(cand);
     }
 
-    const deduplicated = jaccardDeduplicate(uniqueCandidates);
-    deduplicated.sort((a, b) => b.score - a.score);
+    // Jaccard similarity deduplication (threshold = 0.80)
+    const deduplicated = jaccardDeduplicate(uniquePool, 0.80);
 
-    const { countTokens } = require("../utils/tokenizer");
+    // 5. Compute Combined Score across 3 Ranking Signals + Section Preference
+    // Signal 1: Semantic similarity from Qdrant
+    // Signal 2: Keyword overlap
+    // Signal 3: Metadata relevance
+    const scoredPool = deduplicated.map(chunk => {
+        const semanticScore = computeSemanticScore(chunk.score);
+        const keywordScore = computeKeywordScore(question, chunk, queryPlan);
+        const metadataScore = computeMetadataScore(queryPlan, chunk);
+
+        // Weighted combination: 45% semantic, 25% keyword, 25% metadata
+        const baseScore = (0.45 * semanticScore) + (0.25 * keywordScore) + (0.25 * metadataScore);
+
+        return {
+            ...chunk,
+            baseScore: parseFloat(baseScore.toFixed(4)),
+            score: parseFloat(baseScore.toFixed(4)),
+            rankingSignals: {
+                semanticScore: parseFloat(semanticScore.toFixed(4)),
+                keywordScore: parseFloat(keywordScore.toFixed(4)),
+                metadataScore: parseFloat(metadataScore.toFixed(4)),
+                sectionBoost: 0
+            }
+        };
+    });
+
+    // Sort by base score before applying section boost
+    scoredPool.sort((a, b) => b.baseScore - a.baseScore);
+
+    // Prefer chunks from the same section (Section Coherence Boosting)
+    const sectionBoosted = applySectionPreference(scoredPool);
+
+    // Sort results by final combined relevance score
+    sectionBoosted.sort((a, b) => b.score - a.score);
+
+    // 6. Dynamic Top-K Slicing and Token Budget Filtering
     let totalTokens = 0;
     const finalCandidates = [];
-    const maxContextChunks = Number(process.env.RAG_MAX_CONTEXT_CHUNKS) || 15;
+    const targetTopK = dynamicK;
     const maxContextTokens = Number(process.env.RAG_MAX_CONTEXT_TOKENS) || 4000;
 
-    for (const cand of deduplicated) {
+    for (const cand of sectionBoosted) {
         const tokens = countTokens(cand.content);
-        if (totalTokens + tokens > maxContextTokens) {
-            console.log(`[Retrieval] Context budget limit reached (Tokens: ${totalTokens}, next chunk size: ${tokens} exceeds ${maxContextTokens})`);
-            break;
-        }
-        if (finalCandidates.length >= maxContextChunks) {
-            console.log(`[Retrieval] Context budget reached (Max chunks limit: ${maxContextChunks})`);
+        if (finalCandidates.length >= targetTopK || (totalTokens + tokens > maxContextTokens && finalCandidates.length > 0)) {
             break;
         }
         finalCandidates.push(cand);
         totalTokens += tokens;
     }
 
-    finalCandidates.resolvedType = usedType;
-    finalCandidates.resolvedDept = usedDept;
-    finalCandidates.retrievalTelemetry = {
-        queryMode,
-        initialK,
-        finalK: currentK,
-        totalAttempts: attemptsCount,
-        candidatesBeforeDedup: combined.length,
-        candidatesAfterDedup: deduplicated.length,
-        finalCandidatesCount: finalCandidates.length,
-        finalTokens: totalTokens
+    const latencyMs = Date.now() - startTime;
+
+    // 7. Attach Retrieval Statistics & Telemetry
+    finalCandidates.statistics = {
+        matchedChunks: finalCandidates.length,
+        filteredChunks: filteredCount,
+        latency: latencyMs,
+        latencyMs: latencyMs,
+        topKRule,
+        targetTopK,
+        filtersApplied: queryPlan.filters,
+        queryPlan
     };
 
-    console.log(`[Retrieval Telemetry] Mode: ${queryMode} | Initial K: ${initialK} | Final K: ${currentK} | Unique Chunks: ${finalCandidates.length} | Tokens: ${totalTokens}`);
+    finalCandidates.retrievalTelemetry = {
+        ...finalCandidates.statistics,
+        queryMode,
+        totalTokens
+    };
+
+    console.log(`[Retrieval Stats] Matched: ${finalCandidates.length} | Top-K Rule: "${topKRule}" | Filtered: ${filteredCount} | Latency: ${latencyMs}ms | Filters:`, queryPlan.filters);
+
+    // Cache retrieval candidates for identical queries (10-minute TTL)
+    if (finalCandidates.length > 0) {
+        const categories = queryPlan.category ? [queryPlan.category] : [];
+        cacheService.setRetrievalCache(question, queryPlan.filters, finalCandidates, categories, userInst, dynamicK).catch(() => {});
+    }
 
     return finalCandidates;
 };
 
 module.exports = {
+    buildPlannerQdrantFilter,
     retrieveRelevantChunks,
+    resolveDynamicTopK,
+    computeSemanticScore,
+    computeKeywordScore,
+    computeMetadataScore,
+    applySectionPreference,
     retrieve
 };

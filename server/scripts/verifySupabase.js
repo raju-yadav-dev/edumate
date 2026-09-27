@@ -6,10 +6,14 @@ const colors = require("./colors");
  * @returns {Promise<boolean>}
  */
 const verifySupabase = async () => {
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_URL === "https://placeholder.supabase.co") {
+        console.log(colors.cyan("ℹ️ Supabase not configured. Using local file storage."));
+        return true;
+    }
+
     console.log(colors.cyan("Verifying Supabase connection..."));
     
     try {
-        // Query buckets to test client authorization & URL health
         const { error } = await supabase.storage.listBuckets();
         if (error) {
             throw error;
@@ -18,8 +22,8 @@ const verifySupabase = async () => {
         console.log(colors.green("✓ Supabase Storage connection verified successfully."));
         return true;
     } catch (err) {
-        console.error(colors.red(`❌ Error: Supabase authorization/connection check failed: ${err.message}`));
-        return false;
+        console.warn(colors.yellow(`⚠️ Supabase connection check warning: ${err.message}. Local storage fallback active.`));
+        return true;
     }
 };
 

@@ -20,7 +20,15 @@ const retrieveAndEnrichChunks = async (query, user, limit, ignoreInstitution = f
     if (candidates.length === 0) return [];
 
     const docIds = candidates.map(c => c.metadata?.documentId).filter(Boolean);
-    const docs = await Document.find({ _id: { $in: docIds }, status: "active" }).lean();
+    let docs = [];
+    const mongoose = require("mongoose");
+    if (mongoose.connection && mongoose.connection.readyState === 1 && docIds.length > 0) {
+        try {
+            docs = await Document.find({ _id: { $in: docIds }, status: "active" }).lean();
+        } catch (dbErr) {
+            console.warn("[SearchManager] MongoDB Document lookup failed:", dbErr.message);
+        }
+    }
     
     const docMap = {};
     docs.forEach(doc => {
@@ -29,17 +37,17 @@ const retrieveAndEnrichChunks = async (query, user, limit, ignoreInstitution = f
 
     const enriched = candidates.map(chunk => {
         const doc = docMap[chunk.metadata?.documentId?.toString()];
-        if (!doc) return null; // Discard chunks belonging to missing/deleted documents
+        if (!doc && docs.length > 0) return null; // Discard chunks belonging to missing/deleted documents when DB returned results
 
         // Map and preserve all required metadata fields
         const chunkId = chunk.id || "";
-        const originalName = doc.originalName || chunk.metadata?.originalName || chunk.metadata?.filename || "Unknown";
-        const documentId = chunk.metadata?.documentId || doc._id.toString();
+        const originalName = doc?.originalName || chunk.metadata?.originalName || chunk.metadata?.filename || "Unknown";
+        const documentId = chunk.metadata?.documentId || doc?._id?.toString() || "";
         const pageNumber = chunk.metadata?.pageNumber || chunk.metadata?.page || 1;
-        const university = doc.institution || chunk.metadata?.institution || chunk.metadata?.university || "";
-        const department = doc.department || chunk.metadata?.department || "";
-        const course = chunk.metadata?.course || doc.metadata?.course || "";
-        const sourceType = chunk.metadata?.sourceType || (doc.metadata?.uploadedFrom === "crawler" ? "url" : "document");
+        const university = doc?.institution || chunk.metadata?.institution || chunk.metadata?.university || "";
+        const department = doc?.department || chunk.metadata?.department || "";
+        const course = chunk.metadata?.course || doc?.metadata?.course || "";
+        const sourceType = chunk.metadata?.sourceType || (doc?.metadata?.uploadedFrom === "crawler" ? "url" : "document");
 
         return {
             ...chunk,
@@ -57,11 +65,12 @@ const retrieveAndEnrichChunks = async (query, user, limit, ignoreInstitution = f
                 department,
                 course,
                 sourceType,
-                uploadedFrom: doc.metadata?.uploadedFrom || "api",
-                sourceUrl: doc.metadata?.sourceUrl || ""
+                uploadedFrom: doc?.metadata?.uploadedFrom || chunk.metadata?.uploadedFrom || "api",
+                sourceUrl: doc?.metadata?.sourceUrl || chunk.metadata?.sourceUrl || ""
             }
         };
     }).filter(Boolean);
+
 
     enriched.resolvedType = candidates.resolvedType;
     enriched.resolvedDept = candidates.resolvedDept;
@@ -70,21 +79,21 @@ const retrieveAndEnrichChunks = async (query, user, limit, ignoreInstitution = f
 };
 
 /**
- * Helper to fetch adjacent chunks (previous and next) from MongoDB to expand context.
+ * Helper to fetch adjacent chunks (previous and next) from local storage to expand context.
  */
 const expandChunkContext = async (chunk) => {
     try {
-        const Chunk = require("../models/Chunk");
+        const localChunkManager = require("../storage/localChunkManager");
         const docId = chunk.metadata?.documentId;
         if (!docId) return chunk;
 
-        // Fetch all chunks for this document sorted by ID (insertion order)
-        const allDocChunks = await Chunk.find({ document: docId }).sort({ _id: 1 }).lean();
+        // Fetch all chunks for this document from local storage
+        const allDocChunks = localChunkManager.getDocumentChunks(docId);
         if (allDocChunks.length <= 1) return chunk;
 
         // Find index of current chunk content
         const curIndex = allDocChunks.findIndex(c => 
-            c.content.trim() === chunk.content.trim()
+            c.chunkId === chunk.id || c.chunkId === chunk.metadata?.chunkId || c.content.trim() === chunk.content.trim()
         );
         if (curIndex === -1) return chunk;
 

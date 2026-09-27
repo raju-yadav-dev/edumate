@@ -135,9 +135,19 @@ const crawlerRoutes = require("./crawler/routes/crawlerRoutes");
 app.use("/api/crawler", crawlerRoutes);
 const knowledgeRoutes = require("./knowledge/knowledgeRoutes");
 app.use("/api/knowledge", knowledgeRoutes);
+const benchmarkRoutes = require("./routes/benchmarkRoutes");
+app.use("/api/benchmark", benchmarkRoutes);
+const analyticsRoutes = require("./routes/analyticsRoutes");
+app.use("/api/analytics", analyticsRoutes);
+const validationRoutes = require("./routes/validationRoutes");
+app.use("/api/validation", validationRoutes);
+const demoRoutes = require("./routes/demoRoutes");
+app.use("/api/demo", demoRoutes);
 
 const { getSystemHealth } = require("./controllers/systemController");
 app.get("/api/system/health", getSystemHealth);
+app.get("/api/health", getSystemHealth);
+app.get("/health", getSystemHealth);
 
 if (global.startupTimer) {
     global.startupTimer.log("Routes registered", Date.now() - routesInitStart);
@@ -243,13 +253,13 @@ app.get("/api/verify-hod-css", async (req, res) => {
 
 app.get("/api/debug-faculty-chunks", async (req, res) => {
     try {
-        const Chunk = require("./models/Chunk");
+        const localChunkManager = require("./storage/localChunkManager");
         const Document = require("./models/Document");
         const doc = await Document.findOne({ originalName: /Computational Sciences/i }).lean();
         if (!doc) {
             return res.status(404).json({ error: "Document not found" });
         }
-        const chunks = await Chunk.find({ document: doc._id }).lean();
+        const chunks = await localChunkManager.getDocumentChunks(doc._id);
         res.json({ doc, chunks });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -258,16 +268,16 @@ app.get("/api/debug-faculty-chunks", async (req, res) => {
 
 app.get("/api/search-all-db-chunks", async (req, res) => {
     try {
-        const Chunk = require("./models/Chunk");
+        const localChunkManager = require("./storage/localChunkManager");
         const Document = require("./models/Document");
         const queryStr = req.query.q || "Jayanta";
-        const chunks = await Chunk.find({ content: new RegExp(queryStr, "i") }).lean();
+        const results = await localChunkManager.searchLocalChunks(queryStr, { limit: 20 });
         const enriched = [];
-        for (const c of chunks) {
-            const doc = await Document.findById(c.document).lean();
+        for (const c of results) {
+            const doc = await Document.findById(c.documentId).lean();
             enriched.push({ chunk: c, doc });
         }
-        res.json({ count: chunks.length, query: queryStr, results: enriched });
+        res.json({ count: results.length, query: queryStr, results: enriched });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

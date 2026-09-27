@@ -49,6 +49,9 @@ import UserManagement from "./components/users/UserManagement";
 import SettingsPage from "./components/settings/SettingsPage";
 import CrawlerManager from "../crawler/CrawlerManager";
 import KnowledgeSources from "./components/knowledge/KnowledgeSources";
+import ChunkingStudio from "./components/chunking/ChunkingStudio";
+import LlmBenchmarkDashboard from "./components/benchmark/LlmBenchmarkDashboard";
+import KnowledgeAnalyticsDashboard from "./components/analytics/KnowledgeAnalyticsDashboard";
 import { getDocumentUrl } from "./utils/documentUtils";
 import { recordActivityLog } from "../services/activityLogService";
 import { formatBytes } from "./utils/formatBytes";
@@ -2140,18 +2143,24 @@ function Admin({ mode = "auto" }) {
                     <form onSubmit={handleAdminLogin} className="admin-auth-form">
                         <input ref={adminEmailRef} type="email" placeholder="Admin email" defaultValue={adminUser?.email || ""} />
 
-                        <div className="login-password-box admin-password-box">
+                        <div className="admin-password-box">
                             <input
                                 ref={adminPasswordRef}
                                 type={showAdminPassword ? "text" : "password"}
                                 placeholder="Password"
                             />
-                            <span onClick={() => setShowAdminPassword((current) => !current)}>
+                            <button
+                                type="button"
+                                className="admin-password-toggle"
+                                onClick={() => setShowAdminPassword((current) => !current)}
+                                aria-label={showAdminPassword ? "Hide password" : "Show password"}
+                                tabIndex={-1}
+                            >
                                 {showAdminPassword ? <FaEyeSlash /> : <FaEye />}
-                            </span>
+                            </button>
                         </div>
 
-                        <button type="submit" disabled={authLoading}>
+                        <button type="submit" className="admin-auth-submit-btn" disabled={authLoading}>
                             {authLoading ? "Signing in..." : "Enter admin panel"}
                         </button>
 
@@ -2299,6 +2308,23 @@ function Admin({ mode = "auto" }) {
                             onRetryFailedIndexing={handleReindexFailedJobs}
                         />
                     </>
+                ) : null}
+
+                {activeSection === "chunking" ? (
+                    <ChunkingStudio
+                        documents={documents}
+                        onRefresh={refreshSection}
+                        setNotice={setNotice}
+                        setError={setError}
+                    />
+                ) : null}
+
+                {activeSection === "benchmark" ? (
+                    <LlmBenchmarkDashboard />
+                ) : null}
+
+                {activeSection === "analytics" ? (
+                    <KnowledgeAnalyticsDashboard />
                 ) : null}
 
                 {activeSection === "users" ? (

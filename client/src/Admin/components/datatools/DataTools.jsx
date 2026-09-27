@@ -6,6 +6,7 @@ import RecentOperations from "./RecentOperations";
 import ToolActions from "./ToolActions";
 import CrawlerManager from "../../../crawler/CrawlerManager";
 import KnowledgeSources from "../knowledge/KnowledgeSources";
+import ChunkingStudio from "../chunking/ChunkingStudio";
 import "./DataTools.css";
 
 export default function DataTools({ setActiveSection, documents = [], storageStats = {}, users = [], onRefresh, user, setNotice, setError }) {
@@ -107,6 +108,13 @@ export default function DataTools({ setActiveSection, documents = [], storageSta
                 </button>
                 <button
                     type="button"
+                    className={`datatools-tab-btn ${activeTab === "chunking" ? "active" : ""}`}
+                    onClick={() => setActiveTab("chunking")}
+                >
+                    Chunking Studio
+                </button>
+                <button
+                    type="button"
                     className={`datatools-tab-btn ${activeTab === "crawler" ? "active" : ""}`}
                     onClick={() => setActiveTab("crawler")}
                 >
@@ -145,6 +153,15 @@ export default function DataTools({ setActiveSection, documents = [], storageSta
                         </div>
                     </div>
                 </>
+            )}
+
+            {activeTab === "chunking" && (
+                <ChunkingStudio
+                    documents={documents}
+                    onRefresh={onRefresh}
+                    setNotice={setNotice}
+                    setError={setError}
+                />
             )}
 
             {activeTab === "crawler" && (

@@ -18,17 +18,9 @@ router.use("/admin", adminRoutes);
 router.use("/crawler", crawlerRoutes);
 router.use("/knowledge", knowledgeRoutes);
 
-router.get("/health", (req, res) => {
-    res.status(200).json({
-        success: true,
-        message: "EduMate API healthy",
-        data: {
-            service: "edumate-api",
-            version: "v1",
-            timestamp: new Date().toISOString()
-        },
-        errors: null
-    });
-});
+const { getSystemHealth } = require("../controllers/systemController");
+
+router.get("/health", getSystemHealth);
 
 module.exports = router;
+

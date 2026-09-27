@@ -2,12 +2,10 @@ const crypto = require("crypto");
 const path = require("path");
 
 const Document = require("../models/Document");
-const supabase = require("../config/supabase");
+const localStorageManager = require("../storage/localStorageManager");
 const asyncHandler = require("../utils/asyncHandler");
 const taskRegistry = require("../utils/taskRegistry");
 const { sendSuccess } = require("../utils/response");
-
-const BUCKET = process.env.SUPABASE_STORAGE_BUCKET || process.env.SUPABASE_BUCKET || "documents";
 
 const uploadDocument = asyncHandler(async (req, res) => {
     if (!req.file) {
@@ -44,21 +42,10 @@ const uploadDocument = asyncHandler(async (req, res) => {
         const uniqueName = `${Date.now()}-${crypto.randomUUID()}${extension}`;
         const storagePath = `${category}/${uniqueName}`;
 
-        const uploadMimeType = isImage ? "image/png" : file.mimetype;
-
         //------------------------------------------
-        // Upload to Supabase
+        // Save to Local Storage (edumate/storage/)
         //------------------------------------------
-        const { error } = await supabase.storage
-            .from(BUCKET)
-            .upload(storagePath, file.buffer, {
-                contentType: uploadMimeType,
-                upsert: false
-            });
-
-        if (error) {
-            throw error;
-        }
+        await localStorageManager.saveFile(storagePath, file.buffer);
 
         //------------------------------------------
         // Save metadata

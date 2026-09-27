@@ -46,7 +46,7 @@ export default function RecentOperations({ operations, setOperations }) {
             details: "78 new documents",
             icon: SyncIcon,
             logTrace: [
-                "10:15:00 AM - Connected to Supabase bucket 'documents'",
+                "10:15:00 AM - Initialized Local Storage Root 'storage/'",
                 "10:15:40 AM - Detected 78 new PDF files",
                 "10:16:08 AM - Sync complete, queue updated"
             ]

@@ -277,6 +277,161 @@ const bulkDeleteDocuments = asyncHandler(async (req, res) => {
     return sendSuccess(res, 202, "Bulk deletion scheduled in background.", task);
 });
 
+const downloadDocument = asyncHandler(async (req, res) => {
+    const { documentId } = req.params;
+    const Document = require("../models/Document");
+    const localStorageManager = require("../storage/localStorageManager");
+
+    const doc = await Document.findOne({ _id: documentId, status: { $ne: "deleted" } });
+    if (!doc) {
+        return res.status(404).json({ success: false, message: "Document not found." });
+    }
+
+    try {
+        const fileBuffer = await localStorageManager.readFile(doc.storagePath);
+        res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(doc.originalName || "document")}"`);
+        res.setHeader("Content-Type", doc.mimeType || "application/octet-stream");
+        return res.send(fileBuffer);
+    } catch (err) {
+        return res.status(404).json({ success: false, message: "File not found on local storage: " + err.message });
+    }
+});
+
+const previewDocument = asyncHandler(async (req, res) => {
+    const { documentId } = req.params;
+    const page = Number(req.query.page) || 1;
+    const Document = require("../models/Document");
+
+    const doc = await Document.findOne({ _id: documentId, status: { $ne: "deleted" } });
+    if (!doc) {
+        return res.status(404).json({ success: false, message: "Document not found." });
+    }
+
+    const downloadUrl = `/api/documents/${doc._id}/download`;
+
+    return sendSuccess(res, 200, "Document preview details retrieved.", {
+        documentId: doc._id,
+        title: doc.originalName,
+        category: doc.category,
+        department: doc.department,
+        mimeType: doc.mimeType,
+        pageNumber: page,
+        previewUrl: downloadUrl,
+        downloadUrl: downloadUrl
+    });
+});
+
+
+const createPlaceholder = asyncHandler(async (req, res) => {
+    const { name, category, department, program } = req.body;
+    const doc = await getDocumentService().createPlaceholderDocument({
+        name,
+        category,
+        department,
+        program,
+        user: req.user
+    });
+    return sendSuccess(res, 201, "Placeholder document created successfully.", doc);
+});
+
+const renameFolder = asyncHandler(async (req, res) => {
+    const { oldPath, newPath } = req.body;
+    const result = await getDocumentService().renameFolder({ oldPath, newPath, user: req.user });
+    return sendSuccess(res, 200, "Folder renamed successfully.", result);
+});
+
+const deleteFolder = asyncHandler(async (req, res) => {
+    const { folderPath } = req.body;
+    const result = await getDocumentService().deleteFolder({ folderPath, user: req.user });
+    return sendSuccess(res, 200, "Folder deleted successfully.", result);
+});
+
+const bulkRestoreDocuments = asyncHandler(async (req, res) => {
+    const { ids } = req.body;
+    const result = await getDocumentService().bulkRestore({ ids, user: req.user });
+    return sendSuccess(res, 200, "Documents restored successfully.", result);
+});
+
+// Queue Controller Endpoints
+const getQueueStatus = asyncHandler(async (req, res) => {
+    const chunkingQueueService = require("../ai/services/chunkingQueueService");
+    const status = await chunkingQueueService.getQueueStatus();
+    return sendSuccess(res, 200, "Queue status retrieved.", status);
+});
+
+const pauseQueue = asyncHandler(async (req, res) => {
+    const chunkingQueueService = require("../ai/services/chunkingQueueService");
+    const result = chunkingQueueService.pauseQueue();
+    return sendSuccess(res, 200, "Queue paused.", result);
+});
+
+const resumeQueue = asyncHandler(async (req, res) => {
+    const chunkingQueueService = require("../ai/services/chunkingQueueService");
+    const result = chunkingQueueService.resumeQueue();
+    return sendSuccess(res, 200, "Queue resumed.", result);
+});
+
+const enqueueDocuments = asyncHandler(async (req, res) => {
+    const { documentIds, options } = req.body;
+    const chunkingQueueService = require("../ai/services/chunkingQueueService");
+    const result = await chunkingQueueService.enqueueDocuments(documentIds, options);
+    return sendSuccess(res, 200, "Documents enqueued for processing.", result);
+});
+
+const retryFailedQueue = asyncHandler(async (req, res) => {
+    const chunkingQueueService = require("../ai/services/chunkingQueueService");
+    const result = await chunkingQueueService.retryFailed();
+    return sendSuccess(res, 200, "Failed documents re-enqueued.", result);
+});
+
+const cancelDocumentProcessing = asyncHandler(async (req, res) => {
+    const { documentId } = req.params;
+    const chunkingQueueService = require("../ai/services/chunkingQueueService");
+    const result = await chunkingQueueService.cancelDocument(documentId);
+    return sendSuccess(res, 200, "Document processing cancelled.", result);
+});
+
+const resumeDocumentProcessing = asyncHandler(async (req, res) => {
+    const { documentId } = req.params;
+    const chunkingQueueService = require("../ai/services/chunkingQueueService");
+    const result = await chunkingQueueService.resumeDocument(documentId);
+    return sendSuccess(res, 200, "Document processing resumed.", result);
+});
+
+const retryDocumentProcessing = asyncHandler(async (req, res) => {
+    const { documentId } = req.params;
+    const chunkingQueueService = require("../ai/services/chunkingQueueService");
+    const result = await chunkingQueueService.retryDocument(documentId);
+    return sendSuccess(res, 200, "Document re-enqueued for processing.", result);
+});
+
+// Chunks & Integrity Controller Endpoints
+const getDocumentChunks = asyncHandler(async (req, res) => {
+    const { documentId } = req.params;
+    const integrityService = require("../ai/services/integrityService");
+    const result = await integrityService.getDocumentChunks(documentId);
+    return sendSuccess(res, 200, "Document chunks retrieved.", result);
+});
+
+const getIntegrityReport = asyncHandler(async (req, res) => {
+    const integrityService = require("../ai/services/integrityService");
+    const result = await integrityService.auditKnowledgeBase();
+    return sendSuccess(res, 200, "Integrity audit report generated.", result);
+});
+
+const repairDocument = asyncHandler(async (req, res) => {
+    const { documentId } = req.params;
+    const integrityService = require("../ai/services/integrityService");
+    const result = await integrityService.repairDocument(documentId);
+    return sendSuccess(res, 200, "Document repair finished.", result);
+});
+
+const repairAllDocuments = asyncHandler(async (req, res) => {
+    const integrityService = require("../ai/services/integrityService");
+    const result = await integrityService.autoRepairAll();
+    return sendSuccess(res, 200, "Auto-repair for all documents completed.", result);
+});
+
 module.exports = {
     uploadDocument,
     listDocuments,
@@ -296,5 +451,24 @@ module.exports = {
     duplicateDocument,
     bulkMoveDocuments,
     bulkCopyDocuments,
-    bulkDeleteDocuments
+    bulkDeleteDocuments,
+    previewDocument,
+    downloadDocument,
+    createPlaceholder,
+    renameFolder,
+    deleteFolder,
+    bulkRestoreDocuments,
+    getQueueStatus,
+    pauseQueue,
+    resumeQueue,
+    enqueueDocuments,
+    retryFailedQueue,
+    cancelDocumentProcessing,
+    resumeDocumentProcessing,
+    retryDocumentProcessing,
+    getDocumentChunks,
+    getIntegrityReport,
+    repairDocument,
+    repairAllDocuments
 };
+

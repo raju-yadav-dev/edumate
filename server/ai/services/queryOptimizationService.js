@@ -147,10 +147,27 @@ function resolveReferences(question, context = {}) {
 
     if (topic) {
         q = q.replace(/\b(this course|the course|that course|its course)\b/gi, topic);
+
+        // Follow-up: "What about semester X?"
+        const semMatch = q.match(/\b(?:what about|how about|tell me about)?\s*(?:semester|sem)\s*([0-9ivx]+)\b/i);
+        if (semMatch && !new RegExp(`\\b${topic.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}\\b`, "i").test(q)) {
+            q = `Semester ${semMatch[1]} syllabus curriculum subjects for ${topic}`;
+        }
+
+        // Follow-up: "Tell me more" / "Tell me more about it"
+        if (/^(tell me more|more details?|explain more|elaborate)( about it| about this)?[\.\?!]*$/i.test(q)) {
+            q = `Detailed overview, subjects, and curriculum information for ${topic}`;
+        }
+
+        // Follow-up: "Compare it" / "Compare them"
+        if (/^(compare it|compare them|compare this|how does it compare)[\.\?!]*$/i.test(q)) {
+            q = `Comparison and career scope for ${topic}`;
+        }
+
         if (/\b(what about|what is the|tell me about)\s+(the )?(fee|fees|fee structure|eligibility|admission|placements?|duration)\b/i.test(q) && !new RegExp(`\\b${topic.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}\\b`, "i").test(q)) {
             q += ` for ${topic}`;
         }
-        if (/\b(it|its|that)\b/i.test(q) && /\b(fee|fees|eligibility|admission|placement|duration)\b/i.test(q)) {
+        if (/\b(it|its|that)\b/i.test(q) && /\b(fee|fees|eligibility|admission|placement|duration|compare|comparison)\b/i.test(q)) {
             q = q.replace(/\b(it|its|that)\b/gi, topic);
         }
     }
