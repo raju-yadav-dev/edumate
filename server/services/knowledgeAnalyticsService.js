@@ -101,6 +101,10 @@ class KnowledgeAnalyticsService {
             { query: "BBA Hospital Management placements", count: 14 }
         ];
 
+        // 8. Mission 16 Hybrid Router Telemetry
+        const { getRouterAnalytics } = require("../ai/routing/queryRouter");
+        const routerStats = getRouterAnalytics();
+
         return {
             timestamp: new Date().toISOString(),
             knowledgeBase: {
@@ -112,6 +116,18 @@ class KnowledgeAnalyticsService {
                 byDepartment: docsByDept.map(d => ({ department: d._id || "General", count: d.count })),
                 byCategory: docsByCat.map(c => ({ category: c._id || "Uncategorized", count: c.count })),
                 byStatus: docsByStatus.map(s => ({ status: s._id || "Unknown", count: s.count }))
+            },
+            routerTelemetry: {
+                totalRequests: routerStats.totalRequests,
+                llmOnlyRequests: routerStats.llmOnlyRequests,
+                ragRequests: routerStats.ragRequests,
+                mixedRequests: routerStats.mixedRequests,
+                ragOnlyRequests: routerStats.ragOnlyRequests,
+                toolRequests: routerStats.toolRequests,
+                retrievalSkippedCount: routerStats.retrievalSkippedCount,
+                averageRoutingLatencyMs: routerStats.avgRoutingLatencyMs,
+                retrievalLatencySavedMs: routerStats.retrievalLatencySavedMs,
+                recentDecisions: routerStats.recentDecisions || []
             },
             aiPerformance: {
                 model: llmConfig.model,

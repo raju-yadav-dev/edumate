@@ -1,11 +1,12 @@
 /**
- * Layer 8 — Conversation / Context Cache
- * EduMate Mission 14.1
+ * Layer 8 — Conversation Context Cache
+ * EduMate Mission 17 — Production Grade
  * 
  * Responsibilities:
- * - Keep active conversation summaries, titles, and recent message turns in server memory
+ * - Cache conversation summaries, recent message turns, detected entities, and memory states
+ * - TTL: Conversation lifetime / session lifetime
  * - Eliminate repeated MongoDB queries during conversational multi-turn dialogue
- * - Cache merged document chunk context arrays by chunk IDs signature
+ * - Cache merged document chunk context arrays by deterministic chunk signature
  */
 
 const crypto = require("crypto");
@@ -13,8 +14,8 @@ const BaseLRUCache = require("./BaseLRUCache");
 
 class Layer8_ConversationContextCache {
     constructor() {
-        const ttl = Number(process.env.CACHE_LAYER8_TTL || process.env.CONTEXT_CACHE_TTL || 600); // 10 minutes
-        const maxEntries = Number(process.env.CACHE_LAYER8_MAX || 300);
+        const ttl = Number(process.env.CACHE_LAYER8_TTL || process.env.CONTEXT_CACHE_TTL || 3600 * 24); // Conversation session lifetime
+        const maxEntries = Number(process.env.CACHE_LAYER8_MAX || 500);
 
         this.conversationCache = new BaseLRUCache({
             name: "Layer8_ConversationContext",
@@ -25,11 +26,10 @@ class Layer8_ConversationContextCache {
         this.mergedContextCache = new BaseLRUCache({
             name: "Layer8_MergedContext",
             maxEntries: maxEntries * 2,
-            defaultTtlSeconds: ttl
+            defaultTtlSeconds: 1800 // 30 minutes
         });
     }
 
-    // --- Conversation & Recent Turns Memory ---
     _convKey(userId, conversationId) {
         return `conv_ctx:${String(userId || "anon")}:${String(conversationId || "default")}`;
     }
@@ -55,7 +55,14 @@ class Layer8_ConversationContextCache {
     appendMessageToContext(userId, conversationId, message) {
         if (!userId || !conversationId || !message) return;
         const key = this._convKey(userId, conversationId);
-        const ctx = this.conversationCache.get(key) || { title: "Chat", summary: "", recentMessages: [], totalMessages: 0 };
+        const ctx = this.conversationCache.get(key) || { 
+            title: "Chat", 
+            summary: "", 
+            entities: {}, 
+            memoryState: {}, 
+            recentMessages: [], 
+            totalMessages: 0 
+        };
         ctx.recentMessages = Array.isArray(ctx.recentMessages) ? ctx.recentMessages : [];
         ctx.recentMessages.push({
             role: message.role,
@@ -63,8 +70,8 @@ class Layer8_ConversationContextCache {
             sources: message.sources || [],
             createdAt: message.createdAt || new Date().toISOString()
         });
-        if (ctx.recentMessages.length > 20) {
-            ctx.recentMessages = ctx.recentMessages.slice(-20);
+        if (ctx.recentMessages.length > 30) {
+            ctx.recentMessages = ctx.recentMessages.slice(-30);
         }
         ctx.totalMessages = (ctx.totalMessages || 0) + 1;
         this.conversationCache.set(key, ctx);
@@ -112,7 +119,7 @@ class Layer8_ConversationContextCache {
 
         return {
             layer: 8,
-            name: "Layer 8 — Conversation / Context Cache",
+            name: "Layer 8 — Conversation Context Cache",
             size: convStats.size + mergedStats.size,
             hits: totalHits,
             misses: totalMisses,

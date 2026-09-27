@@ -115,6 +115,14 @@ app.use(express.urlencoded({
 
 app.use(cookieParser());
 
+const { securitySanitizerMiddleware } = require("./middleware/securitySanitizer");
+const { chatRateLimiter, uploadRateLimiter, loginRateLimiter, healthRateLimiter } = require("./middleware/rateLimiters");
+const securityRoutes = require("./routes/securityRoutes");
+const developerRoutes = require("./routes/developerRoutes");
+const agentRoutes = require("./routes/agentRoutes");
+
+app.use(securitySanitizerMiddleware);
+
 if (global.startupTimer) {
     global.startupTimer.log("Express initialised", Date.now() - expressInitStart);
 }
@@ -123,13 +131,20 @@ const routesInitStart = Date.now();
 app.use("/api/v1", apiRoutes);
 
 // Backward compatible route aliases while the frontend migrates to /api/v1.
+app.use("/api/auth/login", loginRateLimiter);
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
-app.use("/api/chat", chatRoutes);
+app.use("/api/chat", chatRateLimiter, chatRoutes);
 app.use("/api/documents", documentRoutes);
+app.use("/api/admin/security", securityRoutes);
+app.use("/api/security", securityRoutes);
+app.use("/api/admin/developer", developerRoutes);
+app.use("/api/developer", developerRoutes);
+app.use("/api/admin/agents", agentRoutes);
+app.use("/api/agents", agentRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/storage", storageRoutes);
-app.use("/api/upload", uploadRoutes);
+app.use("/api/upload", uploadRateLimiter, uploadRoutes);
 app.use("/api/map", mapRoutes);
 const crawlerRoutes = require("./crawler/routes/crawlerRoutes");
 app.use("/api/crawler", crawlerRoutes);
@@ -143,11 +158,13 @@ const validationRoutes = require("./routes/validationRoutes");
 app.use("/api/validation", validationRoutes);
 const demoRoutes = require("./routes/demoRoutes");
 app.use("/api/demo", demoRoutes);
+const cacheRoutes = require("./routes/cacheRoutes");
+app.use("/api/cache", cacheRoutes);
 
 const { getSystemHealth } = require("./controllers/systemController");
-app.get("/api/system/health", getSystemHealth);
-app.get("/api/health", getSystemHealth);
-app.get("/health", getSystemHealth);
+app.get("/api/system/health", healthRateLimiter, getSystemHealth);
+app.get("/api/health", healthRateLimiter, getSystemHealth);
+app.get("/health", healthRateLimiter, getSystemHealth);
 
 if (global.startupTimer) {
     global.startupTimer.log("Routes registered", Date.now() - routesInitStart);

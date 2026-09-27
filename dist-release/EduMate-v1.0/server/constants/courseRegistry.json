@@ -1,0 +1,1436 @@
+[
+  {
+    "courseId": "b_tech_cse",
+    "canonicalName": "Bachelor of Technology in Computer Science & Engineering",
+    "shortName": "B.Tech CSE",
+    "aliases": [
+      "Bachelor of Technology in Computer Science & Engineering",
+      "B.Tech CSE",
+      "BTech CSE",
+      "B Tech CSE",
+      "B.Tech Computer Science",
+      "BTech Computer Science",
+      "B Tech Computer Science",
+      "CSE",
+      "Computer Science Engineering",
+      "Computer Science and Engineering"
+    ],
+    "level": "UG",
+    "school": "School of Engineering",
+    "category": "Computer Science & Engineering",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "b_tech_cse_lateral_entry",
+    "canonicalName": "Bachelor of Technology in Computer Science & Engineering --- Lateral Entry",
+    "shortName": "B.Tech CSE (Lateral Entry)",
+    "aliases": [
+      "Bachelor of Technology in Computer Science & Engineering --- Lateral Entry",
+      "B.Tech CSE",
+      "BTech CSE",
+      "B Tech CSE",
+      "B.Tech Computer Science",
+      "BTech Computer Science",
+      "B Tech Computer Science",
+      "CSE",
+      "Computer Science Engineering",
+      "Computer Science and Engineering",
+      "B.Tech CSE Lateral Entry",
+      "BTech CSE Lateral"
+    ],
+    "level": "UG",
+    "school": "School of Engineering",
+    "category": "Computer Science & Engineering",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "b_tech_cse_ai_ml",
+    "canonicalName": "Bachelor of Technology in Computer Science & Engineering --- Artificial Intelligence & Machine Learning",
+    "shortName": "B.Tech CSE (AI & ML)",
+    "aliases": [
+      "Bachelor of Technology in Computer Science & Engineering --- Artificial Intelligence & Machine Learning",
+      "B.Tech CSE",
+      "BTech CSE",
+      "B Tech CSE",
+      "B.Tech Computer Science",
+      "BTech Computer Science",
+      "B Tech Computer Science",
+      "CSE",
+      "Computer Science Engineering",
+      "Computer Science and Engineering",
+      "B.Tech CSE AIML",
+      "BTech CSE AIML",
+      "CSE AIML",
+      "CSE AI & ML"
+    ],
+    "level": "UG",
+    "school": "School of Engineering",
+    "category": "Computer Science & Engineering",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "b_tech_cse_lateral_entry",
+    "canonicalName": "Bachelor of Technology in Computer Science & Engineering --- Artificial Intelligence & Machine Learning --- Lateral Entry",
+    "shortName": "B.Tech CSE (Lateral Entry)",
+    "aliases": [
+      "Bachelor of Technology in Computer Science & Engineering --- Artificial Intelligence & Machine Learning --- Lateral Entry",
+      "B.Tech CSE",
+      "BTech CSE",
+      "B Tech CSE",
+      "B.Tech Computer Science",
+      "BTech Computer Science",
+      "B Tech Computer Science",
+      "CSE",
+      "Computer Science Engineering",
+      "Computer Science and Engineering",
+      "B.Tech CSE Lateral Entry",
+      "BTech CSE Lateral"
+    ],
+    "level": "UG",
+    "school": "School of Engineering",
+    "category": "Computer Science & Engineering",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "b_tech_cse_ai_robotics",
+    "canonicalName": "Bachelor of Technology in Computer Science & Engineering --- Artificial Intelligence & Robotics",
+    "shortName": "B.Tech CSE (AI & Robotics)",
+    "aliases": [
+      "Bachelor of Technology in Computer Science & Engineering --- Artificial Intelligence & Robotics",
+      "B.Tech CSE",
+      "BTech CSE",
+      "B Tech CSE",
+      "B.Tech Computer Science",
+      "BTech Computer Science",
+      "B Tech Computer Science",
+      "CSE",
+      "Computer Science Engineering",
+      "Computer Science and Engineering",
+      "B.Tech CSE AI & Robotics",
+      "BTech CSE AI & Robotics",
+      "CSE AI & Robotics"
+    ],
+    "level": "UG",
+    "school": "School of Engineering",
+    "category": "Computer Science & Engineering",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "b_tech_cse_lateral_entry",
+    "canonicalName": "Bachelor of Technology in Computer Science & Engineering --- Artificial Intelligence & Robotics --- Lateral Entry",
+    "shortName": "B.Tech CSE (Lateral Entry)",
+    "aliases": [
+      "Bachelor of Technology in Computer Science & Engineering --- Artificial Intelligence & Robotics --- Lateral Entry",
+      "B.Tech CSE",
+      "BTech CSE",
+      "B Tech CSE",
+      "B.Tech Computer Science",
+      "BTech Computer Science",
+      "B Tech Computer Science",
+      "CSE",
+      "Computer Science Engineering",
+      "Computer Science and Engineering",
+      "B.Tech CSE Lateral Entry",
+      "BTech CSE Lateral"
+    ],
+    "level": "UG",
+    "school": "School of Engineering",
+    "category": "Computer Science & Engineering",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "b_tech_cse_lateral_entry",
+    "canonicalName": "Bachelor of Technology in Computer Science & Engineering --- Data Science --- Lateral Entry",
+    "shortName": "B.Tech CSE (Lateral Entry)",
+    "aliases": [
+      "Bachelor of Technology in Computer Science & Engineering --- Data Science --- Lateral Entry",
+      "B.Tech CSE",
+      "BTech CSE",
+      "B Tech CSE",
+      "B.Tech Computer Science",
+      "BTech Computer Science",
+      "B Tech Computer Science",
+      "CSE",
+      "Computer Science Engineering",
+      "Computer Science and Engineering",
+      "B.Tech CSE Lateral Entry",
+      "BTech CSE Lateral"
+    ],
+    "level": "UG",
+    "school": "School of Engineering",
+    "category": "Computer Science & Engineering",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "b_tech_cse_cyber_security",
+    "canonicalName": "Bachelor of Technology in Computer Science & Engineering --- Cyber Security",
+    "shortName": "B.Tech CSE (Cyber Security)",
+    "aliases": [
+      "Bachelor of Technology in Computer Science & Engineering --- Cyber Security",
+      "B.Tech CSE",
+      "BTech CSE",
+      "B Tech CSE",
+      "B.Tech Computer Science",
+      "BTech Computer Science",
+      "B Tech Computer Science",
+      "CSE",
+      "Computer Science Engineering",
+      "Computer Science and Engineering",
+      "B.Tech CSE Cyber Security",
+      "BTech CSE Cyber Security",
+      "CSE Cyber Security"
+    ],
+    "level": "UG",
+    "school": "School of Engineering",
+    "category": "Computer Science & Engineering",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "b_tech_cse_lateral_entry",
+    "canonicalName": "Bachelor of Technology in Computer Science & Engineering --- Cyber Security --- Lateral Entry",
+    "shortName": "B.Tech CSE (Lateral Entry)",
+    "aliases": [
+      "Bachelor of Technology in Computer Science & Engineering --- Cyber Security --- Lateral Entry",
+      "B.Tech CSE",
+      "BTech CSE",
+      "B Tech CSE",
+      "B.Tech Computer Science",
+      "BTech Computer Science",
+      "B Tech Computer Science",
+      "CSE",
+      "Computer Science Engineering",
+      "Computer Science and Engineering",
+      "B.Tech CSE Lateral Entry",
+      "BTech CSE Lateral"
+    ],
+    "level": "UG",
+    "school": "School of Engineering",
+    "category": "Computer Science & Engineering",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "b_tech_cse_ds_ai",
+    "canonicalName": "Bachelor of Technology in Computer Science & Engineering --- Data Science & Artificial Intelligence",
+    "shortName": "B.Tech CSE (DS & AI)",
+    "aliases": [
+      "Bachelor of Technology in Computer Science & Engineering --- Data Science & Artificial Intelligence",
+      "B.Tech CSE",
+      "BTech CSE",
+      "B Tech CSE",
+      "B.Tech Computer Science",
+      "BTech Computer Science",
+      "B Tech Computer Science",
+      "CSE",
+      "Computer Science Engineering",
+      "Computer Science and Engineering",
+      "B.Tech CSE DS & AI",
+      "BTech CSE DS & AI",
+      "CSE DS & AI"
+    ],
+    "level": "UG",
+    "school": "School of Engineering",
+    "category": "Computer Science & Engineering",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "b_sc_cyber_security",
+    "canonicalName": "Bachelor of Science (Honours) in Advanced Networking & Cyber Security",
+    "shortName": "B.Sc Cyber Security",
+    "aliases": [
+      "Bachelor of Science (Honours) in Advanced Networking & Cyber Security",
+      "BSc Cyber Security",
+      "B.Sc Advanced Networking",
+      "Advanced Networking"
+    ],
+    "level": "UG",
+    "school": "School of Computational & Applied Sciences",
+    "category": "Cyber Science & Technology",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "bca",
+    "canonicalName": "Bachelor of Computer Applications (Honours)",
+    "shortName": "BCA",
+    "aliases": [
+      "Bachelor of Computer Applications (Honours)",
+      "BCA",
+      "Bachelor of Computer Applications",
+      "Bachelor in Computer Applications",
+      "Computer Applications"
+    ],
+    "level": "UG",
+    "school": "School of Computational & Applied Sciences",
+    "category": "Computational Science",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "bca_ai_ml",
+    "canonicalName": "Bachelor of Computer Applications in Artificial Intelligence & Machine Learning (Honours)",
+    "shortName": "BCA (AI & ML)",
+    "aliases": [
+      "Bachelor of Computer Applications in Artificial Intelligence & Machine Learning (Honours)",
+      "BCA",
+      "Bachelor of Computer Applications",
+      "Bachelor in Computer Applications",
+      "Computer Applications",
+      "BCA AIML",
+      "BCA AI & ML"
+    ],
+    "level": "UG",
+    "school": "School of Computational & Applied Sciences",
+    "category": "Computational Science",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "bba",
+    "canonicalName": "Bachelor of Business Administration (Honours)",
+    "shortName": "BBA",
+    "aliases": [
+      "Bachelor of Business Administration (Honours)",
+      "BBA",
+      "Bachelor of Business Administration",
+      "Bachelor in Business Administration"
+    ],
+    "level": "UG",
+    "school": "School of Management & Commerce",
+    "category": "Management",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "bba_business_analytics",
+    "canonicalName": "Bachelor of Business Administration (Honours) in Business Analytics",
+    "shortName": "BBA (Business Analytics)",
+    "aliases": [
+      "Bachelor of Business Administration (Honours) in Business Analytics",
+      "BBA",
+      "Bachelor of Business Administration",
+      "Bachelor in Business Administration",
+      "BBA BA",
+      "BBA Business Analytics"
+    ],
+    "level": "UG",
+    "school": "School of Management & Commerce",
+    "category": "Management",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "bba_digital_marketing",
+    "canonicalName": "Bachelor of Business Administration (Honours) in Digital Marketing",
+    "shortName": "BBA (Digital Marketing)",
+    "aliases": [
+      "Bachelor of Business Administration (Honours) in Digital Marketing",
+      "BBA",
+      "Bachelor of Business Administration",
+      "Bachelor in Business Administration",
+      "BBA DM",
+      "BBA Digital Marketing"
+    ],
+    "level": "UG",
+    "school": "School of Management & Commerce",
+    "category": "Management",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "bba_hospital_management",
+    "canonicalName": "Bachelor of Business Administration (Honours) in Hospital Management",
+    "shortName": "BBA (Hospital Management)",
+    "aliases": [
+      "Bachelor of Business Administration (Honours) in Hospital Management",
+      "BBA",
+      "Bachelor of Business Administration",
+      "Bachelor in Business Administration",
+      "BBA HM",
+      "BBA Hospital Management",
+      "Hospital Management"
+    ],
+    "level": "UG",
+    "school": "School of Management & Commerce",
+    "category": "Hospital Management",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "b_com",
+    "canonicalName": "Bachelor of Commerce (Honours) in Accounts, Finance & Banking",
+    "shortName": "B.Com",
+    "aliases": [
+      "Bachelor of Commerce (Honours) in Accounts, Finance & Banking",
+      "B.Com",
+      "BCom",
+      "Bachelor of Commerce"
+    ],
+    "level": "UG",
+    "school": "School of Management & Commerce",
+    "category": "Commerce",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "b_pharm",
+    "canonicalName": "Bachelor of Pharmacy",
+    "shortName": "B.Pharm",
+    "aliases": [
+      "Bachelor of Pharmacy",
+      "B.Pharm",
+      "BPharm",
+      "Pharmacy"
+    ],
+    "level": "UG",
+    "school": "School of Medical & Allied Health Sciences",
+    "category": "Pharmaceutical Technology",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "b_pharm_lateral_entry",
+    "canonicalName": "Bachelor of Pharmacy --- Lateral Entry",
+    "shortName": "B.Pharm (Lateral Entry)",
+    "aliases": [
+      "Bachelor of Pharmacy --- Lateral Entry",
+      "B.Pharm",
+      "BPharm",
+      "Bachelor of Pharmacy",
+      "Pharmacy"
+    ],
+    "level": "UG",
+    "school": "School of Medical & Allied Health Sciences",
+    "category": "Pharmaceutical Technology",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "b_optom",
+    "canonicalName": "Bachelor of Optometry",
+    "shortName": "B.Optom",
+    "aliases": [
+      "Bachelor of Optometry",
+      "B.Optom",
+      "BOptom",
+      "Optometry"
+    ],
+    "level": "UG",
+    "school": "School of Medical & Allied Health Sciences",
+    "category": "Allied Health Sciences",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "bpt",
+    "canonicalName": "Bachelor of Physiotherapy",
+    "shortName": "BPT",
+    "aliases": [
+      "Bachelor of Physiotherapy",
+      "BPT",
+      "Physiotherapy"
+    ],
+    "level": "UG",
+    "school": "School of Medical & Allied Health Sciences",
+    "category": "Allied Health Sciences",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "bachelor_of_science_in_critical_care_technology",
+    "canonicalName": "Bachelor of Science in Critical Care Technology",
+    "shortName": "Bachelor of Science in Critical Care Technology",
+    "aliases": [
+      "Bachelor of Science in Critical Care Technology"
+    ],
+    "level": "UG",
+    "school": "School of Medical & Allied Health Sciences",
+    "category": "Allied Health Sciences",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "b_optom",
+    "canonicalName": "Bachelor of Optometry --- Lateral Entry",
+    "shortName": "B.Optom",
+    "aliases": [
+      "Bachelor of Optometry --- Lateral Entry",
+      "B.Optom",
+      "BOptom",
+      "Bachelor of Optometry",
+      "Optometry"
+    ],
+    "level": "UG",
+    "school": "School of Medical & Allied Health Sciences",
+    "category": "Allied Health Sciences",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "bpt",
+    "canonicalName": "Bachelor of Physiotherapy --- Lateral Entry",
+    "shortName": "BPT",
+    "aliases": [
+      "Bachelor of Physiotherapy --- Lateral Entry",
+      "BPT",
+      "Bachelor of Physiotherapy",
+      "Physiotherapy"
+    ],
+    "level": "UG",
+    "school": "School of Medical & Allied Health Sciences",
+    "category": "Allied Health Sciences",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "bachelor_of_science_in_medical_lab_technology_lateral_entry",
+    "canonicalName": "Bachelor of Science in Medical Lab Technology --- Lateral Entry",
+    "shortName": "Bachelor of Science in Medical Lab Technology --- Lateral Entry",
+    "aliases": [
+      "Bachelor of Science in Medical Lab Technology --- Lateral Entry"
+    ],
+    "level": "UG",
+    "school": "School of Medical & Allied Health Sciences",
+    "category": "Allied Health Sciences",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "bachelor_of_science_in_medical_radiology_imaging_technology_lateral_entry",
+    "canonicalName": "Bachelor of Science in Medical Radiology & Imaging Technology --- Lateral Entry",
+    "shortName": "Bachelor of Science in Medical Radiology & Imaging Technology --- Lateral Entry",
+    "aliases": [
+      "Bachelor of Science in Medical Radiology & Imaging Technology --- Lateral Entry"
+    ],
+    "level": "UG",
+    "school": "School of Medical & Allied Health Sciences",
+    "category": "Allied Health Sciences",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "bachelor_of_science_in_operation_theatre_technology_lateral_entry",
+    "canonicalName": "Bachelor of Science in Operation Theatre Technology --- Lateral Entry",
+    "shortName": "Bachelor of Science in Operation Theatre Technology --- Lateral Entry",
+    "aliases": [
+      "Bachelor of Science in Operation Theatre Technology --- Lateral Entry"
+    ],
+    "level": "UG",
+    "school": "School of Medical & Allied Health Sciences",
+    "category": "Allied Health Sciences",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "bachelor_of_science_in_critical_care_technology_lateral_entry",
+    "canonicalName": "Bachelor of Science in Critical Care Technology --- Lateral Entry",
+    "shortName": "Bachelor of Science in Critical Care Technology --- Lateral Entry",
+    "aliases": [
+      "Bachelor of Science in Critical Care Technology --- Lateral Entry"
+    ],
+    "level": "UG",
+    "school": "School of Medical & Allied Health Sciences",
+    "category": "Allied Health Sciences",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "bachelor_of_medical_laboratory_science",
+    "canonicalName": "Bachelor of Medical Laboratory Science",
+    "shortName": "Bachelor of Medical Laboratory Science",
+    "aliases": [
+      "Bachelor of Medical Laboratory Science"
+    ],
+    "level": "UG",
+    "school": "School of Medical & Allied Health Sciences",
+    "category": "Allied Health Sciences",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "bachelor_in_medical_radiology_and_imaging_technology",
+    "canonicalName": "Bachelor in Medical Radiology and Imaging Technology",
+    "shortName": "Bachelor in Medical Radiology and Imaging Technology",
+    "aliases": [
+      "Bachelor in Medical Radiology and Imaging Technology"
+    ],
+    "level": "UG",
+    "school": "School of Medical & Allied Health Sciences",
+    "category": "Allied Health Sciences",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "bachelor_in_anaesthesia_operation_theatre_technology",
+    "canonicalName": "Bachelor in Anaesthesia & Operation Theatre Technology",
+    "shortName": "Bachelor in Anaesthesia & Operation Theatre Technology",
+    "aliases": [
+      "Bachelor in Anaesthesia & Operation Theatre Technology"
+    ],
+    "level": "UG",
+    "school": "School of Medical & Allied Health Sciences",
+    "category": "Allied Health Sciences",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "bachelor_of_physician_associate",
+    "canonicalName": "Bachelor of Physician Associate",
+    "shortName": "Bachelor of Physician Associate",
+    "aliases": [
+      "Bachelor of Physician Associate"
+    ],
+    "level": "UG",
+    "school": "School of Medical & Allied Health Sciences",
+    "category": "Allied Health Sciences",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "b_sc_nursing",
+    "canonicalName": "Bachelor of Science in Nursing",
+    "shortName": "B.Sc Nursing",
+    "aliases": [
+      "Bachelor of Science in Nursing",
+      "BSc Nursing",
+      "B.Sc Nursing",
+      "Nursing"
+    ],
+    "level": "UG",
+    "school": "School of Medical & Allied Health Sciences",
+    "category": "Nursing",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "b_sc_food_nutrition_dietetics",
+    "canonicalName": "Bachelor of Science (Honours) in Food, Nutrition & Dietetics",
+    "shortName": "B.Sc Food Nutrition & Dietetics",
+    "aliases": [
+      "Bachelor of Science (Honours) in Food, Nutrition & Dietetics",
+      "BSc Food Nutrition",
+      "B.Sc Food and Nutrition",
+      "Food and Nutrition"
+    ],
+    "level": "UG",
+    "school": "School of Medical & Allied Health Sciences",
+    "category": "Food & Nutrition",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "bachelor_of_technology_in_biotechnology",
+    "canonicalName": "Bachelor of Technology in Biotechnology",
+    "shortName": "Bachelor of Technology in Biotechnology",
+    "aliases": [
+      "Bachelor of Technology in Biotechnology"
+    ],
+    "level": "UG",
+    "school": "School of Biotechnology & Biosciences",
+    "category": "Biotechnology",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "b_sc_hons_biotechnology",
+    "canonicalName": "Bachelor of Science (Honours) in Biotechnology",
+    "shortName": "B.Sc (Hons) Biotechnology",
+    "aliases": [
+      "Bachelor of Science (Honours) in Biotechnology",
+      "BSc Biotechnology",
+      "B.Sc Biotechnology",
+      "Biotechnology"
+    ],
+    "level": "UG",
+    "school": "School of Biotechnology & Biosciences",
+    "category": "Biotechnology",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "bachelor_of_technology_in_biotechnology_lateral_entry",
+    "canonicalName": "Bachelor of Technology in Biotechnology --- Lateral Entry",
+    "shortName": "Bachelor of Technology in Biotechnology --- Lateral Entry",
+    "aliases": [
+      "Bachelor of Technology in Biotechnology --- Lateral Entry"
+    ],
+    "level": "UG",
+    "school": "School of Biotechnology & Biosciences",
+    "category": "Biotechnology",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "b_sc_agriculture",
+    "canonicalName": "Bachelor of Science (Honours) in Agriculture",
+    "shortName": "B.Sc Agriculture",
+    "aliases": [
+      "Bachelor of Science (Honours) in Agriculture",
+      "BSc Agriculture",
+      "B.Sc Agriculture",
+      "Agriculture"
+    ],
+    "level": "UG",
+    "school": "School of Agriculture",
+    "category": "Agriculture",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "llb",
+    "canonicalName": "Bachelor of Law",
+    "shortName": "LLB",
+    "aliases": [
+      "Bachelor of Law",
+      "LLB",
+      "L.L.B.",
+      "Bachelor of Laws",
+      "Law"
+    ],
+    "level": "UG",
+    "school": "School of Law",
+    "category": "Law",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "bba_llb",
+    "canonicalName": "Bachelor of Business Administration & Bachelor of Law",
+    "shortName": "BBA LLB",
+    "aliases": [
+      "Bachelor of Business Administration & Bachelor of Law",
+      "BBA LLB",
+      "BBA-LLB",
+      "BBA & LLB",
+      "Bachelor of Business Administration and Bachelor of Law"
+    ],
+    "level": "UG",
+    "school": "School of Law",
+    "category": "Law",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "ba_llb",
+    "canonicalName": "Bachelor of Arts & Bachelor of Law",
+    "shortName": "BA LLB",
+    "aliases": [
+      "Bachelor of Arts & Bachelor of Law",
+      "BA LLB",
+      "BA-LLB",
+      "BA & LLB",
+      "Bachelor of Arts and Bachelor of Law"
+    ],
+    "level": "UG",
+    "school": "School of Law",
+    "category": "Law",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "b_sc_animation_multimedia",
+    "canonicalName": "Bachelor of Science (Honours) in Animation & Multimedia",
+    "shortName": "B.Sc Animation & Multimedia",
+    "aliases": [
+      "Bachelor of Science (Honours) in Animation & Multimedia",
+      "BSc Animation",
+      "B.Sc Animation",
+      "Animation & Multimedia"
+    ],
+    "level": "UG",
+    "school": "School of Communication, Multimedia & Film Studies",
+    "category": "Multimedia",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "b_sc_animation_vfx_gaming",
+    "canonicalName": "Bachelor of Science (Honours) in Animation, VFX & Gaming",
+    "shortName": "B.Sc Animation VFX & Gaming",
+    "aliases": [
+      "Bachelor of Science (Honours) in Animation, VFX & Gaming",
+      "BSc VFX",
+      "B.Sc VFX",
+      "VFX & Gaming"
+    ],
+    "level": "UG",
+    "school": "School of Communication, Multimedia & Film Studies",
+    "category": "Multimedia",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "b_sc_media_science_journalism",
+    "canonicalName": "Bachelor of Science (Honours) in Digital Media Science & Journalism (AI-Integrated)",
+    "shortName": "B.Sc Media Science & Journalism",
+    "aliases": [
+      "Bachelor of Science (Honours) in Digital Media Science & Journalism (AI-Integrated)",
+      "BSc Media Science",
+      "B.Sc Journalism",
+      "Media Science",
+      "Journalism"
+    ],
+    "level": "UG",
+    "school": "School of Communication, Multimedia & Film Studies",
+    "category": "Media Science & Journalism",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "b_sc_psychology",
+    "canonicalName": "Bachelor of Science (Honours) in Psychology",
+    "shortName": "B.Sc Psychology",
+    "aliases": [
+      "Bachelor of Science (Honours) in Psychology",
+      "BSc Psychology",
+      "B.Sc Psychology",
+      "Psychology"
+    ],
+    "level": "UG",
+    "school": "School of Humanities & Social Sciences",
+    "category": "Psychology",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "ba_english",
+    "canonicalName": "Bachelor of Arts (Honours) in Applied English",
+    "shortName": "BA English",
+    "aliases": [
+      "Bachelor of Arts (Honours) in Applied English",
+      "BA English",
+      "Bachelor of Arts in English",
+      "English"
+    ],
+    "level": "UG",
+    "school": "School of Humanities & Social Sciences",
+    "category": "English & Literary Studies",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "m_tech_cse_ai_ml",
+    "canonicalName": "Master of Technology in Computer Science & Engineering --- Artificial Intelligence & Machine Learning",
+    "shortName": "M.Tech CSE (AI & ML)",
+    "aliases": [
+      "Master of Technology in Computer Science & Engineering --- Artificial Intelligence & Machine Learning",
+      "M.Tech CSE",
+      "MTech CSE",
+      "Master of Technology in Computer Science",
+      "MTech CSE AIML"
+    ],
+    "level": "PG",
+    "school": "School of Engineering",
+    "category": "School of Engineering",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "m_tech_robotics",
+    "canonicalName": "Master of Technology in Robotics & Automation",
+    "shortName": "M.Tech Robotics",
+    "aliases": [
+      "Master of Technology in Robotics & Automation",
+      "M.Tech Robotics",
+      "MTech Robotics"
+    ],
+    "level": "PG",
+    "school": "School of Engineering",
+    "category": "School of Engineering",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "m_tech_cse",
+    "canonicalName": "Master of Technology in Computer Science & Engineering",
+    "shortName": "M.Tech CSE",
+    "aliases": [
+      "Master of Technology in Computer Science & Engineering",
+      "M.Tech CSE",
+      "MTech CSE",
+      "Master of Technology in Computer Science"
+    ],
+    "level": "PG",
+    "school": "School of Engineering",
+    "category": "School of Engineering",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "m_tech_cse_data_science",
+    "canonicalName": "Master of Technology in Computer Science & Engineering --- Data Science",
+    "shortName": "M.Tech CSE (Data Science)",
+    "aliases": [
+      "Master of Technology in Computer Science & Engineering --- Data Science",
+      "M.Tech CSE",
+      "MTech CSE",
+      "Master of Technology in Computer Science",
+      "MTech CSE DS"
+    ],
+    "level": "PG",
+    "school": "School of Engineering",
+    "category": "School of Engineering",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "mca",
+    "canonicalName": "Master of Computer Applications",
+    "shortName": "MCA",
+    "aliases": [
+      "Master of Computer Applications",
+      "MCA"
+    ],
+    "level": "PG",
+    "school": "School of Computational & Applied Sciences",
+    "category": "School of Computational & Applied Sciences",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "m_sc_cyber_security",
+    "canonicalName": "Master of Science in Advanced Networking & Cyber Security",
+    "shortName": "M.Sc Cyber Security",
+    "aliases": [
+      "Master of Science in Advanced Networking & Cyber Security",
+      "MSc Cyber Security",
+      "M.Sc Advanced Networking"
+    ],
+    "level": "PG",
+    "school": "School of Computational & Applied Sciences",
+    "category": "School of Computational & Applied Sciences",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "m_sc_mathematics",
+    "canonicalName": "Master of Science in Mathematics",
+    "shortName": "M.Sc Mathematics",
+    "aliases": [
+      "Master of Science in Mathematics",
+      "MSc Mathematics",
+      "Mathematics"
+    ],
+    "level": "PG",
+    "school": "School of Computational & Applied Sciences",
+    "category": "School of Computational & Applied Sciences",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "mba",
+    "canonicalName": "Master of Business Administration",
+    "shortName": "MBA",
+    "aliases": [
+      "Master of Business Administration",
+      "MBA"
+    ],
+    "level": "PG",
+    "school": "School of Management & Commerce",
+    "category": "School of Management & Commerce",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "m_com",
+    "canonicalName": "Master of Commerce in Banking & Financial Accounting",
+    "shortName": "M.Com",
+    "aliases": [
+      "Master of Commerce in Banking & Financial Accounting",
+      "M.Com",
+      "MCom",
+      "Master of Commerce"
+    ],
+    "level": "PG",
+    "school": "School of Management & Commerce",
+    "category": "School of Management & Commerce",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "mba",
+    "canonicalName": "Master of Business Administration in Healthcare & Hospital",
+    "shortName": "MBA",
+    "aliases": [
+      "Master of Business Administration in Healthcare & Hospital",
+      "MBA",
+      "Master of Business Administration"
+    ],
+    "level": "PG",
+    "school": "School of Management & Commerce",
+    "category": "School of Management & Commerce",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "m_pharm_pharmaceutics",
+    "canonicalName": "Master of Pharmacy in Pharmaceutics",
+    "shortName": "M.Pharm (Pharmaceutics)",
+    "aliases": [
+      "Master of Pharmacy in Pharmaceutics",
+      "M.Pharm",
+      "MPharm",
+      "Master of Pharmacy",
+      "MPharm Pharmaceutics"
+    ],
+    "level": "PG",
+    "school": "School of Medical & Allied Health Sciences",
+    "category": "School of Medical & Allied Health Sciences",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "m_pharm_pharmaceutical_chemistry",
+    "canonicalName": "Master of Pharmacy in Pharmaceutical Chemistry",
+    "shortName": "M.Pharm (Pharmaceutical Chemistry)",
+    "aliases": [
+      "Master of Pharmacy in Pharmaceutical Chemistry",
+      "M.Pharm",
+      "MPharm",
+      "Master of Pharmacy",
+      "MPharm Pharmaceutical Chemistry"
+    ],
+    "level": "PG",
+    "school": "School of Medical & Allied Health Sciences",
+    "category": "School of Medical & Allied Health Sciences",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "m_optom",
+    "canonicalName": "Master of Optometry",
+    "shortName": "M.Optom",
+    "aliases": [
+      "Master of Optometry",
+      "M.Optom",
+      "MOptom"
+    ],
+    "level": "PG",
+    "school": "School of Medical & Allied Health Sciences",
+    "category": "School of Medical & Allied Health Sciences",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "mmls",
+    "canonicalName": "Master of Medical Laboratory Science",
+    "shortName": "MMLS",
+    "aliases": [
+      "Master of Medical Laboratory Science",
+      "MMLS",
+      "M.Sc MLT",
+      "MSc MLT"
+    ],
+    "level": "PG",
+    "school": "School of Medical & Allied Health Sciences",
+    "category": "School of Medical & Allied Health Sciences",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "m_sc_nutrition",
+    "canonicalName": "Master of Science in Nutrition & Dietetics",
+    "shortName": "M.Sc Nutrition",
+    "aliases": [
+      "Master of Science in Nutrition & Dietetics",
+      "MSc Nutrition",
+      "M.Sc Nutrition & Dietetics"
+    ],
+    "level": "PG",
+    "school": "School of Medical & Allied Health Sciences",
+    "category": "School of Medical & Allied Health Sciences",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "m_sc_biotechnology",
+    "canonicalName": "Master of Science in Biotechnology",
+    "shortName": "M.Sc Biotechnology",
+    "aliases": [
+      "Master of Science in Biotechnology",
+      "MSc Biotechnology"
+    ],
+    "level": "PG",
+    "school": "School of Biotechnology & Biosciences",
+    "category": "School of Biotechnology & Biosciences",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "m_sc_bioinformatics",
+    "canonicalName": "Master of Science in Bioinformatics",
+    "shortName": "M.Sc Bioinformatics",
+    "aliases": [
+      "Master of Science in Bioinformatics",
+      "MSc Bioinformatics"
+    ],
+    "level": "PG",
+    "school": "School of Biotechnology & Biosciences",
+    "category": "School of Biotechnology & Biosciences",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "m_sc_agriculture_agronomy",
+    "canonicalName": "Master of Science in Agriculture --- Agronomy",
+    "shortName": "M.Sc Agriculture (Agronomy)",
+    "aliases": [
+      "Master of Science in Agriculture --- Agronomy",
+      "MSc Agriculture",
+      "MSc Agronomy"
+    ],
+    "level": "PG",
+    "school": "School of Agriculture",
+    "category": "School of Agriculture",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "m_sc_agriculture_horticulture",
+    "canonicalName": "Master of Science in Agriculture --- Horticulture",
+    "shortName": "M.Sc Agriculture (Horticulture)",
+    "aliases": [
+      "Master of Science in Agriculture --- Horticulture",
+      "MSc Agriculture",
+      "MSc Horticulture"
+    ],
+    "level": "PG",
+    "school": "School of Agriculture",
+    "category": "School of Agriculture",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "llm",
+    "canonicalName": "Master of Law",
+    "shortName": "LLM",
+    "aliases": [
+      "Master of Law",
+      "LLM",
+      "L.L.M.",
+      "Master of Laws"
+    ],
+    "level": "PG",
+    "school": "School of Law",
+    "category": "School of Law",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "m_sc_animation",
+    "canonicalName": "Master of Science in Animation & Multimedia",
+    "shortName": "M.Sc Animation",
+    "aliases": [
+      "Master of Science in Animation & Multimedia",
+      "MSc Animation",
+      "M.Sc Animation & Multimedia"
+    ],
+    "level": "PG",
+    "school": "School of Communication, Multimedia & Film Studies",
+    "category": "School of Communication, Multimedia & Film Studies",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "m_sc_media_science",
+    "canonicalName": "Master of Science in Media Science & Journalism",
+    "shortName": "M.Sc Media Science",
+    "aliases": [
+      "Master of Science in Media Science & Journalism",
+      "MSc Media Science",
+      "M.Sc Media Science & Journalism"
+    ],
+    "level": "PG",
+    "school": "School of Communication, Multimedia & Film Studies",
+    "category": "School of Communication, Multimedia & Film Studies",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "ma_english",
+    "canonicalName": "Master of Arts in English",
+    "shortName": "MA English",
+    "aliases": [
+      "Master of Arts in English",
+      "MA English"
+    ],
+    "level": "PG",
+    "school": "School of Humanities & Social Sciences",
+    "category": "School of Humanities & Social Sciences",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "m_sc_psychology",
+    "canonicalName": "Master of Science in Applied Psychology",
+    "shortName": "M.Sc Psychology",
+    "aliases": [
+      "Master of Science in Applied Psychology",
+      "MSc Psychology",
+      "M.Sc Applied Psychology"
+    ],
+    "level": "PG",
+    "school": "School of Humanities & Social Sciences",
+    "category": "School of Humanities & Social Sciences",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "diploma_cse",
+    "canonicalName": "Diploma in Computer Science & Engineering",
+    "shortName": "Diploma CSE",
+    "aliases": [
+      "Diploma in Computer Science & Engineering",
+      "Diploma CSE",
+      "Diploma in Computer Science"
+    ],
+    "level": "Diploma",
+    "school": "School of Engineering",
+    "category": "School of Engineering",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "diploma_cse_lateral_entry",
+    "canonicalName": "Diploma in Computer Science Engineering --- Lateral Entry",
+    "shortName": "Diploma CSE (Lateral Entry)",
+    "aliases": [
+      "Diploma in Computer Science Engineering --- Lateral Entry",
+      "Diploma CSE",
+      "Diploma in Computer Science"
+    ],
+    "level": "Diploma",
+    "school": "School of Engineering",
+    "category": "School of Engineering",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "diploma_ee",
+    "canonicalName": "Diploma in Electrical Engineering",
+    "shortName": "Diploma EE",
+    "aliases": [
+      "Diploma in Electrical Engineering",
+      "Diploma EE"
+    ],
+    "level": "Diploma",
+    "school": "School of Engineering",
+    "category": "School of Engineering",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "diploma_ee_lateral_entry",
+    "canonicalName": "Diploma in Electrical Engineering --- Lateral Entry",
+    "shortName": "Diploma EE (Lateral Entry)",
+    "aliases": [
+      "Diploma in Electrical Engineering --- Lateral Entry",
+      "Diploma EE",
+      "Diploma in Electrical Engineering"
+    ],
+    "level": "Diploma",
+    "school": "School of Engineering",
+    "category": "School of Engineering",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "diploma_me",
+    "canonicalName": "Diploma in Mechanical Engineering",
+    "shortName": "Diploma ME",
+    "aliases": [
+      "Diploma in Mechanical Engineering",
+      "Diploma ME"
+    ],
+    "level": "Diploma",
+    "school": "School of Engineering",
+    "category": "School of Engineering",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "diploma_me_lateral_entry",
+    "canonicalName": "Diploma in Mechanical Engineering --- Lateral Entry",
+    "shortName": "Diploma ME (Lateral Entry)",
+    "aliases": [
+      "Diploma in Mechanical Engineering --- Lateral Entry",
+      "Diploma ME",
+      "Diploma in Mechanical Engineering"
+    ],
+    "level": "Diploma",
+    "school": "School of Engineering",
+    "category": "School of Engineering",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "diploma_robotics_lateral_entry",
+    "canonicalName": "Diploma in Robotics and Automation --- Lateral Entry",
+    "shortName": "Diploma Robotics (Lateral Entry)",
+    "aliases": [
+      "Diploma in Robotics and Automation --- Lateral Entry",
+      "Diploma Robotics"
+    ],
+    "level": "Diploma",
+    "school": "School of Engineering",
+    "category": "School of Engineering",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "d_pharm",
+    "canonicalName": "Diploma in Pharmacy",
+    "shortName": "D.Pharm",
+    "aliases": [
+      "Diploma in Pharmacy",
+      "D.Pharm",
+      "DPharm"
+    ],
+    "level": "Diploma",
+    "school": "School of Medical & Allied Health Sciences",
+    "category": "School of Medical & Allied Health Sciences",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "gnm",
+    "canonicalName": "General Nursing & Midwifery",
+    "shortName": "GNM",
+    "aliases": [
+      "General Nursing & Midwifery",
+      "GNM",
+      "General Nursing",
+      "Nursing"
+    ],
+    "level": "Diploma",
+    "school": "School of Medical & Allied Health Sciences",
+    "category": "School of Medical & Allied Health Sciences",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "dmlt",
+    "canonicalName": "Diploma in Medical Laboratory Science",
+    "shortName": "DMLT",
+    "aliases": [
+      "Diploma in Medical Laboratory Science",
+      "DMLT",
+      "Diploma MLT"
+    ],
+    "level": "Diploma",
+    "school": "School of Medical & Allied Health Sciences",
+    "category": "School of Medical & Allied Health Sciences",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "phd_in_engineering_computer_science_engineering",
+    "canonicalName": "PhD in Engineering (Computer Science & Engineering)",
+    "shortName": "PhD in Engineering (Computer Science & Engineering)",
+    "aliases": [
+      "PhD in Engineering (Computer Science & Engineering)",
+      "PhD",
+      "Ph.D.",
+      "Doctor of Philosophy",
+      "PhD in Computer Science & Engineering",
+      "PhD Computer Science & Engineering"
+    ],
+    "level": "PhD",
+    "school": "School of Engineering",
+    "category": "School of Engineering",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "phd_in_engineering_electronics_communication_engineering",
+    "canonicalName": "PhD in Engineering (Electronics & Communication Engineering)",
+    "shortName": "PhD in Engineering (Electronics & Communication Engineering)",
+    "aliases": [
+      "PhD in Engineering (Electronics & Communication Engineering)",
+      "PhD",
+      "Ph.D.",
+      "Doctor of Philosophy",
+      "PhD in Electronics & Communication Engineering",
+      "PhD Electronics & Communication Engineering"
+    ],
+    "level": "PhD",
+    "school": "School of Engineering",
+    "category": "School of Engineering",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "phd_in_science_computer_science",
+    "canonicalName": "PhD in Science (Computer Science)",
+    "shortName": "PhD in Science (Computer Science)",
+    "aliases": [
+      "PhD in Science (Computer Science)",
+      "PhD",
+      "Ph.D.",
+      "Doctor of Philosophy",
+      "PhD in Science (Computer Science",
+      "PhD Science (Computer Science"
+    ],
+    "level": "PhD",
+    "school": "School of Computational & Applied Sciences",
+    "category": "School of Computational & Applied Sciences",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "phd_in_science_mathematics",
+    "canonicalName": "PhD in Science (Mathematics)",
+    "shortName": "PhD in Science (Mathematics)",
+    "aliases": [
+      "PhD in Science (Mathematics)",
+      "PhD",
+      "Ph.D.",
+      "Doctor of Philosophy",
+      "PhD in Science (Mathematics",
+      "PhD Science (Mathematics"
+    ],
+    "level": "PhD",
+    "school": "School of Computational & Applied Sciences",
+    "category": "School of Computational & Applied Sciences",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "phd_in_commerce",
+    "canonicalName": "PhD in Commerce",
+    "shortName": "PhD in Commerce",
+    "aliases": [
+      "PhD in Commerce",
+      "PhD",
+      "Ph.D.",
+      "Doctor of Philosophy",
+      "PhD Commerce"
+    ],
+    "level": "PhD",
+    "school": "School of Management & Commerce",
+    "category": "School of Management & Commerce",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "phd_in_management",
+    "canonicalName": "PhD in Management",
+    "shortName": "PhD in Management",
+    "aliases": [
+      "PhD in Management",
+      "PhD",
+      "Ph.D.",
+      "Doctor of Philosophy",
+      "PhD Management"
+    ],
+    "level": "PhD",
+    "school": "School of Management & Commerce",
+    "category": "School of Management & Commerce",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "phd_in_hospital_management",
+    "canonicalName": "PhD in Hospital Management",
+    "shortName": "PhD in Hospital Management",
+    "aliases": [
+      "PhD in Hospital Management",
+      "PhD",
+      "Ph.D.",
+      "Doctor of Philosophy",
+      "PhD Hospital Management"
+    ],
+    "level": "PhD",
+    "school": "School of Management & Commerce",
+    "category": "School of Management & Commerce",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "phd_in_pharmaceutical_sciences",
+    "canonicalName": "PhD in Pharmaceutical Sciences",
+    "shortName": "PhD in Pharmaceutical Sciences",
+    "aliases": [
+      "PhD in Pharmaceutical Sciences",
+      "PhD",
+      "Ph.D.",
+      "Doctor of Philosophy",
+      "PhD Pharmaceutical Sciences"
+    ],
+    "level": "PhD",
+    "school": "School of Medical & Allied Health Sciences",
+    "category": "School of Medical & Allied Health Sciences",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "phd_in_science_biotechnology",
+    "canonicalName": "PhD in Science (Biotechnology)",
+    "shortName": "PhD in Science (Biotechnology)",
+    "aliases": [
+      "PhD in Science (Biotechnology)",
+      "PhD",
+      "Ph.D.",
+      "Doctor of Philosophy",
+      "PhD in Science (Biotechnology",
+      "PhD Science (Biotechnology"
+    ],
+    "level": "PhD",
+    "school": "School of Biotechnology & Biosciences",
+    "category": "School of Biotechnology & Biosciences",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "phd_in_law",
+    "canonicalName": "PhD in Law",
+    "shortName": "PhD in Law",
+    "aliases": [
+      "PhD in Law",
+      "PhD",
+      "Ph.D.",
+      "Doctor of Philosophy",
+      "PhD Law"
+    ],
+    "level": "PhD",
+    "school": "School of Law",
+    "category": "School of Law",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  },
+  {
+    "courseId": "phd_in_humanities_english",
+    "canonicalName": "PhD in Humanities (English)",
+    "shortName": "PhD in Humanities (English)",
+    "aliases": [
+      "PhD in Humanities (English)",
+      "PhD",
+      "Ph.D.",
+      "Doctor of Philosophy",
+      "PhD in Humanities (English",
+      "PhD Humanities (English"
+    ],
+    "level": "PhD",
+    "school": "School of Humanities & Social Sciences",
+    "category": "School of Humanities & Social Sciences",
+    "sourceDocument": "Brainware University list of courses.pdf"
+  }
+]

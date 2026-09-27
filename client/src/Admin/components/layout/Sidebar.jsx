@@ -14,7 +14,10 @@ import {
     Users,
     Globe,
     BookOpen,
-    Layers
+    Layers,
+    Zap,
+    Shield,
+    Code2
 } from "lucide-react";
 import { useState } from "react";
 
@@ -156,6 +159,36 @@ function Sidebar({
                     >
                         <Activity />
                         <span>Storage Overview</span>
+                    </button>
+
+                    <button
+                        type="button"
+                        className={activeSection === "cache" ? "active" : ""}
+                        onClick={() => setActiveSection("cache")}
+                        title="10-Layer Smart Cache Architecture"
+                    >
+                        <Zap />
+                        <span>Smart Cache</span>
+                    </button>
+
+                    <button
+                        type="button"
+                        className={activeSection === "security" ? "active" : ""}
+                        onClick={() => setActiveSection("security")}
+                        title="Enterprise Security & Audit Hub"
+                    >
+                        <Shield />
+                        <span>Security & Audit</span>
+                    </button>
+
+                    <button
+                        type="button"
+                        className={activeSection === "developer" ? "active" : ""}
+                        onClick={() => setActiveSection("developer")}
+                        title="AI Developer Mode & RAG Debugger"
+                    >
+                        <Code2 />
+                        <span>AI Developer Mode</span>
                     </button>
 
                     <button

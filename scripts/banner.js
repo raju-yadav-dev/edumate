@@ -2,74 +2,68 @@ const logger = require("./logger");
 
 const printBanner = () => {
     console.log(logger.cyan(`
-============================================================
-  _____    _       __  __       _
- | ____|__| |_   _|  \\/  | __ _| |_ ___
+================================================================================
+  _____    _       __  __       _       
+ | ____|__| |_   _|  \\/  | __ _| |_ ___ 
  |  _| / _\` | | | | |\\/| |/ _\` | __/ _ \\
  | |__| (_| | |_| | |  | | (_| | ||  __/
  |_____\\__,_|\\__,_|_|  |_|\\__,_|\\__\\___|
 
-============================================================
-             🚀 EduMate Monorepo Control Center
-============================================================
+================================================================================
+             🚀 EduMate AI Monorepo Control Center
+================================================================================
 `));
 };
 
+const printControlCenter = (options = {}) => {
+    const version = options.version || "v1.0 Production";
+    const env = options.env || (process.env.NODE_ENV === "production" ? "Production" : "Development");
+    const port = process.env.PORT || "5000";
+    const chunkingPort = process.env.CHUNKING_PORT || "5001";
+    const llamaPort = process.env.LLAMA_PORT || "8080";
+    const qdrantPort = process.env.QDRANT_PORT || "6333";
+
+    const isMongoOk = options.mongoConnected !== false;
+    const isQdrantOk = options.qdrantConnected !== false;
+    const isLlamaOk = options.llamaReady !== false;
+    const storageType = options.storageType || "Local Storage";
+    const isCacheOk = options.cacheEnabled !== false;
+    const workerStatus = options.workerStatus || "Idle";
+
+    const dot = "●";
+
+    console.log(logger.cyan("================================================================================"));
+    console.log(logger.bold(logger.green("🎓 EduMate AI Platform — Development Control Center")));
+    console.log(logger.cyan(`Version: ${logger.bold(version)}`));
+    console.log(logger.cyan(`Environment: ${logger.bold(env)}`));
+    console.log(logger.cyan("================================================================================"));
+    console.log(logger.bold(logger.yellow("SERVICES")));
+    console.log(`Frontend         → ${logger.cyan("http://localhost:5173")}`);
+    console.log(`Backend API      → ${logger.cyan(`http://localhost:${port}`)}`);
+    console.log(`Knowledge Studio → ${logger.cyan(`http://localhost:${chunkingPort}`)}`);
+    console.log(`LLM API          → ${logger.cyan(`http://localhost:${llamaPort}/v1`)}`);
+    console.log(`Qdrant Dashboard → ${logger.cyan(`http://localhost:${qdrantPort}/dashboard`)}`);
+    console.log(`Health API       → ${logger.cyan(`http://localhost:${port}/api/health`)}`);
+    console.log(`Knowledge Health → ${logger.cyan(`http://localhost:${chunkingPort}/health`)}`);
+    console.log(logger.cyan("================================================================================"));
+    console.log(logger.bold(logger.yellow("SYSTEM STATUS")));
+    console.log(`MongoDB     ${isMongoOk ? logger.green(`${dot} Connected`) : logger.red(`${dot} Disconnected`)}`);
+    console.log(`Qdrant      ${isQdrantOk ? logger.green(`${dot} Connected`) : logger.red(`${dot} Disconnected`)}`);
+    console.log(`llama.cpp   ${isLlamaOk ? logger.green(`${dot} Ready`) : logger.yellow(`${dot} Offline`)}`);
+    console.log(`Storage     ${logger.green(`${dot} ${storageType}`)}`);
+    console.log(`Smart Cache ${isCacheOk ? logger.green(`${dot} Enabled`) : logger.yellow(`${dot} Disabled`)}`);
+    console.log(`Worker      ${logger.green(`${dot} ${workerStatus}`)}`);
+    console.log(logger.cyan("================================================================================"));
+    console.log(logger.bold(logger.green("READY TO ACCEPT REQUESTS")));
+    console.log(logger.cyan("================================================================================\n"));
+};
+
 const printDashboard = (stats = {}) => {
-    const aiProvider = process.env.LLM_PROVIDER || "llama.cpp";
-    const aiModelName = `${process.env.LLM_MODEL || "Qwen3-1.7B-Instruct"} (${aiProvider})`;
-    const embeddingProvider = process.env.EMBEDDING_PROVIDER || "jina";
-    const embeddingModelName = `${process.env.EMBEDDING_MODEL || "jina-embeddings-v3"} (${embeddingProvider})`;
-    const storageProvider = process.env.STORAGE_PROVIDER === "supabase" ? "Supabase Storage" : "Local File Storage";
-
-    console.log(logger.cyan("══════════════════════════════════════════════"));
-    console.log(logger.bold(logger.green("🚀 EduMate Development Environment")));
-    console.log(logger.cyan("══════════════════════════════════════════════"));
-    
-    console.log(`${logger.green("✓")} Node.js`);
-    console.log(`${logger.green("✓")} npm`);
-    console.log(`${logger.green("✓")} MongoDB Connected`);
-    console.log(`${logger.green("✓")} Storage: ${storageProvider}`);
-    console.log(`${logger.green("✓")} AI: ${aiProvider}`);
-    console.log(`${logger.green("✓")} Qdrant Running`);
-    console.log(`${logger.green("✓")} Backend Started`);
-    console.log(`${logger.green("✓")} Frontend Started`);
-    
-    console.log(logger.cyan("──────────────────────────────────────────────"));
-    
-    console.log(logger.bold("Frontend"));
-    console.log(logger.green(stats.frontendUrl || "http://localhost:5173"));
-    console.log();
-    
-    console.log(logger.bold("Backend"));
-    console.log(logger.green(stats.backendUrl || "http://localhost:5000"));
-    console.log();
-    
-    console.log(logger.bold("Environment"));
-    console.log(logger.green(stats.env || "Development"));
-    console.log();
-    
-    console.log(logger.bold("Storage"));
-    console.log(logger.green(storageProvider));
-    console.log();
-
-    console.log(logger.bold("Vector Database"));
-    console.log(logger.green("Qdrant"));
-    console.log();
-    
-    console.log(logger.bold("AI"));
-    console.log(logger.green(aiModelName));
-    console.log();
-    
-    console.log(logger.bold("Embeddings"));
-    console.log(logger.green(embeddingModelName));
-    
-    console.log(logger.cyan("──────────────────────────────────────────────"));
-    console.log(logger.bold(logger.green("Ready to accept requests")));
-    console.log(logger.cyan("══════════════════════════════════════════════"));
+    printControlCenter(stats);
 };
 
 module.exports = {
     printBanner,
+    printControlCenter,
     printDashboard
 };

@@ -40,7 +40,21 @@ const {
     getDocumentChunks,
     getIntegrityReport,
     repairDocument,
-    repairAllDocuments
+    repairAllDocuments,
+    streamQueue,
+    getChunkingLogs,
+    clearChunkingLogs,
+    startChunkingWorker,
+    stopChunkingWorker,
+    restartChunkingWorker,
+    clearChunkingQueue,
+    getLocalStorageTree,
+    syncLocalStorage,
+    getQdrantStatus,
+    verifyQdrantVectors,
+    deleteQdrantVectors,
+    getChunkingAnalytics,
+    getChunkingHealth
 } = require("../controllers/documentController");
 
 const router = express.Router();
@@ -57,7 +71,7 @@ router.get(
     getDocumentChunks
 );
 
-// Folder & Placeholder Management (Mission 9.1)
+// Folder & Placeholder Management
 router.post(
     "/placeholder",
     authorizeRoles("teacher", "faculty", "admin", "super_admin"),
@@ -79,11 +93,38 @@ router.put(
     bulkRestoreDocuments
 );
 
-// Queue Management (Mission 9.2 & 9.3)
+// Mission 15: SSE Real-Time Queue & Log Streaming
+router.get(
+    "/queue/stream",
+    authorizeRoles("teacher", "faculty", "admin", "super_admin"),
+    streamQueue
+);
+
+// Mission 15: Queue, Logs & Worker Controls
 router.get(
     "/queue/status",
     authorizeRoles("teacher", "faculty", "admin", "super_admin"),
     getQueueStatus
+);
+router.get(
+    "/queue/health",
+    authorizeRoles("teacher", "faculty", "admin", "super_admin"),
+    getChunkingHealth
+);
+router.get(
+    "/queue/logs",
+    authorizeRoles("teacher", "faculty", "admin", "super_admin"),
+    getChunkingLogs
+);
+router.post(
+    "/queue/logs/clear",
+    authorizeRoles("admin", "super_admin"),
+    clearChunkingLogs
+);
+router.post(
+    "/queue/clear",
+    authorizeRoles("admin", "super_admin"),
+    clearChunkingQueue
 );
 router.post(
     "/queue/pause",
@@ -106,6 +147,59 @@ router.post(
     retryFailedQueue
 );
 router.post(
+    "/worker/start",
+    authorizeRoles("admin", "super_admin"),
+    startChunkingWorker
+);
+router.post(
+    "/worker/stop",
+    authorizeRoles("admin", "super_admin"),
+    stopChunkingWorker
+);
+router.post(
+    "/worker/restart",
+    authorizeRoles("admin", "super_admin"),
+    restartChunkingWorker
+);
+
+// Mission 15: Local Storage Explorer & Sync
+router.get(
+    "/storage/tree",
+    authorizeRoles("admin", "super_admin"),
+    getLocalStorageTree
+);
+router.post(
+    "/storage/scan-sync",
+    authorizeRoles("admin", "super_admin"),
+    syncLocalStorage
+);
+
+// Mission 15: Qdrant Index Viewer & Management
+router.get(
+    "/qdrant/status",
+    authorizeRoles("admin", "super_admin"),
+    getQdrantStatus
+);
+router.post(
+    "/qdrant/verify",
+    authorizeRoles("admin", "super_admin"),
+    verifyQdrantVectors
+);
+router.delete(
+    "/qdrant/vectors/:documentId",
+    authorizeRoles("admin", "super_admin"),
+    deleteQdrantVectors
+);
+
+// Mission 15: Chunk Analytics Dashboard
+router.get(
+    "/chunking/analytics",
+    authorizeRoles("admin", "super_admin"),
+    getChunkingAnalytics
+);
+
+// Per-Document Queue & Job Controls
+router.post(
     "/:documentId/cancel",
     authorizeRoles("admin", "super_admin"),
     cancelDocumentProcessing
@@ -121,7 +215,7 @@ router.post(
     retryDocumentProcessing
 );
 
-// Integrity & Auto-Repair (Mission 9.5)
+// Integrity & Auto-Repair
 router.get(
     "/integrity/report",
     authorizeRoles("admin", "super_admin"),
@@ -138,7 +232,7 @@ router.post(
     repairDocument
 );
 
-// Existing Legacy / Admin Operations
+// Legacy / Admin Operations
 router.get(
     "/jobs/status",
     authorizeRoles("admin", "super_admin"),
@@ -238,4 +332,3 @@ router.post(
 );
 
 module.exports = router;
-

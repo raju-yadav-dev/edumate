@@ -1,0 +1,43 @@
+{
+  "name": "edumate-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "scripts": {
+    "setup": "node scripts/setup.js",
+    "dev": "node scripts/startup.js",
+    "build": "npm run build --workspaces --if-present",
+    "doctor": "node scripts/doctor.js",
+    "test:embedding": "node scripts/testEmbedding.js",
+    "lint": "npm run lint --workspaces --if-present",
+    "clean": "node scripts/clean.js",
+    "format": "node scripts/format.js",
+    "start": "node server/server.js",
+    "chunking": "node server/chunkingServer.js",
+    "reset": "node scripts/reset.js",
+    "reindex": "node scripts/migrateToJina.js",
+    "test:e2e": "node tests/browser/browserAutomation.js",
+    "test:performance": "node tests/performance/performanceBenchmark.js",
+    "edumate": "node scripts/launcher.js",
+    "install:wizard": "node scripts/installWizard.js",
+    "backup": "node scripts/backupRestoreCenter.js --backup",
+    "restore": "node scripts/backupRestoreCenter.js --restore",
+    "benchmark:models": "node scripts/benchmarkModels.js",
+    "package:release": "node scripts/packageRelease.js",
+    "release:qa": "node scripts/releaseMasterQA.js",
+    "test:security": "node server/scripts/testMission19SecuritySuite.js",
+    "qa": "node tests/runner.js",
+    "qa:report": "node tests/reports/reportGenerator.js"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "puppeteer-core": "^25.12.0"
+  },
+  "dependencies": {
+    "@qdrant/js-client-rest": "^1.18.0",
+    "undici": "^8.9.0"
+  }
+}

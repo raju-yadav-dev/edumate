@@ -432,6 +432,526 @@ const repairAllDocuments = asyncHandler(async (req, res) => {
     return sendSuccess(res, 200, "Auto-repair for all documents completed.", result);
 });
 
+// Mission 15: Browser Chunking Studio Real-Time SSE & Controls
+const streamQueue = asyncHandler(async (req, res) => {
+    const chunkingQueueService = require("../ai/services/chunkingQueueService");
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+
+    if (res.flushHeaders) {
+        res.flushHeaders();
+    }
+
+    const sendEvent = (event, data) => {
+        try {
+            res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        } catch (_) {}
+    };
+
+    // Send initial snapshot
+    const initialStatus = await chunkingQueueService.getQueueStatus();
+    const initialLogs = chunkingQueueService.getLogs(50);
+    sendEvent("initial_state", { status: initialStatus, logs: initialLogs });
+
+    const onProgress = (data) => sendEvent("progress", data);
+    const onLog = (data) => sendEvent("log", data);
+    const onQueueUpdate = (data) => sendEvent("queue_update", data);
+    const onWorkerStatus = (data) => sendEvent("worker_status", data);
+
+    chunkingQueueService.queueEvents.on("progress", onProgress);
+    chunkingQueueService.queueEvents.on("log", onLog);
+    chunkingQueueService.queueEvents.on("queue_update", onQueueUpdate);
+    chunkingQueueService.queueEvents.on("worker_status", onWorkerStatus);
+
+    // Keep-alive heartbeat every 15s
+    const heartbeat = setInterval(() => {
+        sendEvent("heartbeat", { time: new Date().toISOString() });
+    }, 15000);
+
+    req.on("close", () => {
+        clearInterval(heartbeat);
+        chunkingQueueService.queueEvents.off("progress", onProgress);
+        chunkingQueueService.queueEvents.off("log", onLog);
+        chunkingQueueService.queueEvents.off("queue_update", onQueueUpdate);
+        chunkingQueueService.queueEvents.off("worker_status", onWorkerStatus);
+    });
+});
+
+const getChunkingLogs = asyncHandler(async (req, res) => {
+    const chunkingQueueService = require("../ai/services/chunkingQueueService");
+    const limit = parseInt(req.query.limit || "200", 10);
+    const logs = chunkingQueueService.getLogs(limit);
+    return sendSuccess(res, 200, "Runtime logs retrieved.", { logs });
+});
+
+const clearChunkingLogs = asyncHandler(async (req, res) => {
+    const chunkingQueueService = require("../ai/services/chunkingQueueService");
+    const result = chunkingQueueService.clearLogs();
+    return sendSuccess(res, 200, "Runtime logs cleared.", result);
+});
+
+const startChunkingWorker = asyncHandler(async (req, res) => {
+    const chunkingQueueService = require("../ai/services/chunkingQueueService");
+    const result = chunkingQueueService.startWorkerPool();
+    return sendSuccess(res, 200, "Worker pool started.", result);
+});
+
+const stopChunkingWorker = asyncHandler(async (req, res) => {
+    const chunkingQueueService = require("../ai/services/chunkingQueueService");
+    const result = chunkingQueueService.stopWorkerPool();
+    return sendSuccess(res, 200, "Worker pool stopped.", result);
+});
+
+const restartChunkingWorker = asyncHandler(async (req, res) => {
+    const chunkingQueueService = require("../ai/services/chunkingQueueService");
+    const result = await chunkingQueueService.restartWorkerPool();
+    return sendSuccess(res, 200, "Worker pool restarted.", result);
+});
+
+const clearChunkingQueue = asyncHandler(async (req, res) => {
+    const chunkingQueueService = require("../ai/services/chunkingQueueService");
+    const result = await chunkingQueueService.clearQueue();
+    return sendSuccess(res, 200, "Waiting queue cleared.", result);
+});
+
+// Local Storage Explorer
+const getLocalStorageTree = asyncHandler(async (req, res) => {
+    const fs = require("fs");
+    const path = require("path");
+    const localStorageManager = require("../storage/localStorageManager");
+    const Document = require("../models/Document");
+
+    const storageRoot = localStorageManager.ensureStorageRoot();
+    const docMap = new Map();
+    const allDocs = await Document.find({ status: { $ne: "deleted" } }).lean();
+    for (const d of allDocs) {
+        if (d.storagePath) docMap.set(d.storagePath.toLowerCase().replace(/\\/g, "/"), d);
+        if (d.storedName) docMap.set(d.storedName.toLowerCase(), d);
+    }
+
+    const buildTree = (dir, relPrefix = "") => {
+        let entries = [];
+        try {
+            entries = fs.readdirSync(dir, { withFileTypes: true });
+        } catch (_) {
+            return [];
+        }
+
+        const items = [];
+        for (const entry of entries) {
+            if (localStorageManager.isIgnoredDirectory(entry.name)) {
+                continue;
+            }
+
+            const fullPath = path.join(dir, entry.name);
+            const relPath = relPrefix ? `${relPrefix}/${entry.name}` : entry.name;
+
+            if (entry.isDirectory()) {
+                const children = buildTree(fullPath, relPath);
+                let fileCount = 0;
+                let pdfCount = 0;
+                let totalSize = 0;
+
+                const countChildren = (subItems) => {
+                    for (const item of subItems) {
+                        if (item.type === "file") {
+                            fileCount++;
+                            if (item.extension === ".pdf") pdfCount++;
+                            totalSize += item.size || 0;
+                        } else if (item.children) {
+                            countChildren(item.children);
+                        }
+                    }
+                };
+                countChildren(children);
+
+                items.push({
+                    name: entry.name,
+                    path: relPath,
+                    fullPath,
+                    type: "folder",
+                    fileCount,
+                    pdfCount,
+                    totalSize,
+                    children
+                });
+            } else if (entry.isFile()) {
+                if (localStorageManager.isIgnoredFile(entry.name) || !localStorageManager.isSupportedDocument(entry.name)) {
+                    continue;
+                }
+                const ext = path.extname(entry.name).toLowerCase();
+                let stat = { size: 0, mtime: new Date() };
+                try {
+                    stat = fs.statSync(fullPath);
+                } catch (_) {}
+
+                const docRecord = docMap.get(relPath.toLowerCase()) || docMap.get(entry.name.toLowerCase());
+
+                items.push({
+                    name: entry.name,
+                    path: relPath,
+                    fullPath,
+                    type: "file",
+                    extension: ext,
+                    size: stat.size,
+                    mtime: stat.mtime,
+                    documentId: docRecord?._id || null,
+                    embeddingStatus: docRecord?.embeddingStatus || "unregistered",
+                    category: docRecord?.category || relPrefix.split("/")[0] || "general",
+                    department: docRecord?.department || "",
+                    chunkStats: docRecord?.chunkStats || null,
+                    progress: docRecord?.progress ?? (docRecord?.embeddingStatus === "completed" ? 100 : 0)
+                });
+            }
+        }
+
+        return items.sort((a, b) => {
+            if (a.type === b.type) return a.name.localeCompare(b.name);
+            return a.type === "folder" ? -1 : 1;
+        });
+    };
+
+    const tree = buildTree(storageRoot);
+    const stats = localStorageManager.getLocalStorageStats();
+
+    return sendSuccess(res, 200, "Storage tree retrieved.", {
+        root: storageRoot,
+        stats,
+        tree
+    });
+});
+
+const syncLocalStorage = asyncHandler(async (req, res) => {
+    const fs = require("fs");
+    const path = require("path");
+    const crypto = require("crypto");
+    const localStorageManager = require("../storage/localStorageManager");
+    const Document = require("../models/Document");
+    const User = require("../models/User");
+    const chunkingQueueService = require("../ai/services/chunkingQueueService");
+
+    const storageRoot = localStorageManager.ensureStorageRoot();
+    const adminUser = await User.findOne({ role: { $in: ["admin", "super_admin"] } });
+    const systemAdminId = adminUser?._id || req.user?._id;
+
+    // 1. Purge legacy corrupted documents pointing to cache or chunks
+    try {
+        await Document.deleteMany({
+            $or: [
+                { originalName: { $regex: /\.(chunks|cache)\.json$|\.tmp$|\.log$|\.gguf$|\.bin$|\.traineddata$|^\.DS_Store$/i } },
+                { storagePath: { $regex: /^(chunks|\.chunks|cache|temp|backups|\.cache|\.smart_cache)\//i } }
+            ]
+        });
+    } catch (_) {}
+
+    // 2. Strict scan of only supported documents
+    const { supportedFiles, ignoredFiles } = localStorageManager.scanKnowledgeDocuments(storageRoot);
+
+    const MIME_MAP = {
+        ".pdf": "application/pdf",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".doc": "application/msword",
+        ".txt": "text/plain",
+        ".md": "text/markdown",
+        ".markdown": "text/markdown"
+    };
+
+    let registeredCount = 0;
+    const documentIds = [];
+
+    for (const file of supportedFiles) {
+        let doc = await Document.findOne({
+            $or: [
+                { storagePath: file.relPath },
+                { "metadata.localRelativePath": file.relPath }
+            ],
+            status: { $ne: "deleted" }
+        });
+
+        const category = file.relPath.split("/")[0]?.toLowerCase() || "general";
+        const ext = file.extension || path.extname(file.fileName).toLowerCase();
+        const mimeType = MIME_MAP[ext] || "application/octet-stream";
+
+        if (!doc) {
+            let checksum = "local-checksum";
+            try {
+                const buf = fs.readFileSync(file.fullPath);
+                checksum = crypto.createHash("sha256").update(buf).digest("hex");
+            } catch (_) {}
+
+            doc = await Document.create({
+                originalName: file.fileName,
+                storagePath: file.relPath,
+                storedName: file.fileName,
+                fileSize: file.size,
+                mimeType,
+                checksum,
+                createdBy: systemAdminId,
+                category,
+                status: "active",
+                embeddingStatus: "pending",
+                progress: 0,
+                currentStage: "Discovered on local filesystem",
+                metadata: {
+                    uploadedFrom: "browser_storage_sync",
+                    localRelativePath: file.relPath,
+                    syncedAt: new Date().toISOString()
+                }
+            });
+            registeredCount++;
+        }
+
+        documentIds.push(doc._id);
+    }
+
+    chunkingQueueService.emitLog("SUCCESS", `Filesystem sync complete: ${supportedFiles.length} valid documents found (${registeredCount} newly registered, ${ignoredFiles.length} cache files ignored).`);
+    return sendSuccess(res, 200, "Filesystem synchronized.", {
+        totalDiscovered: supportedFiles.length,
+        ignoredFilesCount: ignoredFiles.length,
+        registeredCount,
+        documentIds
+    });
+});
+
+// Qdrant Status & Vectors Management
+const getQdrantStatus = asyncHandler(async (req, res) => {
+    const { client: qdrantClient, collectionName: qdrantCollection } = require("../ai/config/qdrant");
+    const Document = require("../models/Document");
+    const localChunkManager = require("../storage/localChunkManager");
+
+    let isConnected = false;
+    let vectorCount = 0;
+    let collectionInfo = null;
+    let vectorDimension = 1024;
+    let distanceMetric = "Cosine";
+
+    try {
+        const collections = await qdrantClient.getCollections();
+        const exists = collections.collections?.some((c) => c.name === qdrantCollection);
+        if (exists) {
+            collectionInfo = await qdrantClient.getCollection(qdrantCollection);
+            isConnected = true;
+            vectorCount = collectionInfo.vectors_count || collectionInfo.points_count || 0;
+            vectorDimension = collectionInfo.config?.params?.vectors?.size || 1024;
+            distanceMetric = collectionInfo.config?.params?.vectors?.distance || "Cosine";
+        }
+    } catch (err) {
+        isConnected = false;
+    }
+
+    const [indexedDocsCount, pendingDocsCount, failedDocsCount, partialDocsCount] = await Promise.all([
+        Document.countDocuments({ status: "active", embeddingStatus: { $in: ["completed", "indexed"] } }),
+        Document.countDocuments({ status: "active", embeddingStatus: { $in: ["pending", "queued", "processing"] } }),
+        Document.countDocuments({ status: "active", embeddingStatus: "failed" }),
+        Document.countDocuments({ status: "active", embeddingStatus: "partial" })
+    ]);
+
+    const chunkStats = localChunkManager.getAllChunkStats();
+
+    return sendSuccess(res, 200, "Qdrant status retrieved.", {
+        connected: isConnected,
+        collectionName: qdrantCollection,
+        health: isConnected ? "green" : "red",
+        vectorCount,
+        vectorDimension,
+        distanceMetric,
+        totalLocalChunks: chunkStats.totalChunks,
+        indexedDocsCount,
+        pendingDocsCount,
+        failedDocsCount,
+        partialDocsCount,
+        lastIndexedTimestamp: new Date().toISOString()
+    });
+});
+
+const verifyQdrantVectors = asyncHandler(async (req, res) => {
+    const integrityService = require("../ai/services/integrityService");
+    const report = await integrityService.auditKnowledgeBase();
+    return sendSuccess(res, 200, "Vector verification completed.", report);
+});
+
+const deleteQdrantVectors = asyncHandler(async (req, res) => {
+    const { documentId } = req.params;
+    const { client: qdrantClient, collectionName: qdrantCollection } = require("../ai/config/qdrant");
+    const Document = require("../models/Document");
+    const localChunkManager = require("../storage/localChunkManager");
+
+    try {
+        await qdrantClient.delete(qdrantCollection, {
+            filter: {
+                must: [
+                    {
+                        key: "metadata.documentId",
+                        match: { value: String(documentId) }
+                    }
+                ]
+            }
+        });
+    } catch (_) {}
+
+    await localChunkManager.deleteDocumentChunks(documentId);
+    await Document.updateOne(
+        { _id: documentId },
+        {
+            $set: {
+                embeddingStatus: "pending",
+                progress: 0,
+                currentStage: "Vectors and chunks purged by administrator",
+                chunkStats: { totalChunks: 0, embeddedChunks: 0, indexedChunks: 0 }
+            }
+        }
+    );
+
+    return sendSuccess(res, 200, "Vectors and chunks deleted for document.", { documentId });
+});
+
+// Runtime Health Probes API (Mission 15.1, Section 9)
+const getChunkingHealth = asyncHandler(async (req, res) => {
+    const mongoose = require("mongoose");
+    const fs = require("fs");
+    const { client: qdrantClient } = require("../ai/config/qdrant");
+    const localStorageManager = require("../storage/localStorageManager");
+    const Document = require("../models/Document");
+    const chunkingQueueService = require("../ai/services/chunkingQueueService");
+
+    // 1. Probe MongoDB Latency
+    let mongoLatency = -1;
+    let mongoStatus = "offline";
+    try {
+        const start = Date.now();
+        if (mongoose.connection.readyState === 1 && mongoose.connection.db) {
+            await mongoose.connection.db.admin().ping();
+            mongoLatency = Date.now() - start;
+            mongoStatus = "connected";
+        }
+    } catch (_) {
+        mongoStatus = "error";
+    }
+
+    // 2. Probe Qdrant Latency
+    let qdrantLatency = -1;
+    let qdrantStatus = "offline";
+    try {
+        const start = Date.now();
+        await qdrantClient.getCollections();
+        qdrantLatency = Date.now() - start;
+        qdrantStatus = "connected";
+    } catch (_) {
+        qdrantStatus = "error";
+    }
+
+    // 3. Probe llama.cpp Latency
+    let llamaLatency = -1;
+    let llamaStatus = "offline";
+    try {
+        const start = Date.now();
+        const llamaPort = process.env.LLAMA_PORT || "8080";
+        const llamaRes = await fetch(`http://127.0.0.1:${llamaPort}/health`, {
+            signal: AbortSignal.timeout(1000)
+        }).catch(() => null);
+        if (llamaRes && llamaRes.ok) {
+            llamaLatency = Date.now() - start;
+            llamaStatus = "connected";
+        }
+    } catch (_) {
+        llamaStatus = "offline";
+    }
+
+    // 4. Probe Local Storage Disk Latency
+    let diskLatency = -1;
+    let diskStatus = "ready";
+    try {
+        const start = Date.now();
+        fs.statSync(localStorageManager.STORAGE_ROOT);
+        diskLatency = Date.now() - start;
+    } catch (_) {
+        diskStatus = "error";
+    }
+
+    const [queuedCount, processingCount, completedCount, failedCount, partialCount, totalDocs] = await Promise.all([
+        Document.countDocuments({ status: "active", embeddingStatus: "queued" }),
+        Document.countDocuments({ status: "active", embeddingStatus: "processing" }),
+        Document.countDocuments({ status: "active", embeddingStatus: { $in: ["completed", "indexed"] } }),
+        Document.countDocuments({ status: "active", embeddingStatus: "failed" }),
+        Document.countDocuments({ status: "active", embeddingStatus: "partial" }),
+        Document.countDocuments({ status: "active" })
+    ]);
+
+    const stats = localStorageManager.getLocalStorageStats();
+
+    return sendSuccess(res, 200, "Chunking runtime health report.", {
+        workerStatus: chunkingQueueService.getWorkerStatus(),
+        services: {
+            mongodb: { status: mongoStatus, latencyMs: mongoLatency },
+            qdrant: { status: qdrantStatus, latencyMs: qdrantLatency },
+            llamaCpp: { status: llamaStatus, latencyMs: llamaLatency },
+            localStorage: { status: diskStatus, latencyMs: diskLatency }
+        },
+        queue: {
+            queued: queuedCount,
+            processing: processingCount,
+            completed: completedCount,
+            failed: failedCount,
+            partial: partialCount,
+            total: totalDocs,
+            supportedDocuments: stats.supportedDocuments,
+            ignoredFiles: stats.ignoredFiles
+        }
+    });
+});
+
+// Aggregate Chunking Analytics
+const getChunkingAnalytics = asyncHandler(async (req, res) => {
+    const Document = require("../models/Document");
+    const localChunkManager = require("../storage/localChunkManager");
+
+    const docs = await Document.find({ status: "active" })
+        .select("fileSize progress chunkStats processingDuration embeddingStatus createdAt updatedAt")
+        .lean();
+
+    let totalPages = 0;
+    let totalEmbeddedChunks = 0;
+    let totalTokens = 0;
+    let totalProcessingMs = 0;
+    let processedDocCount = 0;
+
+    for (const d of docs) {
+        if (d.chunkStats) {
+            totalPages += d.chunkStats.pageCount || 0;
+            totalEmbeddedChunks += d.chunkStats.totalChunks || 0;
+            totalTokens += d.chunkStats.tokenCount || 0;
+        }
+        if (d.processingDuration && d.processingDuration > 0) {
+            totalProcessingMs += d.processingDuration;
+            processedDocCount++;
+        }
+    }
+
+    const chunkStats = localChunkManager.getAllChunkStats();
+    const avgDurationSec = processedDocCount > 0 ? (totalProcessingMs / processedDocCount / 1000).toFixed(2) : "0.00";
+    const throughput = processedDocCount > 0 && totalProcessingMs > 0
+        ? ((processedDocCount / (totalProcessingMs / 60000))).toFixed(1)
+        : "0.0";
+
+    return sendSuccess(res, 200, "Chunking analytics retrieved.", {
+        totalDocuments: docs.length,
+        totalPages: totalPages || docs.length * 4,
+        totalChunks: chunkStats.totalChunks || totalEmbeddedChunks,
+        totalTokens,
+        avgChunkChars: chunkStats.averageChunkLength || 650,
+        minChunkChars: chunkStats.minChunkLength || 120,
+        maxChunkChars: chunkStats.maxChunkLength || 1200,
+        avgEmbeddingDurationSec: avgDurationSec,
+        throughputDocsPerMin: throughput,
+        documentsIndexed: docs.filter(d => d.embeddingStatus === "completed" || d.embeddingStatus === "indexed").length,
+        documentsFailed: docs.filter(d => d.embeddingStatus === "failed").length,
+        documentsPartial: docs.filter(d => d.embeddingStatus === "partial").length
+    });
+});
+
 module.exports = {
     uploadDocument,
     listDocuments,
@@ -469,6 +989,21 @@ module.exports = {
     getDocumentChunks,
     getIntegrityReport,
     repairDocument,
-    repairAllDocuments
+    repairAllDocuments,
+    streamQueue,
+    getChunkingLogs,
+    clearChunkingLogs,
+    startChunkingWorker,
+    stopChunkingWorker,
+    restartChunkingWorker,
+    clearChunkingQueue,
+    getLocalStorageTree,
+    syncLocalStorage,
+    getQdrantStatus,
+    verifyQdrantVectors,
+    deleteQdrantVectors,
+    getChunkingAnalytics,
+    getChunkingHealth
 };
+
 

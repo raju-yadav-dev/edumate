@@ -52,6 +52,9 @@ import KnowledgeSources from "./components/knowledge/KnowledgeSources";
 import ChunkingStudio from "./components/chunking/ChunkingStudio";
 import LlmBenchmarkDashboard from "./components/benchmark/LlmBenchmarkDashboard";
 import KnowledgeAnalyticsDashboard from "./components/analytics/KnowledgeAnalyticsDashboard";
+import SmartCacheDashboard from "./components/cache/SmartCacheDashboard";
+import SecurityDashboard from "./components/security/SecurityDashboard";
+import DeveloperMode from "./components/developer/DeveloperMode";
 import { getDocumentUrl } from "./utils/documentUtils";
 import { recordActivityLog } from "../services/activityLogService";
 import { formatBytes } from "./utils/formatBytes";
@@ -2325,6 +2328,18 @@ function Admin({ mode = "auto" }) {
 
                 {activeSection === "analytics" ? (
                     <KnowledgeAnalyticsDashboard />
+                ) : null}
+
+                {activeSection === "cache" ? (
+                    <SmartCacheDashboard />
+                ) : null}
+
+                {activeSection === "security" ? (
+                    <SecurityDashboard />
+                ) : null}
+
+                {activeSection === "developer" ? (
+                    <DeveloperMode />
                 ) : null}
 
                 {activeSection === "users" ? (

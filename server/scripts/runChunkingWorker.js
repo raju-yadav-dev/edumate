@@ -1,19 +1,19 @@
 #!/usr/bin/env node
 
 /**
- * EduMate Dedicated Chunking Runtime Worker
+ * EduMate Dedicated Chunking Runtime Worker (Mission 15.1 Production Grade)
  * 
  * Usage:
  *   npm run chunking
  *   node server/scripts/runChunkingWorker.js [--force] [--all]
  * 
  * Features:
- *   - Operates strictly on local knowledge storage root `storage/`
- *   - Starts ONLY the chunking pipeline (Local Storage Manager, Chunking Queue Worker,
- *     PDF Parser, Metadata Extractor, Chunk Generator, Embedding Generator, Qdrant Indexer)
- *   - Does NOT launch web server, express, chat runtime, voice assistant, or frontend
- *   - Auto-discovers files in `storage/` and synchronizes Document records
- *   - Processes queue to completion and exits cleanly with exit code 0
+ *   - Strictly operates on `storage/` root, strictly ignores internal cache & generated artifacts
+ *   - Only ingests supported document types (PDF, DOCX, TXT, Markdown)
+ *   - Recovers Qdrant collection automatically if missing, checks availability before running
+ *   - Gracefully degrades llama.cpp metadata extraction to local regex extractor
+ *   - Validates strict chunk count === vector count before marking Completed
+ *   - Cleans up temporary processing artifacts
  */
 
 const path = require("path");
@@ -24,7 +24,7 @@ const mongoose = require("mongoose");
 const localStorageManager = require("../storage/localStorageManager");
 const Document = require("../models/Document");
 const chunkingQueueService = require("../ai/services/chunkingQueueService");
-const { client: qdrantClient, collectionName: qdrantCollection } = require("../ai/config/qdrant");
+const { client: qdrantClient, collectionName: qdrantCollection, ensureCollection } = require("../ai/config/qdrant");
 
 const MIME_MAP = {
     ".pdf": "application/pdf",
@@ -32,8 +32,7 @@ const MIME_MAP = {
     ".doc": "application/msword",
     ".txt": "text/plain",
     ".md": "text/markdown",
-    ".csv": "text/csv",
-    ".json": "application/json"
+    ".markdown": "text/markdown"
 };
 
 const getMimeType = (filePath) => {
@@ -41,48 +40,33 @@ const getMimeType = (filePath) => {
     return MIME_MAP[ext] || "application/octet-stream";
 };
 
-const scanStorageFiles = (dir, rootDir = dir) => {
-    const results = [];
-    if (!fs.existsSync(dir)) return results;
-
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
-    for (const entry of entries) {
-        const fullPath = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-            // Skip internal chunk storage and hidden folders
-            if (entry.name === "chunks" || entry.name === ".chunks" || entry.name.startsWith(".")) {
-                continue;
-            }
-            results.push(...scanStorageFiles(fullPath, rootDir));
-        } else if (entry.isFile()) {
-            if (entry.name.endsWith(".chunks.json") || entry.name.endsWith(".tmp")) {
-                continue;
-            }
-            const relPath = path.relative(rootDir, fullPath).replace(/\\/g, "/");
-            const stat = fs.statSync(fullPath);
-            results.push({
-                fullPath,
-                relPath,
-                fileName: entry.name,
-                size: stat.size,
-                mtime: stat.mtime
-            });
-        }
-    }
-    return results;
-};
-
 const inferCategoryFromPath = (relPath) => {
-    const parts = relPath.split("/");
+    const parts = String(relPath || "").replace(/\\/g, "/").split("/");
     if (parts.length > 1) {
         return parts[0].toLowerCase();
     }
     return "general";
 };
 
+async function cleanupCorruptedDocuments() {
+    try {
+        const corruptQuery = {
+            $or: [
+                { originalName: { $regex: /\.(chunks|cache)\.json$|\.tmp$|\.log$|\.gguf$|\.bin$|\.traineddata$|^\.DS_Store$/i } },
+                { storagePath: { $regex: /^(chunks|\.chunks|cache|temp|backups|\.cache|\.smart_cache)\//i } },
+                { "metadata.localRelativePath": { $regex: /^(chunks|\.chunks|cache|temp|backups|\.cache|\.smart_cache)\//i } }
+            ]
+        };
+        const deleted = await Document.deleteMany(corruptQuery);
+        if (deleted.deletedCount > 0) {
+            console.log(`[Cleanup] Purged ${deleted.deletedCount} corrupted/cache records from MongoDB.`);
+        }
+    } catch (_) {}
+}
+
 async function main() {
     console.log("================================================================");
-    console.log("             🚀 EDUMATE DEDICATED CHUNKING RUNTIME             ");
+    console.log("     🚀 EDUMATE DEDICATED CHUNKING RUNTIME (MISSION 15.1)       ");
     console.log("================================================================");
     console.log(`[Runtime] PID: ${process.pid} | Node: ${process.version}`);
     console.log(`[Storage] Knowledge Storage Root: ${localStorageManager.STORAGE_ROOT}`);
@@ -103,26 +87,28 @@ async function main() {
     await mongoose.connect(mongoUri);
     console.log(`[MongoDB] Connected successfully to ${mongoose.connection.name}.`);
 
-    // 3. Verify Qdrant connection
+    // Clean up any old corrupted cache records
+    await cleanupCorruptedDocuments();
+
+    // 3. Verify Qdrant connection & ensure collection
     console.log(`[Qdrant] Verifying vector database (${qdrantCollection})...`);
+    let isQdrantReady = false;
     try {
-        const collections = await qdrantClient.getCollections();
-        const exists = collections.collections?.some((c) => c.name === qdrantCollection);
-        if (exists) {
-            const info = await qdrantClient.getCollection(qdrantCollection);
-            console.log(`[Qdrant] Connected. Vectors in collection: ${info.vectors_count || info.points_count || 0}`);
-        } else {
-            console.log(`[Qdrant] Collection ${qdrantCollection} not found. Creating...`);
-            const { initQdrant } = require("../ai/config/qdrant");
-            if (typeof initQdrant === "function") await initQdrant();
+        if (typeof ensureCollection === "function") {
+            await ensureCollection();
         }
+        const info = await qdrantClient.getCollection(qdrantCollection);
+        const vectorsCount = info.vectors_count || info.points_count || 0;
+        console.log(`[Qdrant] ✓ Connected. Collection '${qdrantCollection}' ready with ${vectorsCount} indexed vectors.`);
+        isQdrantReady = true;
     } catch (qErr) {
-        console.warn(`[Qdrant] Warning: Qdrant check returned: ${qErr.message}`);
+        console.warn(`[Qdrant] ⚠️ Warning: Qdrant check returned: ${qErr.message}`);
+        console.warn("[Qdrant] Runtime will proceed, documents requiring vector upload will wait for Qdrant.");
     }
 
-    // 4. Scan files in local storage root
-    const diskFiles = scanStorageFiles(storageRoot);
-    console.log(`[Storage] Discovered ${diskFiles.length} file(s) in local storage/ directory.`);
+    // 4. Strict Storage Scan (Only supported docs, skipping all cache & generated files)
+    const { supportedFiles, ignoredFiles } = localStorageManager.scanKnowledgeDocuments(storageRoot);
+    console.log(`[Storage] Discovered ${supportedFiles.length} supported document(s) (Ignored ${ignoredFiles.length} internal/cache files).`);
 
     // 5. Synchronize disk files with MongoDB Document collection
     let syncCount = 0;
@@ -132,7 +118,7 @@ async function main() {
     const adminUser = await User.findOne({ role: { $in: ["admin", "super_admin"] } });
     const systemAdminId = adminUser?._id || new mongoose.Types.ObjectId("64a7c8e9f1a2b3c4d5e6f7a8");
 
-    for (const file of diskFiles) {
+    for (const file of supportedFiles) {
         let doc = await Document.findOne({
             $or: [
                 { storagePath: file.relPath },
@@ -171,16 +157,19 @@ async function main() {
                 }
             });
             syncCount++;
-            console.log(`[Sync] Registered new document in MongoDB: ${file.relPath} (ID: ${doc._id})`);
+            console.log(`[Sync] Registered new document: ${file.relPath} (ID: ${doc._id})`);
         } else {
-            // Update storagePath if missing
             if (!doc.storagePath) {
                 doc.storagePath = file.relPath;
                 await doc.save();
             }
         }
 
-        if (isForce || isAll || doc.embeddingStatus !== "completed") {
+        // Determine if document should be processed
+        const isCompleted = doc.embeddingStatus === "completed" || doc.embeddingStatus === "indexed";
+        const hasZeroVectors = !doc.chunkStats?.indexedChunks || doc.chunkStats.indexedChunks === 0;
+
+        if (isForce || isAll || !isCompleted || hasZeroVectors) {
             documentIdsToProcess.push(doc._id);
         }
     }
@@ -192,7 +181,7 @@ async function main() {
     // Also include any other pending/failed documents in database
     const pendingInDb = await Document.find({
         status: "active",
-        embeddingStatus: { $in: ["pending", "failed", "cancelled", "paused", "queued"] }
+        embeddingStatus: { $in: ["pending", "failed", "cancelled", "paused", "queued", "partial"] }
     }).select("_id originalName");
 
     for (const p of pendingInDb) {
@@ -259,15 +248,18 @@ async function main() {
 
     const completedDocs = await Document.countDocuments({ status: "active", embeddingStatus: { $in: ["completed", "indexed"] } });
     const failedDocs = await Document.countDocuments({ status: "active", embeddingStatus: "failed" });
+    const partialDocs = await Document.countDocuments({ status: "active", embeddingStatus: "partial" });
     const totalDocs = await Document.countDocuments({ status: "active" });
 
     console.log("\n================================================================");
     console.log("             🎉 CHUNKING RUNTIME COMPLETED                      ");
     console.log("================================================================");
-    console.log(`📂 Storage Files:       ${stats.files} file(s) across ${stats.folders} folder(s)`);
+    console.log(`📂 Knowledge Files:     ${stats.supportedDocuments} document(s) across ${stats.folders} folder(s)`);
+    console.log(`🚫 Ignored Artifacts:   ${stats.ignoredFiles} file(s) (cache/chunks)`);
     console.log(`📦 Storage Used:        ${(stats.used / (1024 * 1024)).toFixed(2)} MB`);
     console.log(`📄 Total Documents:     ${totalDocs}`);
     console.log(`✅ Indexed Documents:   ${completedDocs}`);
+    console.log(`⚠️ Partial Documents:   ${partialDocs}`);
     console.log(`❌ Failed Documents:    ${failedDocs}`);
     console.log(`🧬 Qdrant Vectors:      ${qdrantPointCount}`);
     console.log("================================================================\n");

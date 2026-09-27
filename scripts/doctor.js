@@ -15,7 +15,7 @@ const logger = require("./logger");
 const { verifyNodeVersion, verifyNpmVersion, verifyDependencies } = require("./dependencyChecker");
 const { verifyEnvironment } = require("./verifyEnvironment");
 const { verifyMongo } = require("./verifyMongo");
-const { verifySupabase } = require("./verifySupabase");
+const { verifyStorage } = require("./verifyStorage");
 const { verifyGroq } = require("./verifyGroq");
 const { verifyQdrant } = require("./verifyQdrant");
 const { checkInternet } = require("./healthCheck");
@@ -81,15 +81,15 @@ const runDoctor = async () => {
         const mongoOk = await verifyMongo();
         if (!mongoOk) {
             hasErrors = true;
-            logger.warn("💡 Suggestion: Confirm MONGODB_URI is correct and your IP is whitelisted on MongoDB Atlas.");
+            logger.warn("💡 Suggestion: Confirm MONGODB_URI is correct and your IP is whitelisted on MongoDB Atlas / local MongoDB is running.");
         }
         console.log();
 
-        // 7. Verify Supabase connectivity
-        const supabaseOk = await verifySupabase();
-        if (!supabaseOk) {
+        // 7. Verify Local Storage Root
+        const storageOk = await verifyStorage();
+        if (!storageOk) {
             hasErrors = true;
-            logger.warn("💡 Suggestion: Verify SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are set correctly.");
+            logger.warn("💡 Suggestion: Ensure the storage/ folder has read and write permissions.");
         }
         console.log();
 

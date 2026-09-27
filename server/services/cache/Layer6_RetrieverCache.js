@@ -1,11 +1,12 @@
 /**
  * Layer 6 — Retriever Cache
- * EduMate Mission 14.1
+ * EduMate Mission 17 — Production Grade
  * 
  * Responsibilities:
- * - Cache reranked, metadata-filtered, section-boosted candidate chunk lists
- * - Cache by normalized query + filters + institution + topK
- * - Dynamic invalidation on KB version bump or category modification
+ * - Cache reranked retrieval candidates after hybrid scoring (semantic, BM25, metadata, rerank scores)
+ * - Key: Deterministic SHA-256 hash of normalized query + sorted metadata filters + institution + topK + kbVersion
+ * - TTL: 15 minutes (900 seconds)
+ * - Invalidation on document modification or KB version bump
  */
 
 const crypto = require("crypto");
@@ -13,8 +14,8 @@ const BaseLRUCache = require("./BaseLRUCache");
 
 class Layer6_RetrieverCache {
     constructor() {
-        const ttl = Number(process.env.CACHE_LAYER6_TTL || process.env.RETRIEVAL_CACHE_TTL || 600); // 10 minutes
-        const maxEntries = Number(process.env.CACHE_LAYER6_MAX || 500);
+        const ttl = Number(process.env.CACHE_LAYER6_TTL || process.env.RETRIEVAL_CACHE_TTL || 900); // 15 minutes per Mission 17
+        const maxEntries = Number(process.env.CACHE_LAYER6_MAX || 1000);
 
         this.cache = new BaseLRUCache({
             name: "Layer6_Retriever",
@@ -24,13 +25,17 @@ class Layer6_RetrieverCache {
         });
     }
 
-    _buildKey(query, metadataFilters = {}, kbVersion = "1", institution = "all", topK = null) {
-        const normalized = String(query || "")
+    _normalizeQuery(query) {
+        return String(query || "")
             .toLowerCase()
             .trim()
-            .replace(/[^\w\s]/g, "")
+            .normalize("NFC")
+            .replace(/[^\p{L}\p{N}\s]/gu, "")
             .replace(/\s+/g, " ");
+    }
 
+    _buildKey(query, metadataFilters = {}, kbVersion = "1", institution = "all", topK = null) {
+        const normalized = this._normalizeQuery(query);
         const queryHash = crypto.createHash("sha256").update(normalized).digest("hex").slice(0, 24);
 
         // Deterministic filter string
@@ -44,7 +49,7 @@ class Layer6_RetrieverCache {
             }
         }
         const filterString = filterParts.join("&") || "nofilters";
-        const filterHash = crypto.createHash("md5").update(filterString).digest("hex").slice(0, 12);
+        const filterHash = crypto.createHash("sha256").update(filterString).digest("hex").slice(0, 16);
         const inst = String(institution || "all").trim().toLowerCase();
         const kVal = topK ? `k${topK}` : "kdef";
 
@@ -61,8 +66,8 @@ class Layer6_RetrieverCache {
         if (!query || !Array.isArray(candidates) || candidates.length === 0) return false;
         const key = this._buildKey(query, metadataFilters, kbVersion, institution, topK);
 
-        const retrievedChunkIds = candidates.map(c => String(c.id || c.metadata?.chunkId || c._id || "")).filter(Boolean);
-        const topScore = candidates.length > 0 ? (candidates[0].score || candidates[0].baseScore || 0) : 0;
+        const retrievedChunkIds = candidates.map(c => String(c.id || c.chunkId || c.metadata?.chunkId || c._id || "")).filter(Boolean);
+        const topScore = candidates.length > 0 ? (candidates[0].score || candidates[0].baseScore || candidates[0].rerankScore || 0) : 0;
 
         const payload = {
             query,

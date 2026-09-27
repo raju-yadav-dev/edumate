@@ -183,8 +183,11 @@ const planQuery = (query, options = {}) => {
 
     return {
         query: source,
+        mode: routingDetails.mode || (routingDetails.skipRag ? "LLM_ONLY" : "RAG_LLM"),
         route: routingDetails.route,
         skipRag: routingDetails.skipRag,
+        isMixed: Boolean(routingDetails.isMixed),
+        intentCategory: routingDetails.intentCategory,
         routingDetails,
         intent: primaryIntent,
         detectedIntents,

@@ -1,11 +1,12 @@
 /**
  * Layer 4 — Vector Search Cache
- * EduMate Mission 14.1
+ * EduMate Mission 17 — Production Grade
  * 
  * Responsibilities:
- * - Cache raw Qdrant search results
- * - Cache by normalized query vector hash + metadata filters + limit
- * - Intercept repetitive vector similarity searches
+ * - Cache Qdrant vector retrieval results (retrieved chunk IDs and scores)
+ * - Key: Deterministic SHA-256 hash of embedding vector + sorted metadata filters + limit + collection
+ * - TTL: 15 minutes (900 seconds)
+ * - Invalidation on document indexing/upload
  */
 
 const crypto = require("crypto");
@@ -13,8 +14,8 @@ const BaseLRUCache = require("./BaseLRUCache");
 
 class Layer4_VectorSearchCache {
     constructor() {
-        const ttl = Number(process.env.CACHE_LAYER4_TTL || 600); // 10 minutes
-        const maxEntries = Number(process.env.CACHE_LAYER4_MAX || 500);
+        const ttl = Number(process.env.CACHE_LAYER4_TTL || 900); // 15 minutes per Mission 17
+        const maxEntries = Number(process.env.CACHE_LAYER4_MAX || 1000);
 
         this.cache = new BaseLRUCache({
             name: "Layer4_VectorSearch",
@@ -27,18 +28,20 @@ class Layer4_VectorSearchCache {
     _buildKey(queryEmbedding, filter = {}, limit = 10, collection = "edumate_knowledge") {
         let vectorHash = "novector";
         if (Array.isArray(queryEmbedding) && queryEmbedding.length > 0) {
-            // Hash first, middle, and last vector floats + length for fast fingerprinting
-            const sample = [
-                queryEmbedding[0],
-                queryEmbedding[Math.floor(queryEmbedding.length / 2)],
-                queryEmbedding[queryEmbedding.length - 1],
-                queryEmbedding.length
-            ].join(":");
-            vectorHash = crypto.createHash("md5").update(sample + ":" + queryEmbedding.slice(0, 10).join(",")).digest("hex").slice(0, 16);
+            const buf = Buffer.from(new Float32Array(queryEmbedding).buffer);
+            vectorHash = crypto.createHash("sha256").update(buf).digest("hex").slice(0, 24);
         }
 
-        const filterStr = filter ? JSON.stringify(filter) : "nofilter";
-        const filterHash = crypto.createHash("md5").update(filterStr).digest("hex").slice(0, 12);
+        let filterStr = "nofilter";
+        if (filter && typeof filter === "object") {
+            const sortedKeys = Object.keys(filter).sort();
+            const sortedObj = {};
+            for (const k of sortedKeys) {
+                sortedObj[k] = filter[k];
+            }
+            filterStr = JSON.stringify(sortedObj);
+        }
+        const filterHash = crypto.createHash("sha256").update(filterStr).digest("hex").slice(0, 16);
 
         return `vecsearch:${collection}:${vectorHash}:${filterHash}:${limit}`;
     }

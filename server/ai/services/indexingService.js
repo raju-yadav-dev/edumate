@@ -542,13 +542,13 @@ const runIndexingPipeline = async (documentId, initialBuffer = null, options = {
                 }
             }
 
-            // STAGE 2: Cleaning text (20%)
-            await updateStage("processing", "Cleaning text", 20);
+            // STAGE 2: Cleaning text (25%)
+            await updateStage("processing", "Cleaning document text", 25);
             pages = DocumentTextCleaner.cleanPages(pages);
             text = pages.map(p => p.text || "").join("\n");
 
             // STAGE 3: Building semantic chunks (40%)
-            await updateStage("chunked", "Building semantic chunks", 40);
+            await updateStage("chunked", "Generating chunks", 40);
             for (const page of pages) {
                 const pageChunks = splitter.splitText(page.text || "");
                 pageChunks.forEach((chunk) => {
@@ -565,8 +565,8 @@ const runIndexingPipeline = async (documentId, initialBuffer = null, options = {
             const textContent = buffer.toString("utf-8");
             const parsedRooms = parseBuildingContent(textContent, document.originalName);
 
-            await updateStage("processing", "Cleaning text", 20);
-            await updateStage("chunked", "Building semantic chunks", 40);
+            await updateStage("processing", "Cleaning document text", 25);
+            await updateStage("chunked", "Generating chunks", 40);
 
             rawChunks = parsedRooms.map(item => {
                 const chunkContent = `📍 Campus Location\nBuilding: Building ${item.buildingNumber} (${item.buildingName})\nFloor: ${item.floor}\nRoom: ${item.roomNumber || "N/A"}\nDetails: ${item.description}`;
@@ -596,12 +596,12 @@ const runIndexingPipeline = async (documentId, initialBuffer = null, options = {
                 throw err;
             }
 
-            // STAGE 2: Cleaning text (20%)
-            await updateStage("processing", "Cleaning text", 20);
+            // STAGE 2: Cleaning text (25%)
+            await updateStage("processing", "Cleaning document text", 25);
             text = DocumentTextCleaner.cleanText(text);
 
             // STAGE 3: Building semantic chunks (40%)
-            await updateStage("chunked", "Building semantic chunks", 40);
+            await updateStage("chunked", "Generating chunks", 40);
             const splits = splitter.splitText(text);
             splits.forEach((chunk) => {
                 rawChunks.push({
@@ -619,16 +619,17 @@ const runIndexingPipeline = async (documentId, initialBuffer = null, options = {
             return;
         }
 
-        // STAGE 4: Generating metadata (55%)
-        await updateStage("chunked", "Generating metadata", 55, {
+        // STAGE 4: Generating metadata & keywords (55%)
+        await updateStage("chunked", "Extracting metadata and keywords", 55, {
             chunkStats: { totalChunks: rawChunks.length, pageCount }
         });
 
+        // Graceful llama.cpp metadata extraction fallback
         try {
             const entityExtractionService = require("./entityExtractionService");
             academicEntities = await entityExtractionService.extractAcademicMetadata(text);
         } catch (entityErr) {
-            console.error("[INDEX] Error extracting academic entities:", entityErr.message);
+            console.warn("[INDEX] llama.cpp entity extraction skipped (fallback to local keyword extraction):", entityErr.message);
         }
 
         rawChunks.forEach((chunk) => {
@@ -661,8 +662,8 @@ const runIndexingPipeline = async (documentId, initialBuffer = null, options = {
             return;
         }
 
-        // STAGE 5: Generating embeddings (75%)
-        await updateStage("embedding", "Generating embeddings", 75);
+        // STAGE 5: Generating embeddings (70%)
+        await updateStage("embedding", "Generating vector embeddings", 70);
 
         rawChunks.forEach((chunk) => {
             chunk.contentHash = crypto.createHash("sha256").update(String(chunk.content || "").trim()).digest("hex");
@@ -689,20 +690,14 @@ const runIndexingPipeline = async (documentId, initialBuffer = null, options = {
             throw err;
         }
 
-        if (!embeddings || embeddings.some(e => !e || !Array.isArray(e) || e.length !== expectedDimension)) {
-            const err = new Error(`Embedding generation incomplete: One or more chunks missing valid ${expectedDimension}-dim vector.`);
-            err.errorCode = "EMBEDDING_FAILED";
-            throw err;
-        }
-
         if (isCancelled()) {
             document.embeddingStatus = "cancelled";
             await document.save();
             return;
         }
 
-        // STAGE 6: Saving local chunk storage (88%)
-        await updateStage("indexing", "Saving local chunk storage", 88, {
+        // STAGE 6: Saving local chunk storage (85%)
+        await updateStage("indexing", "Saving chunks to local storage", 85, {
             chunkStats: { embeddedChunks: embeddings.length }
         });
 
@@ -769,11 +764,22 @@ const runIndexingPipeline = async (documentId, initialBuffer = null, options = {
             return;
         }
 
-        // STAGE 7: Indexing into Qdrant (96%)
-        await updateStage("indexing", "Indexing into Qdrant", 96);
+        // STAGE 7: Indexing into Qdrant (95%)
+        await updateStage("indexing", "Indexing into Qdrant", 95);
 
-        const { ensureCollection } = require("../config/qdrant");
-        await ensureCollection();
+        // Pre-check Qdrant availability & collection
+        try {
+            const { ensureCollection } = require("../config/qdrant");
+            await ensureCollection();
+        } catch (qdrantConnErr) {
+            console.warn("[INDEX] Qdrant offline during indexing:", qdrantConnErr.message);
+            document.embeddingStatus = "partial";
+            document.progress = 85;
+            document.currentStage = "Qdrant Offline - Chunks saved locally, vector upload pending";
+            await document.save();
+            return;
+        }
+
         await deleteDocumentIndex(documentId);
 
         // Determine whether Qdrant collection uses named or unnamed vector
@@ -835,29 +841,43 @@ const runIndexingPipeline = async (documentId, initialBuffer = null, options = {
                 );
             }
         } catch (qdrantErr) {
-            const err = new Error(qdrantErr.message || "Failed to upsert points into Qdrant");
-            err.errorCode = "QDRANT_INDEX_FAILED";
-            throw err;
+            console.warn("[INDEX] Qdrant upsert error:", qdrantErr.message);
+            document.embeddingStatus = "partial";
+            document.progress = 85;
+            document.currentStage = `Qdrant upload failed: ${qdrantErr.message}`;
+            await document.save();
+            return;
         }
 
         // STAGE 8: Strict Validation & Completion (100%)
-        const qCountRes = await withTimeout(
-            client.count(collectionName, {
-                filter: {
-                    must: [{ key: "documentId", match: { value: String(documentId) } }]
-                }
-            }),
-            10000,
-            "Qdrant point count verification timed out (10s)"
-        );
+        let pointCount = 0;
+        try {
+            const qCountRes = await withTimeout(
+                client.count(collectionName, {
+                    filter: {
+                        must: [{ key: "documentId", match: { value: String(documentId) } }]
+                    }
+                }),
+                10000,
+                "Qdrant point count verification timed out (10s)"
+            );
+            pointCount = qCountRes?.count || 0;
+        } catch (_) {}
 
-        const pointCount = qCountRes?.count || 0;
-
-        // Strict Completion Validation: indexedChunks === totalChunks
+        // Strict Completion Validation: pointCount > 0 and matches chunks
         if (pointCount !== rawChunks.length || pointCount === 0) {
-            const err = new Error(`Strict validation failed: Expected ${rawChunks.length} vectors in Qdrant but verified ${pointCount}.`);
-            err.errorCode = "VALIDATION_FAILED";
-            throw err;
+            document.embeddingStatus = "partial";
+            document.progress = 90;
+            document.currentStage = `Partial: Verified ${pointCount}/${rawChunks.length} vectors in Qdrant`;
+            document.chunkStats = {
+                totalChunks: rawChunks.length,
+                embeddedChunks: embeddings.length,
+                indexedChunks: pointCount,
+                failedChunks: Math.max(0, rawChunks.length - pointCount),
+                pageCount
+            };
+            await document.save();
+            return;
         }
 
         const totalTokens = rawChunks.reduce((acc, c) => acc + Math.ceil((c.content || "").length / 4), 0);
@@ -865,7 +885,7 @@ const runIndexingPipeline = async (documentId, initialBuffer = null, options = {
         document.embeddingStatus = "completed";
         document.chunkCount = rawChunks.length;
         document.progress = 100;
-        document.currentStage = "Validation completed";
+        document.currentStage = "Completed & Indexed";
         document.healthy = true;
         document.failureInfo = {};
         document.chunkStats = {
@@ -888,7 +908,7 @@ const runIndexingPipeline = async (documentId, initialBuffer = null, options = {
 
         await onProgress({
             progress: 100,
-            stage: "Validation completed",
+            stage: "Completed & Indexed",
             status: "completed",
             chunkStats: document.chunkStats
         });

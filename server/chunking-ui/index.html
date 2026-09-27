@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EduMate Browser Chunking Studio | Dedicated Runtime (Port 5001)</title>
+    <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+
+    <!-- Top Navigation Bar -->
+    <header class="top-nav">
+        <div class="brand">
+            <span class="brand-icon">⚡</span>
+            <div>
+                <h1 class="brand-title">EduMate Chunking Studio</h1>
+                <p class="brand-subtitle">Dedicated Background Runtime &bull; Port 5001</p>
+            </div>
+        </div>
+
+        <!-- Global Live Status Badges -->
+        <div class="top-badges">
+            <div class="status-badge" id="topWorkerStatus">
+                <span class="dot pulse"></span> Worker: IDLE
+            </div>
+            <div class="status-badge" id="topMongoStatus">
+                <span class="dot"></span> MongoDB: Online
+            </div>
+            <div class="status-badge" id="topQdrantStatus">
+                <span class="dot"></span> Qdrant: Ready
+            </div>
+        </div>
+
+        <!-- Top Action Controls -->
+        <div class="top-actions">
+            <button class="btn btn-sm btn-accent" id="btnStorageSync" onclick="triggerStorageSync()">🔄 Sync Storage</button>
+            <button class="btn btn-sm" onclick="retryFailedJobs()">🔁 Retry Failed</button>
+            <button class="btn btn-sm" onclick="restartWorker()">⚡ Restart Pool</button>
+            <button class="btn btn-sm btn-primary" onclick="switchTab('upload')">⬆️ Upload</button>
+        </div>
+    </header>
+
+    <!-- Main Application Layout -->
+    <div class="app-container">
+        
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="nav-item active" data-tab="dashboard">
+                <span>📊</span>
+                <span class="nav-label">Dashboard</span>
+            </div>
+            <div class="nav-item" data-tab="storage">
+                <span>📂</span>
+                <span class="nav-label">Storage Explorer</span>
+            </div>
+            <div class="nav-item" data-tab="upload">
+                <span>⬆️</span>
+                <span class="nav-label">Upload Studio</span>
+            </div>
+            <div class="nav-item" data-tab="queue">
+                <span>📑</span>
+                <span class="nav-label">Queue Monitor</span>
+                <span class="nav-badge" id="navQueueBadge">0</span>
+            </div>
+            <div class="nav-item" data-tab="logs">
+                <span>📜</span>
+                <span class="nav-label">Runtime Console</span>
+            </div>
+            <div class="nav-item" data-tab="analytics">
+                <span>📈</span>
+                <span class="nav-label">Analytics</span>
+            </div>
+
+            <div style="margin-top: auto; padding: 12px; background: var(--bg-card); border-radius: 8px; border: 1px solid var(--border); font-size: 0.75rem; color: var(--text-dim);">
+                <div style="font-weight: 700; color: var(--text-muted); margin-bottom: 4px;">LOCAL RUNTIME</div>
+                <div>Storage: <code>edumate/storage</code></div>
+                <div>Port: <code>5001</code></div>
+                <div style="margin-top: 6px; color: var(--accent);">✓ Zero Vite required</div>
+            </div>
+        </aside>
+
+        <!-- Content Area -->
+        <main class="content-area">
+
+            <!-- TAB 1: DASHBOARD -->
+            <section class="tab-pane active" id="tab-dashboard">
+                <div class="grid-4">
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="card-title">Worker Pool</span>
+                            <span class="tag-status tag-completed" id="dashWorkerStatus">IDLE</span>
+                        </div>
+                        <div class="card-metric" id="dashConcurrency">2 Workers</div>
+                        <div class="card-subtext">Active async queue worker pool</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="card-title">Active Jobs</span>
+                            <span style="font-size: 1.1rem; color: var(--primary);">⚡</span>
+                        </div>
+                        <div class="card-metric" id="dashActiveJobs">0</div>
+                        <div class="card-subtext" id="dashWaitingJobs">0 queued in pipeline</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="card-title">Completed Documents</span>
+                            <span style="font-size: 1.1rem; color: var(--accent);">✓</span>
+                        </div>
+                        <div class="card-metric" id="dashCompletedJobs" style="color: var(--accent);">0</div>
+                        <div class="card-subtext" id="dashFailedJobs">0 failed / retryable</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="card-title">Storage Root</span>
+                            <span style="font-size: 1.1rem; color: var(--purple);">📂</span>
+                        </div>
+                        <div class="card-metric" style="font-size: 1.25rem; padding-top: 6px;">edumate/storage</div>
+                        <div class="card-subtext">Live filesystem watching active</div>
+                    </div>
+                </div>
+
+                <div class="grid-2">
+                    <!-- Service Latencies -->
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="card-title">Microservice Latencies & Health</span>
+                            <button class="btn btn-sm" onclick="fetchHealth()">🔄 Probe</button>
+                        </div>
+                        <div style="display: flex; flex-direction: column; gap: 4px; margin-top: 8px;">
+                            <div class="latency-row">
+                                <span class="latency-name"><span>🍃</span> MongoDB Database</span>
+                                <span class="latency-val" id="latMongo">Probing...</span>
+                            </div>
+                            <div class="latency-row">
+                                <span class="latency-name"><span>🧠</span> Qdrant Vector DB</span>
+                                <span class="latency-val" id="latQdrant">Probing...</span>
+                            </div>
+                            <div class="latency-row">
+                                <span class="latency-name"><span>⚡</span> Embedding / LLM API</span>
+                                <span class="latency-val" id="latLlama">Probing...</span>
+                            </div>
+                            <div class="latency-row">
+                                <span class="latency-name"><span>💾</span> Local Storage I/O</span>
+                                <span class="latency-val" id="latStorage">Probing...</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Quick Control Actions -->
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="card-title">Worker Pool Controls</span>
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px;">
+                            <button class="btn btn-accent" onclick="startWorker()">▶️ Start Worker</button>
+                            <button class="btn btn-sm" onclick="pauseWorker()">⏸ Pause Queue</button>
+                            <button class="btn btn-sm" onclick="resumeWorker()">▶️ Resume Queue</button>
+                            <button class="btn btn-sm" onclick="restartWorker()">⚡ Restart Worker</button>
+                            <button class="btn btn-sm" onclick="reindexAll()">🔄 Re-Index All</button>
+                            <button class="btn btn-sm btn-danger" onclick="clearQueue()">🗑️ Clear Queue</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB 2: STORAGE EXPLORER -->
+            <section class="tab-pane" id="tab-storage">
+                <div class="explorer-header">
+                    <div>
+                        <h2 style="font-size: 1.25rem; font-weight: 800;">Local Storage Explorer</h2>
+                        <p style="font-size: 0.8rem; color: var(--text-muted);">Root: <code>edumate/storage/</code> &bull; Pure local filesystem scan</p>
+                    </div>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <input type="text" class="search-input" placeholder="Search files..." oninput="filterStorageTree(this.value)">
+                        <button class="btn btn-primary" onclick="triggerStorageSync()">🔄 Scan & Sync</button>
+                    </div>
+                </div>
+
+                <div class="tree-container" id="storageTreeContainer">
+                    <div style="padding: 30px; text-align: center; color: var(--text-muted);">
+                        Loading local storage tree...
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB 3: UPLOAD STUDIO -->
+            <section class="tab-pane" id="tab-upload">
+                <div style="max-width: 700px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px;">
+                    <div>
+                        <h2 style="font-size: 1.25rem; font-weight: 800;">Upload & Enqueue Documents</h2>
+                        <p style="font-size: 0.8rem; color: var(--text-muted);">Uploaded files are written directly into <code>edumate/storage/</code> and automatically enqueued.</p>
+                    </div>
+
+                    <div style="display: flex; gap: 12px;">
+                        <div style="flex: 1;">
+                            <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 6px;">Target Category</label>
+                            <select id="uploadCategory" style="width: 100%; background: var(--bg-input); border: 1px solid var(--border); color: var(--text-main); padding: 8px 12px; border-radius: 8px; font-size: 0.85rem;">
+                                <option value="admissions">admissions</option>
+                                <option value="academics">academics</option>
+                                <option value="fees">fees</option>
+                                <option value="hostel">hostel</option>
+                                <option value="departments">departments</option>
+                                <option value="placements">placements</option>
+                                <option value="scholarships">scholarships</option>
+                                <option value="rules">rules</option>
+                                <option value="general" selected>general / others</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="upload-zone" id="dropZone">
+                        <input type="file" id="fileInput" style="display: none;" accept=".pdf,.docx,.doc,.txt,.md">
+                        <div class="upload-icon">📁</div>
+                        <div style="font-weight: 700; font-size: 1rem;">Click or Drag & Drop Documents Here</div>
+                        <div style="font-size: 0.8rem; color: var(--text-muted);">Supported formats: PDF, DOCX, TXT, Markdown (Max: 100MB)</div>
+                    </div>
+
+                    <div id="uploadStatus" style="display: none; padding: 12px 16px; background: var(--bg-card); border-radius: 8px; border: 1px solid var(--border); font-size: 0.85rem;"></div>
+                </div>
+            </section>
+
+            <!-- TAB 4: QUEUE MONITOR -->
+            <section class="tab-pane" id="tab-queue">
+                <div class="explorer-header">
+                    <div>
+                        <h2 style="font-size: 1.25rem; font-weight: 800;">Background Queue Monitor</h2>
+                        <p style="font-size: 0.8rem; color: var(--text-muted);">Live real-time chunking & vector embedding pipeline</p>
+                    </div>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn btn-sm" onclick="fetchQueue()">🔄 Refresh</button>
+                        <button class="btn btn-sm" onclick="retryFailedJobs()">🔁 Retry Failed</button>
+                        <button class="btn btn-sm btn-danger" onclick="clearQueue()">🗑️ Clear</button>
+                    </div>
+                </div>
+
+                <div style="display: flex; flex-direction: column; gap: 16px;">
+                    <div>
+                        <h3 style="font-size: 0.95rem; font-weight: 700; margin-bottom: 10px; color: var(--primary);">Active Worker Jobs</h3>
+                        <div id="activeJobsContainer"></div>
+                    </div>
+
+                    <div>
+                        <h3 style="font-size: 0.95rem; font-weight: 700; margin-bottom: 10px; color: var(--text-muted);">Waiting Queue</h3>
+                        <div id="queuedDocsList"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB 5: RUNTIME CONSOLE -->
+            <section class="tab-pane" id="tab-logs">
+                <div class="console-box">
+                    <div class="console-toolbar">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <span style="font-size: 0.85rem; font-weight: 700; color: var(--text-main);">📜 RUNTIME LOG STREAM</span>
+                            <div style="display: flex; gap: 6px;">
+                                <button class="btn btn-sm filter-chip active" onclick="setLogFilter('ALL')">ALL</button>
+                                <button class="btn btn-sm filter-chip" onclick="setLogFilter('INFO')">INFO</button>
+                                <button class="btn btn-sm filter-chip" onclick="setLogFilter('SUCCESS')">SUCCESS</button>
+                                <button class="btn btn-sm filter-chip" onclick="setLogFilter('WARNING')">WARN</button>
+                                <button class="btn btn-sm filter-chip" onclick="setLogFilter('ERROR')">ERROR</button>
+                            </div>
+                        </div>
+                        <div style="display: flex; gap: 8px;">
+                            <input type="text" placeholder="Filter logs..." class="search-input" style="width: 180px; padding: 4px 10px; font-size: 0.78rem;" oninput="filterLogSearch(this.value)">
+                            <button class="btn btn-sm" onclick="copyAllLogs()">📋 Copy</button>
+                            <button class="btn btn-sm" onclick="exportLogsFile()">📥 Export</button>
+                            <button class="btn btn-sm btn-danger" onclick="clearLogs()">🗑️ Clear</button>
+                        </div>
+                    </div>
+                    <div class="log-stream" id="logStreamTerminal">
+                        <div class="log-line"><span class="log-time">[Init]</span> <span class="log-lvl lvl-SYSTEM">SYSTEM</span> Connecting to live SSE log stream...</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB 6: ANALYTICS -->
+            <section class="tab-pane" id="tab-analytics">
+                <div class="explorer-header">
+                    <div>
+                        <h2 style="font-size: 1.25rem; font-weight: 800;">Chunking & Storage Analytics</h2>
+                        <p style="font-size: 0.8rem; color: var(--text-muted);">Overall vector and storage metrics</p>
+                    </div>
+                    <button class="btn btn-primary" onclick="fetchAnalytics()">🔄 Refresh</button>
+                </div>
+
+                <div class="grid-4">
+                    <div class="card">
+                        <div class="card-title">Total Active Documents</div>
+                        <div class="card-metric" id="anTotalDocs">0</div>
+                        <div class="card-subtext">Registered in database</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">Indexed Documents</div>
+                        <div class="card-metric" style="color: var(--accent);" id="anIndexedDocs">0</div>
+                        <div class="card-subtext">Vectors synced in Qdrant</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">Total Local Chunks</div>
+                        <div class="card-metric" style="color: var(--primary);" id="anTotalChunks">0</div>
+                        <div class="card-subtext">Processed text segments</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">Total Storage Size</div>
+                        <div class="card-metric" id="anStorageSize">0 B</div>
+                        <div class="card-subtext">Local chunks & files</div>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- Chunk Inspector Slide-over Drawer -->
+    <div class="drawer-overlay" id="drawerOverlay" onclick="closeChunkDrawer()"></div>
+    <div class="drawer" id="chunkDrawer">
+        <div class="drawer-header">
+            <div>
+                <h3 style="font-size: 1.1rem; font-weight: 800;" id="drawerDocTitle">Document Chunks</h3>
+                <p style="font-size: 0.78rem; color: var(--text-dim);">Inspection & Payload Viewer</p>
+            </div>
+            <button class="btn btn-sm" onclick="closeChunkDrawer()">✖ Close</button>
+        </div>
+        <div class="drawer-body" id="drawerBody"></div>
+    </div>
+
+    <script src="/js/app.js"></script>
+</body>
+</html>

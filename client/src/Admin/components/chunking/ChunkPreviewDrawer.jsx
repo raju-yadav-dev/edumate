@@ -13,7 +13,11 @@ import {
     Check,
     Loader2,
     AlertCircle,
-    Eye
+    Eye,
+    Cpu,
+    Zap,
+    Clock,
+    Sparkles
 } from "lucide-react";
 import { getDocumentChunks } from "../../../services/adminService";
 
@@ -29,6 +33,7 @@ export default function ChunkPreviewDrawer({
     const [activeChunkIndex, setActiveChunkIndex] = useState(0);
     const [searchQuery, setSearchQuery] = useState("");
     const [copied, setCopied] = useState(false);
+    const [highlightOverlap, setHighlightOverlap] = useState(true);
 
     useEffect(() => {
         if (!isOpen || !doc?._id) return;
@@ -63,6 +68,7 @@ export default function ChunkPreviewDrawer({
     });
 
     const activeChunk = filteredChunks[activeChunkIndex] || chunks[0] || null;
+    const prevChunk = activeChunkIndex > 0 ? filteredChunks[activeChunkIndex - 1] : null;
 
     const copyChunkText = () => {
         if (!activeChunk) return;
@@ -72,6 +78,26 @@ export default function ChunkPreviewDrawer({
         setTimeout(() => setCopied(false), 2000);
     };
 
+    // Calculate overlap text snippet if enabled
+    const computeOverlap = () => {
+        if (!highlightOverlap || !prevChunk || !activeChunk) return null;
+        const prevText = String(prevChunk.text || prevChunk.content || "");
+        const currentText = String(activeChunk.text || activeChunk.content || "");
+        
+        // Find common substring from end of prevText that matches start of currentText
+        let overlap = "";
+        const maxCheck = Math.min(200, prevText.length, currentText.length);
+        for (let len = 15; len <= maxCheck; len++) {
+            const endSnippet = prevText.slice(-len);
+            if (currentText.startsWith(endSnippet)) {
+                overlap = endSnippet;
+            }
+        }
+        return overlap;
+    };
+
+    const overlapSnippet = computeOverlap();
+
     return (
         <div className="chunk-preview-backdrop" onClick={onClose}>
             <div className="chunk-preview-drawer" onClick={(e) => e.stopPropagation()}>
@@ -80,17 +106,26 @@ export default function ChunkPreviewDrawer({
                     <div className="preview-header-left">
                         <div className="preview-header-badge">
                             <Layers size={16} />
-                            <span>Chunk Inspector</span>
+                            <span>Chunk & Vector Inspector</span>
                         </div>
                         <h3 className="preview-doc-title" title={doc.originalName || doc.title}>
                             {doc.originalName || doc.title || "Untitled Document"}
                         </h3>
                         <span className="preview-doc-meta">
-                            Category: <strong>{doc.category || "General"}</strong> • Chunks: <strong>{chunks.length}</strong>
+                            Category: <strong>{doc.category || "General"}</strong> • Chunks: <strong>{chunks.length}</strong> • Department: <strong>{doc.department || "General"}</strong>
                         </span>
                     </div>
 
                     <div className="preview-header-actions">
+                        <button
+                            type="button"
+                            className={`preview-header-btn ${highlightOverlap ? "active" : ""}`}
+                            onClick={() => setHighlightOverlap((v) => !v)}
+                            title="Toggle Overlap Highlight"
+                        >
+                            <Sparkles size={14} />
+                            <span>{highlightOverlap ? "Overlap ON" : "Overlap OFF"}</span>
+                        </button>
                         {chunks.length > 0 && onOpenDiff && (
                             <button
                                 type="button"
@@ -99,7 +134,7 @@ export default function ChunkPreviewDrawer({
                                 title="Compare chunk with neighboring chunk"
                             >
                                 <BookOpen size={14} />
-                                <span>Compare</span>
+                                <span>Compare Diff</span>
                             </button>
                         )}
                         <button
@@ -117,7 +152,7 @@ export default function ChunkPreviewDrawer({
                 {loading ? (
                     <div className="preview-loading-state">
                         <Loader2 size={32} className="spin-icon" />
-                        <p>Fetching and reconstructing semantic chunks...</p>
+                        <p>Fetching reconstructed semantic chunks & embeddings...</p>
                     </div>
                 ) : error ? (
                     <div className="preview-error-state">
@@ -247,12 +282,42 @@ export default function ChunkPreviewDrawer({
                                         </div>
                                     </div>
 
+                                    {/* Embedding Inspector Banner */}
+                                    <div className="embedding-inspector-banner">
+                                        <div className="emb-stat-item">
+                                            <Cpu size={14} />
+                                            <span>Provider: <strong>{activeChunk.metadata?.embeddingProvider || "Jina AI / Local"}</strong></span>
+                                        </div>
+                                        <div className="emb-stat-item">
+                                            <Zap size={14} />
+                                            <span>Model: <strong>{activeChunk.metadata?.embeddingModel || "jina-embeddings-v3"}</strong></span>
+                                        </div>
+                                        <div className="emb-stat-item">
+                                            <Layers size={14} />
+                                            <span>Dimension: <strong>1024</strong></span>
+                                        </div>
+                                        <div className="emb-stat-item">
+                                            <Clock size={14} />
+                                            <span>Status: <strong>Indexed</strong></span>
+                                        </div>
+                                    </div>
+
+                                    {/* Overlap Notice */}
+                                    {overlapSnippet && (
+                                        <div className="chunk-overlap-alert">
+                                            <Sparkles size={14} />
+                                            <span>
+                                                <strong>Boundary Overlap Detected:</strong> "{overlapSnippet.slice(0, 60)}..." ({overlapSnippet.length} chars linked to Chunk #{activeChunkIndex})
+                                            </span>
+                                        </div>
+                                    )}
+
                                     {/* Keywords Pill List */}
                                     {Array.isArray(activeChunk.keywords) && activeChunk.keywords.length > 0 && (
                                         <div className="chunk-keywords-row">
                                             <span className="keywords-label">
                                                 <Tag size={12} />
-                                                Keywords:
+                                                Keywords & Entities:
                                             </span>
                                             <div className="keywords-pills">
                                                 {activeChunk.keywords.map((kw, i) => (

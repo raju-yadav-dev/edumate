@@ -1,0 +1,23 @@
+# Brainware University - Department of Computational Sciences (CSS)
+
+## Faculty & Administration
+- Head of Department (HOD): Dr. Jayanta Aich
+- Professor: Dr. Anirban Roy (Specialization: Machine Learning, Artificial Intelligence)
+- Assistant Professor: Prof. Sanchari Saha (Specialization: Computer Networks, Data Structures)
+- Department Contact Email: css@brainwareuniversity.ac.in
+- Office Location: Tech Building, 3rd Floor, Room 304
+
+## Academic Programs & Fee Structure
+- BCA (Bachelor of Computer Applications): 3 Years (6 Semesters), Fee: ₹65,000 per semester.
+- B.Tech in CSE (Computer Science & Engineering): 4 Years (8 Semesters), Fee: ₹95,000 per semester.
+- MCA (Master of Computer Applications): 2 Years (4 Semesters), Fee: ₹75,000 per semester.
+
+## Hostel & Campus Facilities
+- Boys' Hostel (AC Triple Sharing): ₹42,000 per semester including mess.
+- Girls' Hostel (AC Triple Sharing): ₹42,000 per semester including mess.
+- Non-AC Double Sharing: ₹35,000 per semester.
+- Campus Emergency Helpdesk: +91 98765 43210 (24x7 Security & Medical).
+
+## Admission Criteria & Dates
+- Eligibility: Minimum 50% in Class 12 with Mathematics/Computer Science.
+- Admission Session: July - August 2026.

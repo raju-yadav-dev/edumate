@@ -37,4 +37,32 @@ router.get("/export", async (req, res) => {
     }
 });
 
+/**
+ * GET /api/analytics/router
+ * Returns Mission 16 Intelligent Hybrid Router metrics and decisions
+ */
+router.get("/router", (req, res) => {
+    try {
+        const { getRouterAnalytics } = require("../ai/routing/queryRouter");
+        const stats = getRouterAnalytics();
+        res.json({ success: true, data: stats });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
+ * POST /api/analytics/router/reset
+ * Resets hybrid router telemetry counters
+ */
+router.post("/router/reset", (req, res) => {
+    try {
+        const { resetRouterAnalytics } = require("../ai/routing/queryRouter");
+        const result = resetRouterAnalytics();
+        res.json({ success: true, data: result });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 module.exports = router;

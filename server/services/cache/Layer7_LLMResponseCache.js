@@ -1,72 +1,101 @@
 /**
  * Layer 7 — LLM Response Cache
- * EduMate Mission 14.1
+ * EduMate Mission 17 — Production Grade
  * 
  * Responsibilities:
- * - Cache complete generated responses (including citations, formatting, metadata)
- * - Cache by normalized query + documentType + department + queryMode + kbVersion
- * - Fast sub-50ms cache hits for identical inquiries
+ * - Cache complete generated LLM responses (answer, citations, format, confidence)
+ * - Key: Deterministic SHA-256 hash of normalized prompt + routing mode + context hash
+ * - TTL: 30 minutes (1800 seconds per Mission 17)
+ * - Do not cache streaming tokens — cache only final response
+ * - Synchronize to Layer 10 Persistent Disk Cache
  */
 
 const crypto = require("crypto");
 const BaseLRUCache = require("./BaseLRUCache");
+const layer10PersistentDiskCache = require("./Layer10_PersistentDiskCache");
 
 class Layer7_LLMResponseCache {
     constructor() {
-        const staticTtl = Number(process.env.CACHE_LAYER7_STATIC_TTL || process.env.CACHE_STATIC_TTL || 86400); // 24 hours
-        const dynamicTtl = Number(process.env.CACHE_LAYER7_DYNAMIC_TTL || process.env.CACHE_DYNAMIC_TTL || 60);  // 1 minute
-        const maxEntries = Number(process.env.CACHE_LAYER7_MAX || 500);
+        const ttl = Number(process.env.CACHE_LAYER7_TTL || 1800); // 30 minutes per Mission 17
+        const maxEntries = Number(process.env.CACHE_LAYER7_MAX || 1000);
 
-        this.staticTtl = staticTtl;
-        this.dynamicTtl = dynamicTtl;
+        this.defaultTtl = ttl;
 
         this.cache = new BaseLRUCache({
             name: "Layer7_LLMResponses",
             maxEntries,
-            defaultTtlSeconds: staticTtl,
+            defaultTtlSeconds: ttl,
             enableCategoryTracking: true
         });
 
         this.llmCallsAvoided = 0;
+        this.diskSyncEnabled = true;
     }
 
-    _normalizeQuery(query) {
-        return String(query || "")
-            .toLowerCase()
+    _normalizePrompt(prompt) {
+        return String(prompt || "")
             .trim()
-            .replace(/[^\w\s]/g, "")
+            .toLowerCase()
+            .normalize("NFC")
+            .replace(/[^\p{L}\p{N}\s]/gu, "")
             .replace(/\s+/g, " ");
     }
 
-    _buildKey(query, documentType = "all", department = "all", queryMode = "targeted", kbVersion = "1") {
-        const normalized = this._normalizeQuery(query);
-        const hash = crypto.createHash("sha256").update(normalized).digest("hex").slice(0, 24);
+    _buildKey(prompt, routingMode = "RAG_LLM", contextHash = "nocontext", documentType = "all", department = "all", kbVersion = "1") {
+        const normalized = this._normalizePrompt(prompt);
+        const promptHash = crypto.createHash("sha256").update(normalized).digest("hex").slice(0, 24);
+        const mode = String(routingMode || "RAG_LLM").toUpperCase();
+        const ctx = String(contextHash || "nocontext").slice(0, 16);
         const t = documentType || "all";
         const d = department || "all";
-        const m = queryMode || "targeted";
-        return `llm_resp:v1:kb${kbVersion}:${t}:${d}:${m}:${hash}`;
+
+        return `llm_resp:v1:kb${kbVersion}:${mode}:${t}:${d}:${ctx}:${promptHash}`;
     }
 
-    get(query, documentType = "all", department = "all", queryMode = "targeted", kbVersion = "1") {
-        if (!query) return null;
-        const key = this._buildKey(query, documentType, department, queryMode, kbVersion);
-        const val = this.cache.get(key);
-        if (val) {
+    get(prompt, routingMode = "RAG_LLM", contextHash = "nocontext", documentType = "all", department = "all", kbVersion = "1") {
+        if (!prompt) return null;
+        const key = this._buildKey(prompt, routingMode, contextHash, documentType, department, kbVersion);
+
+        // 1. In-memory LRU
+        const mem = this.cache.get(key);
+        if (mem) {
             this.llmCallsAvoided++;
+            return mem;
         }
-        return val;
+
+        // 2. Layer 10 Disk Cache
+        if (this.diskSyncEnabled) {
+            const diskVal = layer10PersistentDiskCache.get("responses", key);
+            if (diskVal) {
+                this.cache.set(key, diskVal, this.defaultTtl);
+                this.llmCallsAvoided++;
+                return diskVal;
+            }
+        }
+
+        return null;
     }
 
-    set(query, value, categories = [], isDynamic = false, documentType = "all", department = "all", queryMode = "targeted", kbVersion = "1", customTtl = null) {
-        if (!query || !value) return false;
-        const key = this._buildKey(query, documentType, department, queryMode, kbVersion);
-        const ttl = customTtl !== null ? customTtl : (isDynamic ? this.dynamicTtl : this.staticTtl);
+    set(prompt, value, categories = [], routingMode = "RAG_LLM", contextHash = "nocontext", documentType = "all", department = "all", kbVersion = "1", customTtl = null) {
+        if (!prompt || !value) return false;
+        const key = this._buildKey(prompt, routingMode, contextHash, documentType, department, kbVersion);
+        const ttl = customTtl !== null ? customTtl : this.defaultTtl;
         const cats = Array.isArray(categories) ? categories : (categories ? [categories] : []);
-        return this.cache.set(key, value, ttl, cats);
+
+        const ok = this.cache.set(key, value, ttl, cats);
+
+        if (ok && this.diskSyncEnabled) {
+            layer10PersistentDiskCache.set("responses", key, value, ttl, cats);
+        }
+
+        return ok;
     }
 
-    del(query, documentType = "all", department = "all", queryMode = "targeted", kbVersion = "1") {
-        const key = this._buildKey(query, documentType, department, queryMode, kbVersion);
+    del(prompt, routingMode = "RAG_LLM", contextHash = "nocontext", documentType = "all", department = "all", kbVersion = "1") {
+        const key = this._buildKey(prompt, routingMode, contextHash, documentType, department, kbVersion);
+        if (this.diskSyncEnabled) {
+            layer10PersistentDiskCache.delete("responses", key);
+        }
         return this.cache.delete(key);
     }
 
@@ -75,6 +104,9 @@ class Layer7_LLMResponseCache {
     }
 
     clear() {
+        if (this.diskSyncEnabled) {
+            layer10PersistentDiskCache.clear("responses");
+        }
         return this.cache.clear();
     }
 

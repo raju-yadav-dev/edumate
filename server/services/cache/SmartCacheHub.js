@@ -1,18 +1,18 @@
 /**
- * SmartCacheHub — Complete 10-Layer Smart Cache Architecture Orchestrator
- * EduMate Mission 14.1
+ * SmartCacheHub — 10-Layer Smart Cache Architecture Orchestrator
+ * EduMate Mission 17 — Production Grade
  * 
  * Unified Controller for all 10 Independent Cache Layers:
- * - Layer 1: Client/UI Cache
- * - Layer 2: Prompt / Query Cache
- * - Layer 3: Embedding Cache
- * - Layer 4: Vector Search Cache
- * - Layer 5: Document / Chunk Cache
- * - Layer 6: Retriever Cache
- * - Layer 7: LLM Response Cache
- * - Layer 8: Conversation / Context Cache
- * - Layer 9: Model KV Cache
- * - Layer 10: Persistent Disk Cache
+ * - Layer 1: Client/UI Cache (TTL 5-10m)
+ * - Layer 2: Prompt Cache / Query Planner (TTL 1h)
+ * - Layer 3: Embedding Cache (Infinite TTL / local storage)
+ * - Layer 4: Vector Search Cache (TTL 15m)
+ * - Layer 5: Document Chunk Cache (Parsed chunks / disk cache)
+ * - Layer 6: Retriever Cache (Reranked results, TTL 15m)
+ * - Layer 7: LLM Response Cache (TTL 30m)
+ * - Layer 8: Conversation Context Cache (Session lifetime)
+ * - Layer 9: Model KV Cache (llama.cpp slot management)
+ * - Layer 10: Persistent Disk Cache (storage/cache/ with 8 subfolders + gzip)
  */
 
 const layer1ClientCache = require("./Layer1_ClientCache");
@@ -39,8 +39,12 @@ class SmartCacheHub {
         this.l9 = layer9ModelKVCache;
         this.l10 = layer10PersistentDiskCache;
 
-        this.kbVersion = 1;
+        this.kbVersion = Number(process.env.CACHE_VERSION || 1);
         this.isInitialized = false;
+
+        // Telemetry tracking
+        this.totalLatencySavedMs = 0;
+        this.savedOpsCount = 0;
 
         this._initStartup();
     }
@@ -53,6 +57,9 @@ class SmartCacheHub {
         try {
             this.l10.pruneExpired();
         } catch (_) {}
+
+        // Warm startup cache automatically
+        this.warmStartupCache();
     }
 
     getKbVersion() {
@@ -65,8 +72,82 @@ class SmartCacheHub {
         return String(this.kbVersion);
     }
 
+    recordLatencySaved(savedMs) {
+        if (typeof savedMs === "number" && savedMs > 0) {
+            this.totalLatencySavedMs += savedMs;
+            this.savedOpsCount++;
+        }
+    }
+
     // =========================================================================
-    // AUTOMATIC INVALIDATION HANDLERS (Mission 14.1 Rules)
+    // CACHE WARMING (Mission 17 Rules)
+    // =========================================================================
+
+    /**
+     * Pre-warms essential caches on server boot:
+     * - Top FAQs and popular university query plans
+     * - System health status
+     * - Analytics card templates
+     */
+    warmStartupCache() {
+        console.log("[SmartCacheHub:Warming] Initializing cache warming routine...");
+        const start = Date.now();
+        let warmedCount = 0;
+
+        try {
+            // 1. Warm Top Popular University Query Plans (Layer 2)
+            const popularQuestions = [
+                {
+                    q: "Who is the HOD of Computational Sciences department?",
+                    plan: { intent: "FACULTY_INQUIRY", entities: { department: "Computational Sciences", role: "HOD" }, routingMode: "RAG_LLM", category: "faculty" }
+                },
+                {
+                    q: "What is the admission procedure for B.Tech in CSE?",
+                    plan: { intent: "ADMISSION_INQUIRY", entities: { course: "B.Tech CSE" }, routingMode: "RAG_LLM", category: "admissions" }
+                },
+                {
+                    q: "What are the semester exam passing criteria and grading rules?",
+                    plan: { intent: "EXAM_RULES", entities: { topic: "grading" }, routingMode: "RAG_LLM", category: "academics" }
+                },
+                {
+                    q: "What are the campus emergency contact numbers?",
+                    plan: { intent: "CONTACT_INFO", entities: { topic: "emergency" }, routingMode: "LLM_ONLY", category: "general" }
+                },
+                {
+                    q: "What is the fee structure for BCA program?",
+                    plan: { intent: "FEES_INQUIRY", entities: { course: "BCA" }, routingMode: "RAG_LLM", category: "fees" }
+                }
+            ];
+
+            for (const item of popularQuestions) {
+                this.l2.setQueryPlan(item.q, item.plan, 3600);
+                warmedCount++;
+            }
+
+            // 2. Warm Analytics Cards (Layer 1)
+            this.l1.setAnalyticsCard("overview_summary", {
+                activeStatus: "optimal",
+                warmedAt: new Date().toISOString()
+            }, 300);
+            warmedCount++;
+
+            // 3. Warm System Health Status in Persistent Disk Cache (Layer 10)
+            this.l10.set("analytics", "system_health_bootstrap", {
+                status: "healthy",
+                warmedAt: new Date().toISOString()
+            }, 86400);
+            warmedCount++;
+
+            console.log(`[SmartCacheHub:Warming] Warmup completed in ${Date.now() - start}ms (${warmedCount} entries warmed)`);
+        } catch (err) {
+            console.warn("[SmartCacheHub:Warming] Warning during cache warmup:", err.message);
+        }
+
+        return warmedCount;
+    }
+
+    // =========================================================================
+    // AUTOMATIC INVALIDATION HANDLERS (Mission 17 Rules)
     // =========================================================================
 
     /**
@@ -88,7 +169,7 @@ class SmartCacheHub {
     }
 
     /**
-     * Automatic invalidation on document rechunk
+     * Automatic invalidation on document rechunk / regeneration
      */
     invalidateRechunk(documentId, category = "") {
         console.log(`[SmartCacheHub:Invalidation] Trigger: RECHUNK | DocId: "${documentId}" | Category: "${category}"`);
@@ -163,12 +244,35 @@ class SmartCacheHub {
     }
 
     /**
+     * Invalidation when embedding model changes
+     */
+    invalidateEmbeddingModelChange() {
+        console.log("[SmartCacheHub:Invalidation] Trigger: EMBEDDING_MODEL_CHANGE — Purging Embedding, Vector, and Retriever caches");
+        this.incrementKbVersion();
+        this.l3.clear();
+        this.l4.clear();
+        this.l6.clear();
+        this.l10.clear("embeddings");
+    }
+
+    /**
+     * Invalidation when LLM model changes
+     */
+    invalidateLLMModelChange() {
+        console.log("[SmartCacheHub:Invalidation] Trigger: LLM_MODEL_CHANGE — Purging LLM Response and Model KV caches");
+        this.incrementKbVersion();
+        this.l7.clear();
+        this.l9.clear();
+        this.l10.clear("responses");
+    }
+
+    /**
      * Selective category invalidation cascading across layers
      */
     invalidateCategory(category) {
         if (!category) return;
         const cleanCat = String(category).trim().toLowerCase();
-        console.log(`[SmartCacheHub:Invalidation] Cascading category invalidation: "${cleanCat}" across all 10 layers`);
+        console.log(`[SmartCacheHub:Invalidation] Cascading category invalidation: "${cleanCat}" across all layers`);
 
         this.l2.invalidateCategory(cleanCat);
         this.l3.invalidateCategory(cleanCat);
@@ -199,7 +303,7 @@ class SmartCacheHub {
     }
 
     // =========================================================================
-    // UNIFIED ANALYTICS & MONITORING (Mission 14.1 Metrics)
+    // UNIFIED ANALYTICS & MONITORING (Mission 17 Metrics)
     // =========================================================================
 
     /**
@@ -222,16 +326,26 @@ class SmartCacheHub {
         let totalHits = 0;
         let totalMisses = 0;
         let totalEvictions = 0;
+        let totalEntries = 0;
         let totalMemoryBytes = 0;
         let totalDiskBytes = s10.diskBytes || 0;
         let weightedLookupTime = 0;
         let totalOps = 0;
 
+        let largestCacheName = "Layer 3 — Embedding Cache";
+        let largestCacheEntries = 0;
+
         for (const l of layers) {
             totalHits += (l.hits || 0);
             totalMisses += (l.misses || 0);
             totalEvictions += (l.evictions || 0);
+            totalEntries += (l.size || 0);
             totalMemoryBytes += (l.memoryBytes || 0);
+
+            if ((l.size || 0) > largestCacheEntries) {
+                largestCacheEntries = l.size;
+                largestCacheName = l.name;
+            }
 
             const ops = (l.hits || 0) + (l.misses || 0);
             if (ops > 0 && l.avgLookupTimeMs) {
@@ -245,8 +359,13 @@ class SmartCacheHub {
         const globalMissRatePct = globalOps > 0 ? Number(((totalMisses / globalOps) * 100).toFixed(2)) : 0;
         const globalAvgLookupMs = totalOps > 0 ? Number((weightedLookupTime / totalOps).toFixed(3)) : 0;
 
+        const avgSavedMs = this.savedOpsCount > 0 
+            ? Number((this.totalLatencySavedMs / this.savedOpsCount).toFixed(1)) 
+            : 0;
+
         return {
             global: {
+                totalEntries,
                 totalHits,
                 totalMisses,
                 hitRate: `${globalHitRatePct}%`,
@@ -259,6 +378,12 @@ class SmartCacheHub {
                 diskBytes: totalDiskBytes,
                 diskFormatted: this._formatBytes(totalDiskBytes),
                 avgLookupTimeMs: globalAvgLookupMs,
+                totalLatencySavedMs: this.totalLatencySavedMs,
+                avgLatencySavedMs: avgSavedMs,
+                largestCache: {
+                    name: largestCacheName,
+                    entries: largestCacheEntries
+                },
                 kbVersion: String(this.kbVersion),
                 activeLayers: 10,
                 status: "optimal"
@@ -285,34 +410,31 @@ class SmartCacheHub {
         return `${(bytes / Math.pow(1024, i)).toFixed(2)} ${units[i] || "B"}`;
     }
 
-    /**
-     * Generates formatted startup / telemetry report for all 10 layers
-     */
     generateCacheReport() {
         const stats = this.getStats();
         const l = stats.layers;
 
         const lines = [
             "=========================================================================================",
-            "             EDUMATE MISSION 14.1 — 10-LAYER SMART CACHE ARCHITECTURE REPORT              ",
+            "             EDUMATE MISSION 17 — 10-LAYER SMART CACHE ARCHITECTURE REPORT               ",
             "=========================================================================================",
             ` Global Status      : ${stats.global.status.toUpperCase()} (KB Version: v${stats.global.kbVersion})`,
             ` Global Hit Rate    : ${stats.global.hitRate} (${stats.global.totalHits} Hits / ${stats.global.totalMisses} Misses)`,
-            ` Global Evictions   : ${stats.global.evictions}`,
+            ` Global Evictions   : ${stats.global.evictions} | Total Entries: ${stats.global.totalEntries}`,
             ` Memory Footprint   : ${stats.global.memoryFormatted} | Persistent Disk: ${stats.global.diskFormatted}`,
-            ` Avg Lookup Latency : ${stats.global.avgLookupTimeMs} ms`,
+            ` Avg Lookup Latency : ${stats.global.avgLookupTimeMs} ms | Avg Latency Saved: ${stats.global.avgLatencySavedMs} ms`,
             "-----------------------------------------------------------------------------------------",
             " LAYER                      | ENTRIES | HIT RATE | AVG LATENCY | MEMORY/DISK | STATUS    ",
             "-----------------------------------------------------------------------------------------",
             ` 1. Client / UI Cache       | ${String(l.layer1_clientUI.size).padEnd(7)} | ${String(l.layer1_clientUI.hitRate).padEnd(8)} | ${String(l.layer1_clientUI.avgLookupTimeMs + 'ms').padEnd(11)} | ${String(l.layer1_clientUI.memoryFormatted).padEnd(11)} | ✓ HEALTHY `,
-            ` 2. Prompt / Query Cache    | ${String(l.layer2_promptQuery.size).padEnd(7)} | ${String(l.layer2_promptQuery.hitRate).padEnd(8)} | ${String(l.layer2_promptQuery.avgLookupTimeMs + 'ms').padEnd(11)} | ${String(l.layer2_promptQuery.memoryFormatted).padEnd(11)} | ✓ HEALTHY `,
-            ` 3. Embedding Vector Cache  | ${String(l.layer3_embeddings.size).padEnd(7)} | ${String(l.layer3_embeddings.hitRate).padEnd(8)} | ${String(l.layer3_embeddings.avgLookupTimeMs + 'ms').padEnd(11)} | ${String(l.layer3_embeddings.memoryFormatted).padEnd(11)} | ✓ HEALTHY `,
+            ` 2. Prompt Cache            | ${String(l.layer2_promptQuery.size).padEnd(7)} | ${String(l.layer2_promptQuery.hitRate).padEnd(8)} | ${String(l.layer2_promptQuery.avgLookupTimeMs + 'ms').padEnd(11)} | ${String(l.layer2_promptQuery.memoryFormatted).padEnd(11)} | ✓ HEALTHY `,
+            ` 3. Embedding Cache         | ${String(l.layer3_embeddings.size).padEnd(7)} | ${String(l.layer3_embeddings.hitRate).padEnd(8)} | ${String(l.layer3_embeddings.avgLookupTimeMs + 'ms').padEnd(11)} | ${String(l.layer3_embeddings.memoryFormatted).padEnd(11)} | ✓ HEALTHY `,
             ` 4. Vector Search Cache     | ${String(l.layer4_vectorSearch.size).padEnd(7)} | ${String(l.layer4_vectorSearch.hitRate).padEnd(8)} | ${String(l.layer4_vectorSearch.avgLookupTimeMs + 'ms').padEnd(11)} | ${String(l.layer4_vectorSearch.memoryFormatted).padEnd(11)} | ✓ HEALTHY `,
-            ` 5. Document / Chunk Cache  | ${String(l.layer5_documentChunks.size).padEnd(7)} | ${String(l.layer5_documentChunks.hitRate).padEnd(8)} | ${String(l.layer5_documentChunks.avgLookupTimeMs + 'ms').padEnd(11)} | ${String(l.layer5_documentChunks.memoryFormatted).padEnd(11)} | ✓ HEALTHY `,
-            ` 6. Retriever Rerank Cache  | ${String(l.layer6_retriever.size).padEnd(7)} | ${String(l.layer6_retriever.hitRate).padEnd(8)} | ${String(l.layer6_retriever.avgLookupTimeMs + 'ms').padEnd(11)} | ${String(l.layer6_retriever.memoryFormatted).padEnd(11)} | ✓ HEALTHY `,
+            ` 5. Document Chunk Cache    | ${String(l.layer5_documentChunks.size).padEnd(7)} | ${String(l.layer5_documentChunks.hitRate).padEnd(8)} | ${String(l.layer5_documentChunks.avgLookupTimeMs + 'ms').padEnd(11)} | ${String(l.layer5_documentChunks.memoryFormatted).padEnd(11)} | ✓ HEALTHY `,
+            ` 6. Retriever Cache         | ${String(l.layer6_retriever.size).padEnd(7)} | ${String(l.layer6_retriever.hitRate).padEnd(8)} | ${String(l.layer6_retriever.avgLookupTimeMs + 'ms').padEnd(11)} | ${String(l.layer6_retriever.memoryFormatted).padEnd(11)} | ✓ HEALTHY `,
             ` 7. LLM Response Cache      | ${String(l.layer7_llmResponses.size).padEnd(7)} | ${String(l.layer7_llmResponses.hitRate).padEnd(8)} | ${String(l.layer7_llmResponses.avgLookupTimeMs + 'ms').padEnd(11)} | ${String(l.layer7_llmResponses.memoryFormatted).padEnd(11)} | ✓ HEALTHY `,
-            ` 8. Conversation Memory     | ${String(l.layer8_conversationContext.size).padEnd(7)} | ${String(l.layer8_conversationContext.hitRate).padEnd(8)} | ${String(l.layer8_conversationContext.avgLookupTimeMs + 'ms').padEnd(11)} | ${String(l.layer8_conversationContext.memoryFormatted).padEnd(11)} | ✓ HEALTHY `,
-            ` 9. Model KV Attention Slot | ${String(l.layer9_modelKV.size).padEnd(7)} | ${String(l.layer9_modelKV.hitRate).padEnd(8)} | ${String(l.layer9_modelKV.avgLookupTimeMs + 'ms').padEnd(11)} | ${String(l.layer9_modelKV.memoryFormatted).padEnd(11)} | ✓ HEALTHY `,
+            ` 8. Conversation Context    | ${String(l.layer8_conversationContext.size).padEnd(7)} | ${String(l.layer8_conversationContext.hitRate).padEnd(8)} | ${String(l.layer8_conversationContext.avgLookupTimeMs + 'ms').padEnd(11)} | ${String(l.layer8_conversationContext.memoryFormatted).padEnd(11)} | ✓ HEALTHY `,
+            ` 9. llama.cpp KV Cache      | ${String(l.layer9_modelKV.size).padEnd(7)} | ${String(l.layer9_modelKV.hitRate).padEnd(8)} | ${String(l.layer9_modelKV.avgLookupTimeMs + 'ms').padEnd(11)} | ${String(l.layer9_modelKV.memoryFormatted).padEnd(11)} | ✓ HEALTHY `,
             ` 10. Persistent Disk Cache  | ${String(l.layer10_persistentDisk.size).padEnd(7)} | ${String(l.layer10_persistentDisk.hitRate).padEnd(8)} | ${String(l.layer10_persistentDisk.avgLookupTimeMs + 'ms').padEnd(11)} | ${String(l.layer10_persistentDisk.diskFormatted).padEnd(11)} | ✓ HEALTHY `,
             "========================================================================================="
         ];

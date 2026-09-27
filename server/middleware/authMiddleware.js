@@ -3,10 +3,15 @@ const { verifyAccessToken } = require("../utils/tokenizer");
 
 const authenticate = async (req, res, next) => {
     try {
+        let token = "";
         const authHeader = req.headers.authorization || "";
-        const [scheme, token] = authHeader.split(" ");
+        if (authHeader.startsWith("Bearer ")) {
+            token = authHeader.split(" ")[1];
+        } else if (req.query && req.query.token) {
+            token = req.query.token;
+        }
 
-        if (scheme !== "Bearer" || !token) {
+        if (!token) {
             return res.status(401).json({
                 success: false,
                 code: "MISSING_TOKEN",

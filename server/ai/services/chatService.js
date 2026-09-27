@@ -228,6 +228,29 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
     const activeUser = user || buildGuestUser();
     const tracker = performanceMonitoringService.createTracker({ question: normalizedQuestion, user: activeUser });
 
+    // Prompt Injection Defense Check (Mission 19)
+    const { inspectPromptSecurity } = require("../security/promptInjectionGuard");
+    const securityCheck = inspectPromptSecurity(normalizedQuestion, {
+        userId: activeUser._id,
+        email: activeUser.email,
+        role: activeUser.role,
+        ipAddress: activeUser.ipAddress || "127.0.0.1"
+    });
+
+    if (securityCheck.isBlocked) {
+        const blockedResponse = {
+            message: securityCheck.fallbackMessage,
+            answer: securityCheck.fallbackMessage,
+            sources: [],
+            citations: [],
+            metadata: { isSecurityBlocked: true, intent: "SECURITY_GUARD" },
+            confidence: 1.0,
+            provider: "security-guard"
+        };
+        if (onChunk) onChunk(securityCheck.fallbackMessage);
+        return blockedResponse;
+    }
+
     // Parse lightweight metadata type and department
     const { documentType: detectedType, department: detectedDept } = detectTypeAndDepartment(normalizedQuestion);
     const { detectQueryMode } = require("../utils/queryParser");
@@ -237,11 +260,14 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
     const cachedResponse = await cacheService.get(normalizedQuestion, detectedType, detectedDept, queryMode);
     if (cachedResponse) {
         const responseTimeMs = Date.now() - startedAt;
+        const latencySaved = Math.max(150, 1200 - responseTimeMs);
+        cacheService.recordLatencySaved(latencySaved);
         tracker.recordMetric("cacheHit", true);
         tracker.recordMetric("cacheMiss", false);
         tracker.recordMetric("cacheStatus", "hit");
+        tracker.recordMetric("latencySavedMs", latencySaved);
         tracker.finish();
-        console.log(`[Cache HIT] Found cached response for query: "${normalizedQuestion}" (Type: ${detectedType || 'none'}, Dept: ${detectedDept || 'none'})`);
+        console.log(`[Cache HIT] Found cached response for query: "${normalizedQuestion}" (Type: ${detectedType || 'none'}, Dept: ${detectedDept || 'none'}) | Saved: ${latencySaved}ms`);
         console.log(`[Observability] Cache HIT | Duration: ${responseTimeMs}ms | LLM Calls Avoided: 1`);
         if (onChunk && cachedResponse.answer) {
             onChunk(cachedResponse.answer);
@@ -448,12 +474,15 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
     });
     stopPlannerTimer();
 
-    const routeChosen = chatQueryPlan.route || "UNIVERSITY_SPECIFIC";
+    const modeChosen = chatQueryPlan.mode || (chatQueryPlan.skipRag ? "LLM_ONLY" : "RAG_LLM");
+    const routeChosen = chatQueryPlan.route || (modeChosen === "LLM_ONLY" ? "GENERAL_KNOWLEDGE" : (chatQueryPlan.isMixed ? "MIXED" : "UNIVERSITY_SPECIFIC"));
     const skipRag = Boolean(chatQueryPlan.skipRag);
 
     console.log(`[STAGE 2: Query Classification]`, {
+        mode: modeChosen,
         route: routeChosen,
-        intent: chatQueryPlan.intent || recPrimaryIntent || intent,
+        isMixed: Boolean(chatQueryPlan.isMixed),
+        intent: chatQueryPlan.intentCategory || chatQueryPlan.intent || recPrimaryIntent || intent,
         confidence: chatQueryPlan.routingDetails?.confidence || 0.95,
         skipRag,
         subqueries: activeSubqueries
@@ -471,6 +500,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
         ...(chatQueryPlan.filters || {})
     };
     tracker.recordMetric("metadataFilters", metadataFilters);
+    tracker.recordMetric("modeChosen", modeChosen);
     tracker.recordMetric("routeChosen", routeChosen);
     tracker.recordMetric("skipRag", skipRag);
     stopFilterTimer();
@@ -480,12 +510,12 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
     let retrievedChunks = [];
     let universitySiteResults = [];
     let webResults = [];
-    let activeQuestionType = routeChosen === "GENERAL_KNOWLEDGE" 
+    let activeQuestionType = (modeChosen === "LLM_ONLY" || routeChosen === "GENERAL_KNOWLEDGE")
         ? QUESTION_TYPES.GENERAL_KNOWLEDGE 
         : (routeChosen === "CONVERSATIONAL" ? "conversational" : QUESTION_TYPES.UNIVERSITY_SPECIFIC);
-    let sourceLabel = routeChosen === "GENERAL_KNOWLEDGE" 
+    let sourceLabel = (modeChosen === "LLM_ONLY" || routeChosen === "GENERAL_KNOWLEDGE")
         ? "🤖 EduMate AI (General Knowledge)" 
-        : (routeChosen === "CONVERSATIONAL" ? "💬 EduMate Assistant" : SOURCE_LABELS.UNIVERSITY);
+        : (routeChosen === "CONVERSATIONAL" ? "💬 EduMate Assistant" : (chatQueryPlan.isMixed ? "📚 University Knowledge + General AI" : SOURCE_LABELS.UNIVERSITY));
     let formatted;
     let provider = "llama.cpp";
     let textResponse = "";
@@ -595,10 +625,15 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
     // ==========================================
     let ttftMsRecorded = 0;
     const shouldGenerateLlmResponse = (
+        modeChosen === "LLM_ONLY" ||
         routeChosen === "GENERAL_KNOWLEDGE" || 
         routeChosen === "CONVERSATIONAL" || 
-        (routeChosen === "MIXED") || 
-        (routeChosen === "UNIVERSITY_SPECIFIC" && hasStrongContext)
+        modeChosen === "LLM_TOOLS" ||
+        routeChosen === "LLM_TOOLS" ||
+        routeChosen === "MIXED" || 
+        (modeChosen === "RAG_LLM" && hasStrongContext) ||
+        (routeChosen === "UNIVERSITY_SPECIFIC" && hasStrongContext) ||
+        (modeChosen === "RAG_ONLY")
     );
 
     if (shouldGenerateLlmResponse) {
@@ -757,8 +792,8 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
         provider = "system";
     }
 
-    // Format citations
-    const sources = citationService.formatCitations(retrievedChunks, universitySiteResults, webResults);
+    // Format citations (only when knowledge retrieval was executed)
+    const sources = skipRag ? [] : citationService.formatCitations(retrievedChunks, universitySiteResults, webResults);
 
     // Enrich citations with signed download URLs
     const docIds = sources

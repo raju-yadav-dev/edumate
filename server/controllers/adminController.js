@@ -448,26 +448,42 @@ const clearCache = asyncHandler(async (req, res) => {
     });
 });
 
+const BACKUP_SIGNING_SECRET = process.env.JWT_SECRET || "edumate-backup-secret-key-2026";
+
+function computeBackupChecksum(version, collections) {
+    const serialized = JSON.stringify({ version, collections });
+    return crypto.createHmac("sha256", BACKUP_SIGNING_SECRET).update(serialized).digest("hex");
+}
+
 const backupDatabase = asyncHandler(async (req, res) => {
     const documents = await Document.find({}).lean();
     const users = await User.find({}).lean();
     const settings = await mongoose.connection.db.collection("settings").find({}).toArray();
 
+    const version = "1.0";
+    const collections = { documents, users, settings };
+    const checksum = computeBackupChecksum(version, collections);
+
     return sendSuccess(res, 200, "Database backup created successfully.", {
         timestamp: new Date().toISOString(),
-        version: "1.0",
-        collections: {
-            documents,
-            users,
-            settings
-        }
+        version,
+        checksum,
+        collections
     });
 });
 
 const restoreBackup = asyncHandler(async (req, res) => {
-    const { collections } = req.body;
+    const { version = "1.0", checksum, collections } = req.body;
     if (!collections) {
-        throw new Error("Invalid backup data: missing collections.");
+        return sendError(res, 400, "Invalid backup data: missing collections.");
+    }
+
+    // Verify backup integrity signature if checksum provided
+    if (checksum) {
+        const expectedChecksum = computeBackupChecksum(version, collections);
+        if (checksum !== expectedChecksum) {
+            return sendError(res, 400, "Backup restore rejected: HMAC checksum signature mismatch (backup data may be corrupted or tampered).");
+        }
     }
 
     // Restore Documents
@@ -496,7 +512,7 @@ const restoreBackup = asyncHandler(async (req, res) => {
         }
     }
 
-    return sendSuccess(res, 200, "Database backup restored successfully.");
+    return sendSuccess(res, 200, "Database backup verified and restored successfully.");
 });
 
 const deleteUnusedChunks = asyncHandler(async (req, res) => {

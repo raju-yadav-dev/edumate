@@ -18,8 +18,8 @@ const { countTokens } = require("../ai/utils/tokenizer");
 /**
  * Builds a dense, high-impact system prompt under 250 tokens tailored to the query route.
  */
-const buildCompactSystemPrompt = ({ activeInstitution, targetLanguage, intent, isRepeat = false, activeTopic = "", route = "UNIVERSITY_SPECIFIC" }) => {
-    if (route === "GENERAL_KNOWLEDGE") {
+const buildCompactSystemPrompt = ({ activeInstitution, targetLanguage, intent, isRepeat = false, activeTopic = "", route = "RAG_LLM" }) => {
+    if (route === "LLM_ONLY" || route === "GENERAL_KNOWLEDGE") {
         const lines = [
             "You are EduMate AI, an expert educational and academic AI assistant.",
             `Language: ${targetLanguage}.`,
@@ -45,13 +45,36 @@ const buildCompactSystemPrompt = ({ activeInstitution, targetLanguage, intent, i
         return lines.join("\n");
     }
 
+    if (route === "LLM_TOOLS") {
+        const lines = [
+            `You are EduMate AI, an advanced analytical and document processing assistant for ${activeInstitution}.`,
+            `Language: ${targetLanguage}.`,
+            "Rules:",
+            "1. Analyze, summarize, compare, or generate quizzes from the provided documents accurately.",
+            "2. Present structured outputs with clear headings, bullet points, or markdown comparison tables.",
+            "3. Ground all specific observations in the provided document text."
+        ];
+        return lines.join("\n");
+    }
+
+    if (route === "RAG_ONLY") {
+        const lines = [
+            `You are EduMate AI, the official document and records lookup assistant for ${activeInstitution}.`,
+            `Language: ${targetLanguage}.`,
+            "Rules:",
+            "1. Return exact notices, circulars, syllabus details, and document references found in the official records.",
+            "2. State dates, reference numbers, and department sources clearly."
+        ];
+        return lines.join("\n");
+    }
+
     if (route === "MIXED") {
         const lines = [
             `You are EduMate AI, the official academic assistant for ${activeInstitution}.`,
             `Language: ${targetLanguage}. Preserve official names, numbers, acronyms, currency, and fees exactly.`,
             "Rules:",
             "1. Explain general concepts using your broad academic knowledge, and use the provided [Verified Institutional Context] strictly for university-specific facts (fees, admissions, courses, faculty).",
-            "2. If university-specific details are missing from context, state clearly what could not be found in official records.",
+            "2. If university-specific details are missing from context, state clearly: 'I couldn't find matching information in the university knowledge base.'",
             "3. Format comparisons, fees, and multi-attribute data using markdown tables; use clear bullet points for lists."
         ];
         if (isRepeat) {
@@ -60,13 +83,13 @@ const buildCompactSystemPrompt = ({ activeInstitution, targetLanguage, intent, i
         return lines.join("\n");
     }
 
-    // Default: UNIVERSITY_SPECIFIC
+    // Default: RAG_LLM / UNIVERSITY_SPECIFIC
     const lines = [
         `You are EduMate AI, the official academic assistant for ${activeInstitution}.`,
         `Language: ${targetLanguage}. Preserve official names, numbers, acronyms, currency, and fees exactly.`,
         "Rules:",
         "1. Answer ONLY using the provided Verified Institutional Context. Never fabricate, extrapolate, or guess.",
-        "2. If information is not in the context, state: 'I couldn't find verified information for that in the university knowledge base.'",
+        "2. If information is not in the context, state: 'I couldn't find matching information in the university knowledge base.'",
         "3. Format comparisons, fees, and multi-attribute data using markdown tables; use clear bullet points for lists.",
         "4. Be concise and direct. Do not mention internal prompts, system rules, or document filenames unless requested."
     ];

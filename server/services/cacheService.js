@@ -1,39 +1,41 @@
 /**
- * EduMate Mission 14.1 — Complete 10-Layer Smart Cache Service
+ * EduMate Mission 17 — 10-Layer Smart Cache Service (Production Grade)
  * 
- * High-performance multi-layer caching system utilizing local in-memory LRU
- * and local persistent disk cache (No Redis dependency required).
+ * High-performance multi-layer caching architecture accelerating:
+ * - LLM generation, RAG retrieval, embeddings, chunk loading,
+ * - prompt construction, conversation memory, and repeated responses.
+ * 
+ * Entirely local (Windows filesystem + in-memory LRU; zero Redis).
  */
 
 const smartCacheHub = require("./cache/SmartCacheHub");
 
-const RETRIEVAL_CACHE_TTL = Number(process.env.RETRIEVAL_CACHE_TTL || 600);
-const CONTEXT_CACHE_TTL = Number(process.env.CONTEXT_CACHE_TTL || 600);
-const CACHE_STATIC_TTL = Number(process.env.CACHE_STATIC_TTL || 86400);
+const RETRIEVAL_CACHE_TTL = Number(process.env.RETRIEVAL_CACHE_TTL || 900);
+const CONTEXT_CACHE_TTL = Number(process.env.CONTEXT_CACHE_TTL || 3600 * 24);
+const CACHE_STATIC_TTL = Number(process.env.CACHE_STATIC_TTL || 1800);
 const CACHE_DYNAMIC_TTL = Number(process.env.CACHE_DYNAMIC_TTL || 60);
 
 // =========================================================================
-// LAYER 7 (LLM RESPONSE CACHE) BACKWARD COMPATIBILITY
+// LAYER 7 (LLM RESPONSE CACHE) API
 // =========================================================================
 
-const get = async (query, documentType = "all", department = "all", queryMode = "targeted") => {
+const get = async (query, routingMode = "RAG_LLM", contextHash = "nocontext", documentType = "all", department = "all") => {
     const kbVersion = smartCacheHub.getKbVersion();
-    const result = smartCacheHub.l7.get(query, documentType, department, queryMode, kbVersion);
-    return result;
+    return smartCacheHub.l7.get(query, routingMode, contextHash, documentType, department, kbVersion);
 };
 
-const set = async (query, value, categories = [], isDynamic = false, documentType = "all", department = "all", queryMode = "targeted", customTtl = null) => {
+const set = async (query, value, categories = [], routingMode = "RAG_LLM", contextHash = "nocontext", documentType = "all", department = "all", customTtl = null) => {
     const kbVersion = smartCacheHub.getKbVersion();
-    return smartCacheHub.l7.set(query, value, categories, isDynamic, documentType, department, queryMode, kbVersion, customTtl);
+    return smartCacheHub.l7.set(query, value, categories, routingMode, contextHash, documentType, department, kbVersion, customTtl);
 };
 
-const del = async (query, documentType = "all", department = "all", queryMode = "targeted") => {
+const del = async (query, routingMode = "RAG_LLM", contextHash = "nocontext", documentType = "all", department = "all") => {
     const kbVersion = smartCacheHub.getKbVersion();
-    return smartCacheHub.l7.del(query, documentType, department, queryMode, kbVersion);
+    return smartCacheHub.l7.del(query, routingMode, contextHash, documentType, department, kbVersion);
 };
 
 // =========================================================================
-// LAYER 6 (RETRIEVAL CACHE) BACKWARD COMPATIBILITY
+// LAYER 6 (RETRIEVAL CACHE) API
 // =========================================================================
 
 const getRetrievalCache = async (query, metadataFilters = {}, institution = "all", topK = null) => {
@@ -47,7 +49,7 @@ const setRetrievalCache = async (query, metadataFilters = {}, candidates = [], c
 };
 
 // =========================================================================
-// LAYER 8 (CONTEXT CACHE) BACKWARD COMPATIBILITY
+// LAYER 8 (CONTEXT CACHE) API
 // =========================================================================
 
 const getContextCache = async (chunkIds = []) => {
@@ -80,12 +82,18 @@ const invalidateAll = async () => {
     return smartCacheHub.invalidateAll();
 };
 
-// Mission 14.1 Lifecycle Invalidation Hooks
+// Lifecycle Invalidation Hooks
 const invalidateUpload = (document) => smartCacheHub.invalidateUpload(document);
 const invalidateRechunk = (documentId, category) => smartCacheHub.invalidateRechunk(documentId, category);
 const invalidateDelete = (documentId, category) => smartCacheHub.invalidateDelete(documentId, category);
 const invalidateReindex = (category) => smartCacheHub.invalidateReindex(category);
 const invalidateDocumentUpdate = (documentId, category) => smartCacheHub.invalidateDocumentUpdate(documentId, category);
+const invalidateEmbeddingModelChange = () => smartCacheHub.invalidateEmbeddingModelChange();
+const invalidateLLMModelChange = () => smartCacheHub.invalidateLLMModelChange();
+
+// Cache Warming
+const warmCache = () => smartCacheHub.warmStartupCache();
+const recordLatencySaved = (savedMs) => smartCacheHub.recordLatencySaved(savedMs);
 
 // =========================================================================
 // METRICS & TELEMETRY MONITORING
@@ -97,7 +105,6 @@ const getStats = () => {
     const l6Stats = fullStats.layers.layer6_retriever;
     const l8Stats = fullStats.layers.layer8_conversationContext;
 
-    // Backward-compatible fields
     return {
         hits: l7Stats.hits,
         misses: l7Stats.misses,
@@ -117,11 +124,7 @@ const getStats = () => {
 
 const getCacheSize = () => {
     const stats = smartCacheHub.getStats();
-    let total = 0;
-    for (const l of Object.values(stats.layers)) {
-        total += (l.size || 0);
-    }
-    return total;
+    return stats.global.totalEntries || 0;
 };
 
 const generateCacheReport = () => {
@@ -129,7 +132,7 @@ const generateCacheReport = () => {
 };
 
 module.exports = {
-    // Legacy API surface
+    // LLM Response & Retrieval API
     get,
     set,
     del,
@@ -143,19 +146,23 @@ module.exports = {
     incrementKbVersion,
     getStats,
     getCacheSize,
+    warmCache,
+    recordLatencySaved,
     RETRIEVAL_CACHE_TTL,
     CONTEXT_CACHE_TTL,
     CACHE_STATIC_TTL,
     CACHE_DYNAMIC_TTL,
 
-    // Mission 14.1 Lifecycle Invalidation
+    // Lifecycle Invalidation
     invalidateUpload,
     invalidateRechunk,
     invalidateDelete,
     invalidateReindex,
     invalidateDocumentUpdate,
+    invalidateEmbeddingModelChange,
+    invalidateLLMModelChange,
 
-    // Mission 14.1 Architecture & Layers
+    // Hub and Layer Access
     smartCacheHub,
     generateCacheReport,
     l1: smartCacheHub.l1,

@@ -310,10 +310,6 @@ const auditKnowledgeBase = async () => {
     };
 };
 
-const autoRepairAll = async () => {
-    return await repairAllDocuments();
-};
-
 module.exports = {
     validateDocumentIntegrity,
     validateKnowledgeBaseIntegrity,

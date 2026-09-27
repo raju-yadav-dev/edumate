@@ -1,11 +1,12 @@
 /**
- * Layer 2 — Prompt / Query Cache
- * EduMate Mission 14.1
+ * Layer 2 — Prompt Cache / Query Planner Cache
+ * EduMate Mission 17 — Production Grade
  * 
  * Responsibilities:
- * - Cache normalized query plans & metadata filter extractions
- * - Cache intent detection & categorization results
- * - Cache pre-compiled system prompts and template expansions
+ * - Cache query planner & router outputs (intent, entities, metadata, routing mode, response layout)
+ * - Key: Deterministic SHA-256 hash of normalized user question
+ * - Pre-compiled system prompts and template expansions
+ * - TTL: 1 hour (3600 seconds)
  */
 
 const crypto = require("crypto");
@@ -13,55 +14,77 @@ const BaseLRUCache = require("./BaseLRUCache");
 
 class Layer2_PromptQueryCache {
     constructor() {
-        const ttl = Number(process.env.CACHE_LAYER2_TTL || 1800); // 30 minutes
-        const maxEntries = Number(process.env.CACHE_LAYER2_MAX || 600);
+        const ttl = Number(process.env.CACHE_LAYER2_TTL || 3600); // 1 hour TTL per Mission 17
+        const maxEntries = Number(process.env.CACHE_LAYER2_MAX || 1000);
 
         this.queryPlanCache = new BaseLRUCache({
             name: "Layer2_QueryPlans",
             maxEntries,
-            defaultTtlSeconds: ttl
+            defaultTtlSeconds: ttl,
+            enableCategoryTracking: true
         });
 
         this.promptCache = new BaseLRUCache({
             name: "Layer2_SystemPrompts",
-            maxEntries: 200,
-            defaultTtlSeconds: ttl * 2 // 1 hour
+            maxEntries: 300,
+            defaultTtlSeconds: ttl
         });
     }
 
-    _hashQuery(query) {
-        return crypto
-            .createHash("sha256")
-            .update(String(query || "").toLowerCase().trim().replace(/[^\w\s]/g, "").replace(/\s+/g, " "))
-            .digest("hex")
-            .slice(0, 24);
+    _normalizeQuestion(question) {
+        return String(question || "")
+            .trim()
+            .toLowerCase()
+            .normalize("NFC")
+            .replace(/[^\p{L}\p{N}\s]/gu, "")
+            .replace(/\s+/g, " ");
     }
 
+    _hashQuery(question) {
+        const normalized = this._normalizeQuestion(question);
+        return crypto.createHash("sha256").update(normalized).digest("hex");
+    }
+
+    /**
+     * Retrieves cached query planner / router output
+     */
     getQueryPlan(question) {
         if (!question) return null;
         const key = `qplan:${this._hashQuery(question)}`;
         return this.queryPlanCache.get(key);
     }
 
+    /**
+     * Stores query planner / router output:
+     * { intent, entities, metadata, routingMode, responseLayout, ... }
+     */
     setQueryPlan(question, queryPlan, ttl = null) {
-        if (!question || !queryPlan) return;
+        if (!question || !queryPlan) return false;
         const key = `qplan:${this._hashQuery(question)}`;
         const categories = queryPlan.category ? [queryPlan.category] : [];
-        this.queryPlanCache.set(key, queryPlan, ttl, categories);
+        return this.queryPlanCache.set(key, queryPlan, ttl, categories);
     }
 
     getSystemPrompt(templateKey, params = {}) {
         if (!templateKey) return null;
-        const paramsHash = crypto.createHash("md5").update(JSON.stringify(params)).digest("hex").slice(0, 12);
+        const sortedParams = Object.keys(params).sort().reduce((acc, k) => {
+            acc[k] = params[k];
+            return acc;
+        }, {});
+        const paramsHash = crypto.createHash("sha256").update(JSON.stringify(sortedParams)).digest("hex").slice(0, 16);
         const key = `prompt:${templateKey}:${paramsHash}`;
         return this.promptCache.get(key);
     }
 
     setSystemPrompt(templateKey, params = {}, promptText, ttl = null) {
-        if (!templateKey || !promptText) return;
-        const paramsHash = crypto.createHash("md5").update(JSON.stringify(params)).digest("hex").slice(0, 12);
+        if (!templateKey || !promptText) return false;
+        const sortedParams = Object.keys(params).sort().reduce((acc, k) => {
+            acc[k] = params[k];
+            return acc;
+        }, {});
+        const paramsHash = crypto.createHash("sha256").update(JSON.stringify(sortedParams)).digest("hex").slice(0, 16);
         const key = `prompt:${templateKey}:${paramsHash}`;
-        this.promptCache.set(key, promptText, ttl);
+        return this.promptCache.set(key, promptText, ttl);
     }
 
     invalidateCategory(category) {
@@ -81,16 +104,19 @@ class Layer2_PromptQueryCache {
         const totalMisses = qpStats.misses + prStats.misses;
         const totalOps = totalHits + totalMisses;
         const hitRatePct = totalOps > 0 ? Number(((totalHits / totalOps) * 100).toFixed(2)) : 0;
+        const missRatePct = totalOps > 0 ? Number(((totalMisses / totalOps) * 100).toFixed(2)) : 0;
         const memoryBytes = qpStats.memoryBytes + prStats.memoryBytes;
 
         return {
             layer: 2,
-            name: "Layer 2 — Prompt / Query Cache",
+            name: "Layer 2 — Prompt Cache",
             size: qpStats.size + prStats.size,
             hits: totalHits,
             misses: totalMisses,
             hitRate: `${hitRatePct}%`,
             hitRatePercent: hitRatePct,
+            missRate: `${missRatePct}%`,
+            missRatePercent: missRatePct,
             evictions: qpStats.evictions + prStats.evictions,
             avgLookupTimeMs: Number(((qpStats.avgLookupTimeMs + prStats.avgLookupTimeMs) / 2).toFixed(3)),
             memoryBytes,

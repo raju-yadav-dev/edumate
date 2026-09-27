@@ -597,114 +597,259 @@ export async function bulkRestoreAdminDocuments(ids) {
     return parseResponse(response, "Unable to restore documents.");
 }
 
-// Mission 9.2 & 9.3 Chunking Queue
-export async function getChunkingQueueStatus() {
+// Dedicated Chunking Server Endpoint Resolver (Mission 15.3)
+export function getChunkingServerUrl() {
+    const configured = import.meta.env.VITE_CHUNKING_API_URL;
+    if (configured) return configured.replace(/\/$/, "");
+    return "http://localhost:5001";
+}
+
+export function getChunkingSSEUrl() {
     const token = getAdminAccessToken();
-    const response = await fetch(`${DOCUMENT_API_BASE_URL}/queue/status?_t=${Date.now()}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
-    });
-    return parseResponse(response, "Unable to fetch queue status.");
+    const baseUrl = getChunkingServerUrl();
+    return `${baseUrl}/queue/stream${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+}
+
+export function getChunkingLogsSSEUrl() {
+    const token = getAdminAccessToken();
+    const baseUrl = getChunkingServerUrl();
+    return `${baseUrl}/logs/stream${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+}
+
+async function requestChunkingServer(path, options = {}) {
+    const token = getAdminAccessToken();
+    const chunkingBase = getChunkingServerUrl();
+    const targetUrl = `${chunkingBase}${path.startsWith("/") ? path : `/${path}`}`;
+    
+    const headers = {
+        ...(options.headers || {})
+    };
+    if (token && !headers.Authorization) {
+        headers.Authorization = `Bearer ${token}`;
+    }
+
+    try {
+        const response = await fetch(targetUrl, { ...options, headers });
+        if (response.ok) {
+            return await response.json().catch(() => ({}));
+        }
+        // If 404 or other error on port 5001, try fallback
+        throw new Error(`Server returned ${response.status}`);
+    } catch (err) {
+        // Fallback to primary DOCUMENT_API_BASE_URL
+        const fallbackUrl = `${DOCUMENT_API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
+        const fallbackResponse = await fetch(fallbackUrl, { ...options, headers });
+        return parseResponse(fallbackResponse, `Unable to execute ${path}`);
+    }
+}
+
+// Mission 9.2 & 9.3 & 15.3 Chunking Queue
+export async function getChunkingQueueStatus() {
+    return requestChunkingServer("/queue/status");
 }
 
 export async function pauseChunkingQueue() {
-    const token = getAdminAccessToken();
-    const response = await fetch(`${DOCUMENT_API_BASE_URL}/queue/pause`, {
-        method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
-    });
-    return parseResponse(response, "Unable to pause queue.");
+    return requestChunkingServer("/queue/pause", { method: "POST" });
 }
 
 export async function resumeChunkingQueue() {
-    const token = getAdminAccessToken();
-    const response = await fetch(`${DOCUMENT_API_BASE_URL}/queue/resume`, {
-        method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
-    });
-    return parseResponse(response, "Unable to resume queue.");
+    return requestChunkingServer("/queue/resume", { method: "POST" });
 }
 
 export async function enqueueChunkingDocuments(documentIds, options = {}) {
-    const token = getAdminAccessToken();
-    const response = await fetch(`${DOCUMENT_API_BASE_URL}/queue/enqueue`, {
+    return requestChunkingServer("/queue/enqueue", {
         method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {})
-        },
-        body: JSON.stringify({ documentIds, options })
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: documentIds, ...options })
     });
-    return parseResponse(response, "Unable to enqueue documents.");
 }
 
 export async function retryFailedChunkingQueue() {
-    const token = getAdminAccessToken();
-    const response = await fetch(`${DOCUMENT_API_BASE_URL}/queue/retry-failed`, {
-        method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
-    });
-    return parseResponse(response, "Unable to retry failed queue items.");
+    return requestChunkingServer("/queue/retry-failed", { method: "POST" });
+}
+
+export async function pauseChunkingDocument(documentId) {
+    return requestChunkingServer(`/queue/pause/${documentId}`, { method: "POST" });
 }
 
 export async function cancelChunkingDocument(documentId) {
-    const token = getAdminAccessToken();
-    const response = await fetch(`${DOCUMENT_API_BASE_URL}/${documentId}/cancel`, {
-        method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
-    });
-    return parseResponse(response, "Unable to cancel document processing.");
+    return requestChunkingServer(`/queue/cancel/${documentId}`, { method: "POST" });
 }
 
 export async function resumeChunkingDocument(documentId) {
-    const token = getAdminAccessToken();
-    const response = await fetch(`${DOCUMENT_API_BASE_URL}/${documentId}/resume`, {
-        method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
-    });
-    return parseResponse(response, "Unable to resume document processing.");
+    return requestChunkingServer(`/queue/resume/${documentId}`, { method: "POST" });
 }
 
 export async function retryChunkingDocument(documentId) {
-    const token = getAdminAccessToken();
-    const response = await fetch(`${DOCUMENT_API_BASE_URL}/${documentId}/retry`, {
-        method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
-    });
-    return parseResponse(response, "Unable to retry document processing.");
+    return requestChunkingServer(`/queue/retry/${documentId}`, { method: "POST" });
 }
 
 // Mission 9.5 Chunk Preview & Integrity
 export async function getDocumentChunks(documentId) {
-    const token = getAdminAccessToken();
-    const response = await fetch(`${DOCUMENT_API_BASE_URL}/${documentId}/chunks?_t=${Date.now()}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
-    });
-    return parseResponse(response, "Unable to retrieve document chunks.");
+    return requestChunkingServer(`/chunks/${documentId}`);
 }
 
 export async function getIntegrityReport() {
-    const token = getAdminAccessToken();
-    const response = await fetch(`${DOCUMENT_API_BASE_URL}/integrity/report?_t=${Date.now()}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
-    });
-    return parseResponse(response, "Unable to generate integrity report.");
+    return requestChunkingServer("/integrity/report");
 }
 
 export async function repairAdminDocument(documentId) {
-    const token = getAdminAccessToken();
-    const response = await fetch(`${DOCUMENT_API_BASE_URL}/${documentId}/repair`, {
-        method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
-    });
-    return parseResponse(response, "Unable to repair document.");
+    return requestChunkingServer(`/${documentId}/repair`, { method: "POST" });
 }
 
 export async function repairAllAdminDocuments() {
-    const token = getAdminAccessToken();
-    const response = await fetch(`${DOCUMENT_API_BASE_URL}/integrity/repair-all`, {
-        method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
-    });
-    return parseResponse(response, "Unable to run auto-repair for all documents.");
+    return requestChunkingServer("/integrity/repair-all", { method: "POST" });
 }
+
+// Mission 15 & 15.3: Browser Chunking Studio APIs
+export async function getChunkingLogs(limit = 200) {
+    return requestChunkingServer(`/queue/logs?limit=${limit}&_t=${Date.now()}`);
+}
+
+export async function clearChunkingLogs() {
+    return requestChunkingServer("/queue/logs/clear", { method: "POST" });
+}
+
+export async function startChunkingWorker() {
+    return requestChunkingServer("/worker/start", { method: "POST" });
+}
+
+export async function stopChunkingWorker() {
+    return requestChunkingServer("/worker/stop", { method: "POST" });
+}
+
+export async function restartChunkingWorker() {
+    return requestChunkingServer("/worker/restart", { method: "POST" });
+}
+
+export async function clearChunkingQueue() {
+    return requestChunkingServer("/queue/clear", { method: "POST" });
+}
+
+export async function getLocalStorageTree() {
+    return requestChunkingServer(`/storage/tree?_t=${Date.now()}`);
+}
+
+export async function syncLocalStorage() {
+    return requestChunkingServer("/storage/scan-sync", { method: "POST" });
+}
+
+export async function getQdrantStatus() {
+    return requestChunkingServer(`/qdrant/status?_t=${Date.now()}`);
+}
+
+export async function verifyQdrantVectors() {
+    return requestChunkingServer("/qdrant/verify", { method: "POST" });
+}
+
+export async function deleteQdrantVectors(documentId) {
+    return requestChunkingServer(`/qdrant/vectors/${documentId}`, { method: "DELETE" });
+}
+
+export async function getChunkingAnalytics() {
+    return requestChunkingServer(`/chunking/analytics?_t=${Date.now()}`);
+}
+
+export async function getChunkingHealth() {
+    return requestChunkingServer(`/health?_t=${Date.now()}`);
+}
+
+// Mission 15.3 Windows Explorer Style Storage APIs
+export async function getStorageFilePreview(filePath) {
+    return requestChunkingServer(`/storage/file/preview?path=${encodeURIComponent(filePath)}&_t=${Date.now()}`);
+}
+
+export async function createStorageFolder(folderPath) {
+    return requestChunkingServer("/storage/folder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ folderPath })
+    });
+}
+
+export async function deleteStorageFolder(folderPath) {
+    return requestChunkingServer("/storage/folder", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ folderPath })
+    });
+}
+
+export async function deleteStorageFile(filePath) {
+    return requestChunkingServer("/storage/file", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filePath })
+    });
+}
+
+export async function renameStorageItem(oldPath, newPath) {
+    return requestChunkingServer("/storage/rename", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ oldPath, newPath })
+    });
+}
+
+export async function chunkStorageFolder(folderPath, force = false) {
+    return requestChunkingServer("/storage/chunk/folder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ folderPath, force })
+    });
+}
+
+export async function uploadFilesToStorageFolder(files, folderPath, { onProgress, autoChunk = true } = {}) {
+    const token = getAdminAccessToken();
+    const baseUrl = getChunkingServerUrl();
+
+    return new Promise((resolve, reject) => {
+        const formData = new FormData();
+        Array.from(files).forEach((file) => {
+            formData.append("files", file);
+        });
+        formData.append("folderPath", folderPath || "");
+        formData.append("autoChunk", String(autoChunk));
+
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", `${baseUrl}/storage/upload`, true);
+
+        if (token) {
+            xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+        }
+
+        xhr.upload.onprogress = (event) => {
+            if (event.lengthComputable && typeof onProgress === "function") {
+                const percent = Math.round((event.loaded / event.total) * 100);
+                onProgress(percent, event.loaded, event.total);
+            }
+        };
+
+        xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+                try {
+                    const parsed = JSON.parse(xhr.responseText);
+                    resolve(parsed);
+                } catch {
+                    resolve({ success: true });
+                }
+            } else {
+                try {
+                    const parsed = JSON.parse(xhr.responseText);
+                    reject(new Error(parsed.message || `Upload failed with status ${xhr.status}`));
+                } catch {
+                    reject(new Error(`Upload failed with status ${xhr.status}`));
+                }
+            }
+        };
+
+        xhr.onerror = () => {
+            reject(new Error("Network error during file upload to storage."));
+        };
+
+        xhr.send(formData);
+    });
+}
+
+
 

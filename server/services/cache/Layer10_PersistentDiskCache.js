@@ -1,35 +1,44 @@
 /**
  * Layer 10 — Persistent Disk Cache
- * EduMate Mission 14.1
+ * EduMate Mission 17 — Production Grade
  * 
  * Responsibilities:
- * - Create local persistent cache inside EduMate storage system (`storage/cache/`)
- * - Store cache indexes, embeddings, retrieval cache, prompt cache, and LLM responses
- * - Atomic persistence to disk prevents corrupted cache files on sudden process stops
- * - Fast asynchronous hydration on server startup
- * - Disk space usage monitoring and automated TTL eviction
+ * - Create and manage local persistent cache under `storage/cache/`
+ * - Dedicated subfolders: client, prompt, embeddings, retrieval, responses, chunks, llama, analytics
+ * - Transparent GZIP compression for large payloads (>1KB) to minimize disk I/O and footprint
+ * - Atomic write operations using temp files (.tmp) to prevent corruption during sudden shutdowns
+ * - Deterministic SHA-256 file keys (never raw user prompts in filenames)
+ * - Automatic startup hydration and background TTL pruning
  */
 
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const zlib = require("zlib");
 const localStorageManager = require("../../storage/localStorageManager");
 
 class Layer10_PersistentDiskCache {
     constructor() {
         this.cacheRootDir = path.join(localStorageManager.STORAGE_ROOT, "cache");
+        this.version = "1.0";
+        this.compressionThresholdBytes = 1024; // 1 KB
+
         this.namespaces = {
+            client: path.join(this.cacheRootDir, "client"),
+            prompt: path.join(this.cacheRootDir, "prompt"),
             embeddings: path.join(this.cacheRootDir, "embeddings"),
             retrieval: path.join(this.cacheRootDir, "retrieval"),
-            prompts: path.join(this.cacheRootDir, "prompts"),
-            responses: path.join(this.cacheRootDir, "responses")
+            responses: path.join(this.cacheRootDir, "responses"),
+            chunks: path.join(this.cacheRootDir, "chunks"),
+            llama: path.join(this.cacheRootDir, "llama"),
+            analytics: path.join(this.cacheRootDir, "analytics")
         };
-        this.catalogFilePath = path.join(this.cacheRootDir, "index.json");
 
         this.hits = 0;
         this.misses = 0;
         this.writes = 0;
         this.deletes = 0;
+        this.compressions = 0;
         this.totalLookupTimeMs = 0;
         this.lookupCount = 0;
 
@@ -51,33 +60,62 @@ class Layer10_PersistentDiskCache {
         }
     }
 
-    _getFilePath(namespace, key) {
+    /**
+     * Computes deterministic SHA-256 key for filenames
+     */
+    _hashKey(key) {
+        if (!key) return "empty_key";
+        const normalized = String(key).trim().toLowerCase().normalize("NFC");
+        return crypto.createHash("sha256").update(normalized).digest("hex");
+    }
+
+    _getFilePath(namespace, key, isGzip = false) {
         const baseDir = this.namespaces[namespace] || this.cacheRootDir;
-        const safeKey = crypto.createHash("sha256").update(String(key)).digest("hex");
-        return path.join(baseDir, `${safeKey}.cache.json`);
+        const safeKey = this._hashKey(key);
+        const ext = isGzip ? ".cache.json.gz" : ".cache.json";
+        return path.join(baseDir, `${safeKey}${ext}`);
     }
 
     /**
-     * Reads a cached entry from disk
+     * Reads a cached entry from disk with transparent decompression
      */
     get(namespace, key) {
         const start = Date.now();
         this.lookupCount++;
 
-        const filePath = this._getFilePath(namespace, key);
-        if (!fs.existsSync(filePath)) {
+        const jsonPath = this._getFilePath(namespace, key, false);
+        const gzPath = this._getFilePath(namespace, key, true);
+
+        let targetPath = null;
+        let isGzip = false;
+
+        if (fs.existsSync(gzPath)) {
+            targetPath = gzPath;
+            isGzip = true;
+        } else if (fs.existsSync(jsonPath)) {
+            targetPath = jsonPath;
+            isGzip = false;
+        } else {
             this.misses++;
             this.totalLookupTimeMs += (Date.now() - start);
             return null;
         }
 
         try {
-            const raw = fs.readFileSync(filePath, "utf-8");
-            const entry = JSON.parse(raw);
+            const rawBuffer = fs.readFileSync(targetPath);
+            let jsonString;
+
+            if (isGzip) {
+                jsonString = zlib.gunzipSync(rawBuffer).toString("utf-8");
+            } else {
+                jsonString = rawBuffer.toString("utf-8");
+            }
+
+            const entry = JSON.parse(jsonString);
 
             // Check TTL expiration
             if (entry.expiry && Date.now() > entry.expiry) {
-                try { fs.unlinkSync(filePath); } catch (_) {}
+                try { fs.unlinkSync(targetPath); } catch (_) {}
                 this.misses++;
                 this.totalLookupTimeMs += (Date.now() - start);
                 return null;
@@ -94,18 +132,16 @@ class Layer10_PersistentDiskCache {
     }
 
     /**
-     * Writes an entry to disk atomically
+     * Writes an entry to disk atomically with optional gzip compression
      */
     set(namespace, key, value, ttlSeconds = 86400, categories = []) {
         if (value === undefined || value === null) return false;
         this._ensureDirectories();
 
-        const filePath = this._getFilePath(namespace, key);
-        const tempPath = `${filePath}.${Date.now()}.${Math.random().toString(36).slice(2, 6)}.tmp`;
-
         const expiry = ttlSeconds > 0 ? Date.now() + (ttlSeconds * 1000) : null;
         const payload = {
-            key,
+            version: this.version,
+            key: String(key),
             namespace,
             value,
             expiry,
@@ -113,9 +149,31 @@ class Layer10_PersistentDiskCache {
             categories: Array.isArray(categories) ? categories : [categories]
         };
 
+        const jsonString = JSON.stringify(payload);
+        const buffer = Buffer.from(jsonString, "utf-8");
+        const shouldCompress = buffer.length > this.compressionThresholdBytes;
+
+        const targetPath = this._getFilePath(namespace, key, shouldCompress);
+        const tempPath = `${targetPath}.${Date.now()}.${Math.random().toString(36).slice(2, 6)}.tmp`;
+
+        // Clean alternate extension if existed
+        const alternatePath = this._getFilePath(namespace, key, !shouldCompress);
+
         try {
-            fs.writeFileSync(tempPath, JSON.stringify(payload), "utf-8");
-            fs.renameSync(tempPath, filePath);
+            if (shouldCompress) {
+                const compressed = zlib.gzipSync(buffer);
+                fs.writeFileSync(tempPath, compressed);
+                this.compressions++;
+            } else {
+                fs.writeFileSync(tempPath, buffer);
+            }
+
+            fs.renameSync(tempPath, targetPath);
+
+            if (fs.existsSync(alternatePath)) {
+                try { fs.unlinkSync(alternatePath); } catch (_) {}
+            }
+
             this.writes++;
             return true;
         } catch (err) {
@@ -126,18 +184,24 @@ class Layer10_PersistentDiskCache {
     }
 
     /**
-     * Deletes an entry from disk
+     * Deletes an entry from disk (both plain and gz formats)
      */
     delete(namespace, key) {
-        const filePath = this._getFilePath(namespace, key);
-        if (fs.existsSync(filePath)) {
-            try {
-                fs.unlinkSync(filePath);
-                this.deletes++;
-                return true;
-            } catch (_) {}
+        const jsonPath = this._getFilePath(namespace, key, false);
+        const gzPath = this._getFilePath(namespace, key, true);
+        let removed = false;
+
+        if (fs.existsSync(jsonPath)) {
+            try { fs.unlinkSync(jsonPath); removed = true; } catch (_) {}
         }
-        return false;
+        if (fs.existsSync(gzPath)) {
+            try { fs.unlinkSync(gzPath); removed = true; } catch (_) {}
+        }
+
+        if (removed) {
+            this.deletes++;
+        }
+        return removed;
     }
 
     /**
@@ -152,16 +216,24 @@ class Layer10_PersistentDiskCache {
             try {
                 const files = fs.readdirSync(dir);
                 for (const file of files) {
-                    if (!file.endsWith(".cache.json")) continue;
+                    if (!file.includes(".cache.json")) continue;
                     const fullPath = path.join(dir, file);
                     try {
-                        const raw = fs.readFileSync(fullPath, "utf-8");
-                        const entry = JSON.parse(raw);
+                        let jsonString;
+                        if (file.endsWith(".gz")) {
+                            jsonString = zlib.gunzipSync(fs.readFileSync(fullPath)).toString("utf-8");
+                        } else {
+                            jsonString = fs.readFileSync(fullPath, "utf-8");
+                        }
+                        const entry = JSON.parse(jsonString);
                         if (entry.expiry && now > entry.expiry) {
                             fs.unlinkSync(fullPath);
                             pruned++;
                         }
-                    } catch (_) {}
+                    } catch (_) {
+                        // Corrupted file cleanup
+                        try { fs.unlinkSync(fullPath); pruned++; } catch (_) {}
+                    }
                 }
             } catch (_) {}
         }
@@ -170,7 +242,7 @@ class Layer10_PersistentDiskCache {
     }
 
     /**
-     * Invalidates all files matching a specific category
+     * Invalidates all files matching a specific category across all namespaces
      */
     invalidateCategory(category) {
         if (!category) return 0;
@@ -182,11 +254,16 @@ class Layer10_PersistentDiskCache {
             try {
                 const files = fs.readdirSync(dir);
                 for (const file of files) {
-                    if (!file.endsWith(".cache.json")) continue;
+                    if (!file.includes(".cache.json")) continue;
                     const fullPath = path.join(dir, file);
                     try {
-                        const raw = fs.readFileSync(fullPath, "utf-8");
-                        const entry = JSON.parse(raw);
+                        let jsonString;
+                        if (file.endsWith(".gz")) {
+                            jsonString = zlib.gunzipSync(fs.readFileSync(fullPath)).toString("utf-8");
+                        } else {
+                            jsonString = fs.readFileSync(fullPath, "utf-8");
+                        }
+                        const entry = JSON.parse(jsonString);
                         if (entry.categories && Array.isArray(entry.categories)) {
                             if (entry.categories.some(c => String(c).toLowerCase() === cleanCat)) {
                                 fs.unlinkSync(fullPath);
@@ -202,16 +279,20 @@ class Layer10_PersistentDiskCache {
     }
 
     /**
-     * Purges all cache files on disk
+     * Purges all cache files on disk across all 8 namespaces
      */
-    clear() {
+    clear(namespace = null) {
         let count = 0;
-        for (const dir of Object.values(this.namespaces)) {
+        const targetDirs = namespace && this.namespaces[namespace] 
+            ? [this.namespaces[namespace]] 
+            : Object.values(this.namespaces);
+
+        for (const dir of targetDirs) {
             if (!fs.existsSync(dir)) continue;
             try {
                 const files = fs.readdirSync(dir);
                 for (const file of files) {
-                    if (file.endsWith(".cache.json") || file.endsWith(".tmp")) {
+                    if (file.includes(".cache.json") || file.endsWith(".tmp")) {
                         try {
                             fs.unlinkSync(path.join(dir, file));
                             count++;
@@ -238,7 +319,7 @@ class Layer10_PersistentDiskCache {
                 try {
                     const files = fs.readdirSync(dir);
                     for (const file of files) {
-                        if (file.endsWith(".cache.json")) {
+                        if (file.includes(".cache.json")) {
                             const fullPath = path.join(dir, file);
                             try {
                                 const stat = fs.statSync(fullPath);
@@ -251,7 +332,7 @@ class Layer10_PersistentDiskCache {
             }
             totalFiles += nsFiles;
             totalBytes += nsBytes;
-            namespaceCounts[ns] = { files: nsFiles, bytes: nsBytes };
+            namespaceCounts[ns] = { files: nsFiles, bytes: nsBytes, formatted: this._formatBytes(nsBytes) };
         }
 
         return {
@@ -286,6 +367,7 @@ class Layer10_PersistentDiskCache {
             hitRatePercent: hitRatePct,
             writes: this.writes,
             deletes: this.deletes,
+            compressions: this.compressions,
             avgLookupTimeMs: avgLookupMs,
             diskBytes: diskUsage.totalBytes,
             diskFormatted: diskUsage.totalFormatted,

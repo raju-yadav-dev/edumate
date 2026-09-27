@@ -7,6 +7,10 @@ const documentRoutes = require("./documentRoutes");
 const adminRoutes = require("./adminRoutes");
 const crawlerRoutes = require("../crawler/routes/crawlerRoutes");
 const knowledgeRoutes = require("../knowledge/knowledgeRoutes");
+const cacheRoutes = require("./cacheRoutes");
+const securityRoutes = require("./securityRoutes");
+const developerRoutes = require("./developerRoutes");
+const agentRoutes = require("./agentRoutes");
 
 const router = express.Router();
 
@@ -17,6 +21,10 @@ router.use("/documents", documentRoutes);
 router.use("/admin", adminRoutes);
 router.use("/crawler", crawlerRoutes);
 router.use("/knowledge", knowledgeRoutes);
+router.use("/cache", cacheRoutes);
+router.use("/security", securityRoutes);
+router.use("/developer", developerRoutes);
+router.use("/agents", agentRoutes);
 
 const { getSystemHealth } = require("../controllers/systemController");
 
