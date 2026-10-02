@@ -201,6 +201,15 @@ const startServer = async () => {
                     console.error("⚠️ Failed running RAG Indexing startup check:", ragErr.message);
                 }
 
+                // Local Storage & file_explorer initialization for RAG
+                try {
+                    const localStorageManager = require("./storage/localStorageManager");
+                    const storageRoot = localStorageManager.ensureStorageRoot();
+                    console.log(`✓ Local Storage initialized (Root: ${storageRoot}, file_explorer ready).`);
+                } catch (storageErr) {
+                    console.error("⚠️ Failed to initialize local storage root:", storageErr.message);
+                }
+
                 // Parallel checks for other services
                 const [supabaseConnected, aiCheck, mapCheck] = await Promise.all([
                     // Supabase check

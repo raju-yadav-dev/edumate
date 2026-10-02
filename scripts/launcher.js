@@ -23,13 +23,40 @@ const http = require("http");
 const rootPath = path.resolve(__dirname, "..");
 const envPath = path.join(rootPath, ".env");
 
-if (fs.existsSync(envPath)) {
-    require("dotenv").config({ path: envPath });
+function loadEnvSafely(filePath) {
+    if (!fs.existsSync(filePath)) return;
+    try {
+        require("dotenv").config({ path: filePath });
+    } catch {
+        try {
+            const content = fs.readFileSync(filePath, "utf8");
+            for (const line of content.split("\n")) {
+                const trimmed = line.trim();
+                if (!trimmed || trimmed.startsWith("#")) continue;
+                const idx = trimmed.indexOf("=");
+                if (idx > 0) {
+                    const key = trimmed.substring(0, idx).trim();
+                    const val = trimmed.substring(idx + 1).trim().replace(/^["']|["']$/g, "");
+                    if (process.env[key] === undefined) {
+                        process.env[key] = val;
+                    }
+                }
+            }
+        } catch (_) {}
+    }
 }
+
+const { verifyNodeVersion, verifyDependencies } = require("./dependencyChecker");
+
+// Stage 0: Early verification of Node & dependencies
+verifyNodeVersion();
+verifyDependencies();
+
+// Load environment after dependencies verified
+loadEnvSafely(envPath);
 
 const logger = require("./logger");
 const { printBanner } = require("./banner");
-const { verifyNodeVersion, verifyDependencies } = require("./dependencyChecker");
 const { verifyEnvironment } = require("./verifyEnvironment");
 
 const runningProcesses = [];
@@ -72,13 +99,24 @@ async function startMasterLauncher() {
 
     // Step 1: Pre-flight checks
     console.log(logger.bold("📋 Step 1: Verifying Environment & System Dependencies..."));
-    verifyNodeVersion();
     verifyEnvironment();
-    verifyDependencies();
     console.log(logger.green("  ✓ System dependencies & environment validated.\n"));
 
     // Step 2: Service Orchestration Matrix
     console.log(logger.bold("🚀 Step 2: Initializing EduMate Microservices & AI Runtimes...\n"));
+
+    // Auto-launch Docker & Qdrant Vector Database
+    try {
+        const { startQdrantContainer } = require("./dockerManager");
+        const qdrantOk = await startQdrantContainer();
+        if (qdrantOk) {
+            formatStatus("Qdrant Vector Database", "ONLINE", 6333, "green");
+        } else {
+            formatStatus("Qdrant Vector Database", "ACTIVE", 6333, "yellow");
+        }
+    } catch (_) {
+        formatStatus("Qdrant Vector Database", "ACTIVE", 6333, "yellow");
+    }
 
     // A. Local LLM (llama.cpp)
     try {

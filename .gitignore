@@ -10,38 +10,66 @@ server/node_modules/
 # ===============================================
 .env
 .env.*
+!.env.example
 *.local
 client/.env
 client/.env.*
+!client/.env.example
 server/.env
 server/.env.*
+!server/.env.example
 
 # ===============================================
 # Build & Distribution Output
 # ===============================================
 dist/
 dist-ssr/
+dist-release/
 build/
 
 # ===============================================
-# Local LLM Models
+# AI Models & Weights
 # ===============================================
-backend/ai-models/
-server/ai-models/
+server/ai/ai-models/*
+backend/ai-models/*
+models/*
 llama.cpp/
-models/
 *.gguf
+*.bin
+*.onnx
+*.pt
+*.pth
 
 # ===============================================
-# Uploads / Generated Files
+# OCR / Tesseract Trained Data
 # ===============================================
-uploads/
-server/uploads/
+*.traineddata
 
 # ===============================================
-# Logs
+# Local Storage & Knowledge Documents
 # ===============================================
-logs/
+storage/*
+*.chunks.json
+
+# ===============================================
+# Uploads & Temporary Direct Files
+# ===============================================
+uploads/*
+server/uploads/*
+
+# ===============================================
+# Vector DB, Embeddings & Cache
+# ===============================================
+qdrant_storage/
+chroma/
+vector_cache/
+.smart_cache/
+.cache/
+
+# ===============================================
+# Logs & Debugging
+# ===============================================
+logs/*
 *.log
 npm-debug.log*
 yarn-debug.log*
@@ -69,48 +97,8 @@ git-large-files.txt
 Thumbs.db
 
 # ===============================================
-# Temporary / Agent Probe Files
+# Temporary / Scratch Files
 # ===============================================
+scratch/*
+*.tmp
 .codex_acl.probe.tmp
-
-# ===============================================
-# LocalHost File Storage & Chunks
-# ===============================================
-storage/
-storage/chunks/
-storage/.chunks/
-*.chunks.json
-
-
-# ===============================================
-# AI Models
-# ===============================================
-*.gguf
-server/ai/ai-models/
-backend/ai-models/
-
-# ===============================================
-# OCR / Tesseract Models
-# ===============================================
-*.traineddata
-
-# ===============================================
-# Local Storage & Uploaded Documents
-# ===============================================
-storage/
-server/uploads/
-uploads/
-
-# ===============================================
-# Qdrant / Vector DB / Cache
-# ===============================================
-qdrant_storage/
-chroma/
-vector_cache/
-
-# ===============================================
-# Logs
-# ===============================================
-*.log
-logs/
-# Large Files

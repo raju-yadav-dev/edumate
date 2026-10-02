@@ -73,7 +73,8 @@ const saveToLocalStorage = async (file, category) => {
         extension = ".png";
     }
     const uniqueName = `${Date.now()}-${crypto.randomUUID()}${extension}`;
-    const storagePath = `${category}/${uniqueName}`;
+    const baseDir = category ? `file_explorer/${category}` : "file_explorer";
+    const storagePath = `${baseDir}/${uniqueName}`;
 
     await localStorageManager.saveFile(storagePath, file.buffer);
 
@@ -116,10 +117,19 @@ const uploadDocument = async ({ file, body, user }) => {
     if (isImage) {
         extension = ".png";
     }
-    const uniqueName = `${Date.now()}-${crypto.randomUUID()}${extension}`;
-    const storagePath = `${category}/${uniqueName}`;
+    const targetFolder = body?.targetFolder || body?.folderPath || body?.folder;
+    let baseDir = "file_explorer";
+    if (targetFolder) {
+        baseDir = targetFolder.replace(/^[/\\]+/, "").replace(/\\/g, "/");
+        if (!baseDir.startsWith("file_explorer") && !baseDir.startsWith("storage/file_explorer")) {
+            baseDir = `file_explorer/${baseDir}`;
+        }
+    } else if (category) {
+        baseDir = `file_explorer/${category}`;
+    }
+    const storagePath = `${baseDir}/${uniqueName}`;
 
-    // Write file directly to edumate/storage/<category>/<uniqueName>
+    // Write file directly to edumate/storage/file_explorer/...
     await localStorageManager.saveFile(storagePath, file.buffer);
 
     const document = await Document.create({

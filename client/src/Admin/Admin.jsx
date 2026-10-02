@@ -61,6 +61,7 @@ import { formatBytes } from "./utils/formatBytes";
 import slugifyFolder from "./utils/slugify";
 
 const DEFAULT_FOLDERS = [
+    { label: "File Explorer", value: "file_explorer" },
     { label: "Crawled", value: "crawled" },
     { label: "Admissions", value: "admissions" },
     { label: "Academics", value: "academics" },
@@ -72,6 +73,12 @@ const DEFAULT_FOLDERS = [
     { label: "Transport", value: "transport" },
     { label: "Policies", value: "policies" },
     { label: "Notices", value: "notices" },
+    { label: "Brochures", value: "brochures" },
+    { label: "Building Floor Plans", value: "building_floor_plans" },
+    { label: "Diploma", value: "diploma" },
+    { label: "PG Documents", value: "pg_documents" },
+    { label: "UG Documents", value: "ug_documents" },
+    { label: "Course Eligibility", value: "course_eligibility" },
     { label: "Campus Navigation", value: "campus_navigation" },
     { label: "Building 1", value: "campus_navigation_building_1", parent: "campus_navigation" },
     { label: "Building 2", value: "campus_navigation_building_2", parent: "campus_navigation" },

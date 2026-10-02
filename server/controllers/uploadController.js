@@ -40,10 +40,15 @@ const uploadDocument = asyncHandler(async (req, res) => {
         }
 
         const uniqueName = `${Date.now()}-${crypto.randomUUID()}${extension}`;
-        const storagePath = `${category}/${uniqueName}`;
+        const targetFolder = req.body.folder || req.body.folderPath || (category ? `file_explorer/${category}` : "file_explorer");
+        const cleanBase = targetFolder.replace(/^[/\\]+/, "").replace(/\\/g, "/");
+        const baseDir = (!cleanBase.startsWith("file_explorer") && !cleanBase.startsWith("storage/file_explorer")) 
+            ? `file_explorer/${cleanBase}` 
+            : cleanBase;
+        const storagePath = `${baseDir}/${uniqueName}`;
 
         //------------------------------------------
-        // Save to Local Storage (edumate/storage/)
+        // Save to Local Storage (edumate/storage/file_explorer/...)
         //------------------------------------------
         await localStorageManager.saveFile(storagePath, file.buffer);
 

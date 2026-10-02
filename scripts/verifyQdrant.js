@@ -41,6 +41,12 @@ const verifyQdrant = async (maxAttempts = 10) => {
             if (err.stack) {
                 console.log(logger.yellow(`  Stack: ${err.stack.split("\n").slice(0, 3).join("\n")}`));
             }
+            if (attempts === 1) {
+                try {
+                    const { startQdrantContainer } = require("./dockerManager");
+                    await startQdrantContainer();
+                } catch (_) {}
+            }
             if (attempts < maxAttempts) {
                 await new Promise((resolve) => setTimeout(resolve, 2000));
             }

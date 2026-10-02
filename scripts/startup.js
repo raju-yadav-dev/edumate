@@ -19,12 +19,39 @@ const { spawn } = require("child_process");
 const rootPath = path.resolve(__dirname, "..");
 const envPath = path.join(rootPath, ".env");
 
-if (fs.existsSync(envPath)) {
-    require("dotenv").config({ path: envPath });
+function loadEnvSafely(filePath) {
+    if (!fs.existsSync(filePath)) return;
+    try {
+        require("dotenv").config({ path: filePath });
+    } catch {
+        try {
+            const content = fs.readFileSync(filePath, "utf8");
+            for (const line of content.split("\n")) {
+                const trimmed = line.trim();
+                if (!trimmed || trimmed.startsWith("#")) continue;
+                const idx = trimmed.indexOf("=");
+                if (idx > 0) {
+                    const key = trimmed.substring(0, idx).trim();
+                    const val = trimmed.substring(idx + 1).trim().replace(/^["']|["']$/g, "");
+                    if (process.env[key] === undefined) {
+                        process.env[key] = val;
+                    }
+                }
+            }
+        } catch (_) {}
+    }
 }
 
-const logger = require("./logger");
 const { verifyNodeVersion, verifyDependencies } = require("./dependencyChecker");
+
+// Stage 0: Early dependency & Node verification
+verifyNodeVersion();
+verifyDependencies();
+
+// Load environment after dependencies are verified
+loadEnvSafely(envPath);
+
+const logger = require("./logger");
 const { verifyEnvironment } = require("./verifyEnvironment");
 const { printBanner, printControlCenter } = require("./banner");
 
@@ -52,13 +79,11 @@ const startDev = async () => {
     console.log(logger.cyan("🚀 Initializing EduMate AI Platform Development Ecosystem...\n"));
 
     // Stage 1: Pre-flight Verification
-    verifyNodeVersion();
     const envOk = verifyEnvironment();
     if (!envOk) {
         logger.error("❌ Startup blocked: Environment variables are not configured correctly.");
         process.exit(1);
     }
-    verifyDependencies();
 
     // Stage 2: Storage Root Verification
     let localStorageManager;
@@ -67,7 +92,7 @@ const startDev = async () => {
         localStorageManager.ensureStorageRoot();
     } catch (_) {}
 
-    // Stage 3: Probe Infrastructure Services
+    // Stage 3: Probe Infrastructure Services & Auto-boot Qdrant / Docker
     let isMongoConnected = true;
     try {
         const { verifyMongo } = require("./verifyMongo");
@@ -76,10 +101,18 @@ const startDev = async () => {
         isMongoConnected = false;
     }
 
+    // Auto-launch Docker Desktop & Qdrant Container if needed
+    try {
+        const { startQdrantContainer } = require("./dockerManager");
+        await startQdrantContainer();
+    } catch (dockerErr) {
+        console.log(logger.yellow(`  [Docker Auto-boot Notice] ${dockerErr.message}`));
+    }
+
     let isQdrantConnected = true;
     try {
         const { verifyQdrant } = require("./verifyQdrant");
-        isQdrantConnected = await verifyQdrant(1);
+        isQdrantConnected = await verifyQdrant(3);
     } catch {
         isQdrantConnected = false;
     }

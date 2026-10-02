@@ -31,13 +31,7 @@ console.log(`  ✓ Node.js v${nodeVersion} detected (Supported).\n`);
 console.log("📁 2. Initializing Local Storage & Cache Directories...");
 const requiredDirs = [
     "storage",
-    "storage/documents",
-    "storage/chunks",
-    "storage/embeddings",
-    "storage/backups",
-    "storage/cache",
-    "storage/temp",
-    "storage/demo",
+    "storage/file_explorer",
     "logs",
     "llama.cpp",
     "models"

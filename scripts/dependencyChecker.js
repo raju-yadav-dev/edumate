@@ -1,4 +1,5 @@
 const { execSync } = require("child_process");
+const fs = require("fs");
 const path = require("path");
 const logger = require("./logger");
 
@@ -25,19 +26,57 @@ const verifyNpmVersion = () => {
         const npmVersion = execSync("npm --version", { shell: true }).toString().trim();
         console.log(logger.green(`✓ npm version validated: v${npmVersion}`));
         return true;
-    } catch (e) {
+    } catch {
         console.error(logger.red(`❌ Error: npm is not installed or not in system PATH.`));
         process.exit(1);
     }
 };
 
 /**
- * Checks and installs missing npm dependencies defined in root and workspace package.json files
+ * Checks and auto-installs missing npm dependencies defined in root and workspace package.json files
  */
 const verifyDependencies = () => {
     console.log(logger.cyan("Checking workspace dependencies..."));
     
     const rootPath = path.resolve(__dirname, "..");
+    const rootNodeModules = path.join(rootPath, "node_modules");
+    const clientNodeModules = path.join(rootPath, "client", "node_modules");
+    const serverNodeModules = path.join(rootPath, "server", "node_modules");
+
+    // 1. If root node_modules is missing completely, run full npm install
+    if (!fs.existsSync(rootNodeModules)) {
+        console.log(logger.yellow("⚠️ Root node_modules not found. Auto-installing dependencies..."));
+        try {
+            execSync("npm install", { stdio: "inherit", cwd: rootPath, shell: true });
+            console.log(logger.green("✓ Root dependencies installed successfully."));
+        } catch (err) {
+            console.error(logger.red(`❌ Failed to run npm install: ${err.message}`));
+        }
+    }
+
+    // 2. If client node_modules is missing completely
+    if (!fs.existsSync(clientNodeModules) && fs.existsSync(path.join(rootPath, "client", "package.json"))) {
+        console.log(logger.yellow("⚠️ Client dependencies not found. Auto-installing client..."));
+        try {
+            execSync("npm install", { stdio: "inherit", cwd: path.join(rootPath, "client"), shell: true });
+            console.log(logger.green("✓ Client dependencies installed successfully."));
+        } catch (err) {
+            console.error(logger.red(`❌ Failed to install client dependencies: ${err.message}`));
+        }
+    }
+
+    // 3. If server node_modules is missing completely
+    if (!fs.existsSync(serverNodeModules) && fs.existsSync(path.join(rootPath, "server", "package.json"))) {
+        console.log(logger.yellow("⚠️ Server dependencies not found. Auto-installing server..."));
+        try {
+            execSync("npm install", { stdio: "inherit", cwd: path.join(rootPath, "server"), shell: true });
+            console.log(logger.green("✓ Server dependencies installed successfully."));
+        } catch (err) {
+            console.error(logger.red(`❌ Failed to install server dependencies: ${err.message}`));
+        }
+    }
+
+    // 4. Verify individual packages across manifests
     const paths = [
         path.join(rootPath, "package.json"),
         path.join(rootPath, "server", "package.json"),
@@ -47,43 +86,37 @@ const verifyDependencies = () => {
     const missing = [];
 
     for (const pkgPath of paths) {
+        if (!fs.existsSync(pkgPath)) continue;
         try {
             const pkg = require(pkgPath);
             const pkgDir = path.dirname(pkgPath);
             const deps = { ...pkg.dependencies, ...pkg.devDependencies };
             for (const dep of Object.keys(deps)) {
-                // Ignore self-references or workspaces
                 if (dep === "client" || dep === "server") continue;
                 
                 try {
-                    // Try to resolve package.json first to handle ES modules
-                    require.resolve(`${dep}/package.json`, { paths: [pkgDir] });
-                } catch (e) {
+                    require.resolve(`${dep}/package.json`, { paths: [pkgDir, rootPath] });
+                } catch {
                     try {
-                        require.resolve(dep, { paths: [pkgDir] });
-                    } catch (err) {
+                        require.resolve(dep, { paths: [pkgDir, rootPath] });
+                    } catch {
                         if (!missing.includes(dep)) {
                             missing.push(dep);
                         }
                     }
                 }
             }
-        } catch (e) {
-            console.log(logger.yellow(`⚠️ Warning: Could not read package file at ${pkgPath}`));
-        }
+        } catch (_) {}
     }
 
     if (missing.length > 0) {
-        console.log(logger.yellow(`⚠️ Warning: Missing required dependencies: ${missing.join(", ")}`));
-        console.log(logger.cyan("Executing 'npm install' to recover dependencies automatically..."));
-        
+        console.log(logger.yellow(`⚠️ Missing required packages: ${missing.join(", ")}`));
+        console.log(logger.cyan("Auto-installing missing npm packages..."));
         try {
             execSync("npm install", { stdio: "inherit", cwd: rootPath, shell: true });
-            console.log(logger.green("✓ Dependencies successfully installed."));
+            console.log(logger.green("✓ Missing packages successfully installed."));
         } catch (err) {
-            console.error(logger.red(`❌ Recovery failed: Failed to install missing packages: ${err.message}`));
-            console.error(logger.red("Please execute 'npm install' manually at the root directory."));
-            process.exit(1);
+            console.error(logger.red(`❌ Failed to auto-install missing packages: ${err.message}`));
         }
     } else {
         console.log(logger.green("✓ All required npm dependencies verified."));
