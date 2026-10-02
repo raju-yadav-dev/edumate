@@ -90,30 +90,72 @@ function isSupportedDocument(fileName) {
 /**
  * Resolves a safe absolute path inside STORAGE_ROOT or file_explorer, preventing path traversal.
  */
-function resolveSafePath(relativePath = "") {
+function resolveSafePath(relativePath = "", fallbackName = "") {
     const cleanRelative = String(relativePath || "")
         .replace(/^[/\\]+/, "")
         .replace(/\.\./g, "");
 
-    // 1. Direct path inside STORAGE_ROOT
-    const directPath = path.join(STORAGE_ROOT, cleanRelative);
-    if (fs.existsSync(directPath)) {
-        return directPath;
-    }
-
-    // 2. Path inside file_explorer
+    // 1. Direct path inside file_explorer
     const fePath = path.join(FILE_EXPLORER_DIR, cleanRelative);
     if (fs.existsSync(fePath)) {
         return fePath;
     }
 
-    // 3. If relative path specifies file_explorer or internal storage
-    if (cleanRelative.startsWith("file_explorer") || cleanRelative.startsWith("cache") || cleanRelative.startsWith("chunks")) {
+    // 2. Direct path inside STORAGE_ROOT
+    const directPath = path.join(STORAGE_ROOT, cleanRelative);
+    if (fs.existsSync(directPath)) {
         return directPath;
     }
 
-    // 4. Default to direct path in storage root
-    return directPath;
+    // 3. Path without 'file_explorer/' prefix if present
+    const strippedFe = cleanRelative.replace(/^file_explorer[/\\]/i, "");
+    const strippedFePath = path.join(FILE_EXPLORER_DIR, strippedFe);
+    if (fs.existsSync(strippedFePath)) {
+        return strippedFePath;
+    }
+
+    // 4. Try suffix segments (e.g. 'Admissions/course_eligibility/file.pdf' -> 'course_eligibility/file.pdf')
+    const segments = cleanRelative.split(/[/\\]/);
+    for (let i = 1; i < segments.length; i++) {
+        const subRelative = segments.slice(i).join("/");
+        const subFePath = path.join(FILE_EXPLORER_DIR, subRelative);
+        if (fs.existsSync(subFePath)) {
+            return subFePath;
+        }
+        const subStoragePath = path.join(STORAGE_ROOT, subRelative);
+        if (fs.existsSync(subStoragePath)) {
+            return subStoragePath;
+        }
+    }
+
+    // 5. Basename lookup anywhere inside FILE_EXPLORER_DIR or STORAGE_ROOT
+    const targetName = fallbackName || path.basename(cleanRelative);
+    if (targetName && targetName !== "." && targetName !== "") {
+        const findByBasename = (dir) => {
+            try {
+                const entries = fs.readdirSync(dir, { withFileTypes: true });
+                for (const entry of entries) {
+                    const full = path.join(dir, entry.name);
+                    if (entry.isFile() && entry.name.toLowerCase() === targetName.toLowerCase()) {
+                        return full;
+                    }
+                    if (entry.isDirectory() && !isIgnoredDirectory(entry.name)) {
+                        const found = findByBasename(full);
+                        if (found) return found;
+                    }
+                }
+            } catch (_) {}
+            return null;
+        };
+
+        const foundInFe = findByBasename(FILE_EXPLORER_DIR);
+        if (foundInFe) return foundInFe;
+        const foundInStorage = findByBasename(STORAGE_ROOT);
+        if (foundInStorage) return foundInStorage;
+    }
+
+    // Default fallback
+    return fs.existsSync(FILE_EXPLORER_DIR) ? fePath : directPath;
 }
 
 /**
@@ -136,12 +178,14 @@ function ensureStorageRoot() {
  * Strict Recursive Storage Scanner (Mission 15.1)
  * Scans only supported document types and skips all cache/generated artifacts.
  */
-function scanKnowledgeDocuments(dir = STORAGE_ROOT, rootDir = dir) {
+function scanKnowledgeDocuments(dir = FILE_EXPLORER_DIR, rootDir = dir) {
     ensureStorageRoot();
+    const effectiveDir = (dir === STORAGE_ROOT && fs.existsSync(FILE_EXPLORER_DIR)) ? FILE_EXPLORER_DIR : dir;
+    const effectiveRootDir = (rootDir === STORAGE_ROOT && fs.existsSync(FILE_EXPLORER_DIR)) ? FILE_EXPLORER_DIR : rootDir;
     const supportedFiles = [];
     const ignoredFiles = [];
 
-    if (!fs.existsSync(dir)) {
+    if (!fs.existsSync(effectiveDir)) {
         return { supportedFiles, ignoredFiles };
     }
 
@@ -155,7 +199,7 @@ function scanKnowledgeDocuments(dir = STORAGE_ROOT, rootDir = dir) {
 
         for (const entry of entries) {
             const fullPath = path.join(currentDir, entry.name);
-            const relPath = path.relative(rootDir, fullPath).replace(/\\/g, "/");
+            const relPath = path.relative(effectiveRootDir, fullPath).replace(/\\/g, "/");
 
             if (entry.isDirectory()) {
                 if (isIgnoredDirectory(entry.name)) {
@@ -190,12 +234,12 @@ function scanKnowledgeDocuments(dir = STORAGE_ROOT, rootDir = dir) {
         }
     };
 
-    walk(dir);
+    walk(effectiveDir);
     return { supportedFiles, ignoredFiles };
 }
 
 /**
- * Recursively computes storage metrics for edumate/storage/.
+ * Recursively computes storage metrics for edumate/storage/file_explorer/.
  */
 function getLocalStorageStats(force = false) {
     ensureStorageRoot();
@@ -206,6 +250,8 @@ function getLocalStorageStats(force = false) {
     let supportedCount = 0;
     let ignoredCount = 0;
     let largestFile = null;
+
+    const statsRoot = fs.existsSync(FILE_EXPLORER_DIR) ? FILE_EXPLORER_DIR : STORAGE_ROOT;
 
     function walkDir(currentDir, relativePrefix = "") {
         let entries = [];
@@ -257,7 +303,7 @@ function getLocalStorageStats(force = false) {
         }
     }
 
-    walkDir(STORAGE_ROOT);
+    walkDir(statsRoot);
 
     // Get real filesystem disk capacity and free space
     let diskTotal = 50 * 1024 * 1024 * 1024; // 50 GB default fallback

@@ -28,7 +28,6 @@ document.addEventListener('DOMContentLoaded', () => {
     initUploadZone();
     initSSEStreams();
     fetchInitialData();
-    setInterval(fetchHealth, 8000);
 });
 
 function initNavigation() {
@@ -68,9 +67,13 @@ async function fetchInitialData() {
     ]);
 }
 
-async function fetchHealth() {
+async function fetchHealth(force = false) {
+    const probeBtn = document.querySelector('button[onclick*="fetchHealth"]');
+    if (probeBtn && force) probeBtn.innerText = '⏳ Probing...';
+
     try {
-        const res = await fetch('/health');
+        const url = force ? '/health?force=true' : '/health';
+        const res = await fetch(url);
         const json = await res.json();
         if (json.success) {
             state.health = json.data;
@@ -78,6 +81,8 @@ async function fetchHealth() {
         }
     } catch (err) {
         console.error('Health fetch error:', err);
+    } finally {
+        if (probeBtn && force) probeBtn.innerText = '🔄 Probe';
     }
 }
 
@@ -176,7 +181,10 @@ function updateHealthUI() {
     };
     setLatency('latMongo', h.services?.mongodb?.latencyMs, h.services?.mongodb?.status);
     setLatency('latQdrant', h.services?.qdrant?.latencyMs, h.services?.qdrant?.status);
-    setLatency('latLlama', h.services?.llamaCpp?.latencyMs, h.services?.llamaCpp?.status);
+    const aiService = (h.services?.embedding?.status === 'connected')
+        ? h.services.embedding
+        : (h.services?.llamaCpp?.status === 'connected' ? h.services.llamaCpp : (h.services?.embedding || h.services?.llamaCpp));
+    setLatency('latLlama', aiService?.latencyMs, aiService?.status);
     setLatency('latStorage', h.services?.localStorage?.latencyMs, h.services?.localStorage?.status);
 }
 
@@ -211,10 +219,16 @@ function initSSEStreams() {
         });
         queueSource.addEventListener('queue_update', () => {
             fetchQueue();
-            fetchHealth();
+            fetchAnalytics();
         });
-        queueSource.addEventListener('worker_status', () => {
-            fetchHealth();
+        queueSource.addEventListener('worker_status', (e) => {
+            if (e.data) {
+                try {
+                    const data = JSON.parse(e.data);
+                    const dashWorker = document.getElementById('dashWorkerStatus');
+                    if (dashWorker && data.status) dashWorker.innerText = String(data.status).toUpperCase();
+                } catch (_) {}
+            }
         });
         queueSource.addEventListener('storage_updated', () => {
             fetchStorageTree();
@@ -268,7 +282,7 @@ function renderStorageTree() {
     if (!state.storageTree || state.storageTree.length === 0) {
         container.innerHTML = `
             <div style="padding: 30px; text-align: center; color: var(--text-muted);">
-                <p>📂 No documents discovered in <code>edumate/storage/</code>.</p>
+                <p>📂 No documents discovered in <code>edumate/storage/file_explorer/</code>.</p>
                 <button onclick="triggerStorageSync()" class="btn btn-primary" style="margin-top: 14px;">🔄 Sync Storage Now</button>
             </div>`;
         return;
@@ -654,43 +668,74 @@ function updateAnalyticsUI() {
 // REST Operations & Global Actions
 // ==========================================
 async function startWorker() {
-    await fetch('/worker/start', { method: 'POST' });
-    fetchHealth();
+    try {
+        const res = await fetch('/worker/start', { method: 'POST' });
+        const json = await res.json();
+        console.log('[WorkerPool] Started:', json);
+    } catch (err) {
+        console.error('[WorkerPool] Start error:', err);
+    } finally {
+        fetchQueue();
+        fetchAnalytics();
+        fetchStorageTree();
+    }
 }
 
 async function pauseWorker() {
-    await fetch('/queue/pause', { method: 'POST' });
-    fetchHealth();
+    try {
+        await fetch('/queue/pause', { method: 'POST' });
+    } finally {
+        fetchQueue();
+    }
 }
 
 async function resumeWorker() {
-    await fetch('/queue/resume', { method: 'POST' });
-    fetchHealth();
+    try {
+        await fetch('/queue/resume', { method: 'POST' });
+    } finally {
+        fetchQueue();
+    }
 }
 
 async function restartWorker() {
-    await fetch('/worker/restart', { method: 'POST' });
-    fetchHealth();
-    fetchQueue();
+    try {
+        await fetch('/worker/restart', { method: 'POST' });
+    } finally {
+        fetchQueue();
+        fetchAnalytics();
+        fetchStorageTree();
+    }
 }
 
 async function retryFailedJobs() {
-    await fetch('/queue/retry-all', { method: 'POST' });
-    fetchQueue();
-    fetchHealth();
+    try {
+        await fetch('/queue/retry-all', { method: 'POST' });
+    } finally {
+        fetchQueue();
+        fetchAnalytics();
+    }
 }
 
 async function reindexAll() {
     if (confirm('Re-index and chunk all pending/active documents?')) {
-        await fetch('/qdrant/reindex', { method: 'POST' });
-        fetchQueue();
+        try {
+            await fetch('/qdrant/reindex', { method: 'POST' });
+        } finally {
+            fetchQueue();
+            fetchAnalytics();
+            fetchStorageTree();
+        }
     }
 }
 
 async function clearQueue() {
     if (confirm('Clear all waiting documents from the processing queue?')) {
-        await fetch('/queue/clear', { method: 'POST' });
-        fetchQueue();
+        try {
+            await fetch('/queue/clear', { method: 'POST' });
+        } finally {
+            fetchQueue();
+            fetchAnalytics();
+        }
     }
 }
 

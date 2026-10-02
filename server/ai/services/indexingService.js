@@ -478,7 +478,13 @@ const runIndexingPipeline = async (documentId, initialBuffer = null, options = {
 
         if (!buffer) {
             try {
-                buffer = await loadFromLocalStorage(document.storagePath);
+                const targetPath = localStorageManager.resolveSafePath(document.storagePath || document.metadata?.localRelativePath, document.originalName);
+                const fs = require("fs");
+                if (fs.existsSync(targetPath)) {
+                    buffer = fs.readFileSync(targetPath);
+                } else {
+                    buffer = await loadFromLocalStorage(document.storagePath || document.originalName, document.originalName);
+                }
             } catch (storageErr) {
                 const fs = require("fs");
                 const localPath = path.join(__dirname, "../../uploads/documents", document.storedName || "");
@@ -486,7 +492,7 @@ const runIndexingPipeline = async (documentId, initialBuffer = null, options = {
                     console.log(`[INDEX] Loading document from fallback local path: ${localPath}`);
                     buffer = fs.readFileSync(localPath);
                 } else {
-                    throw new Error(`Failed to load document from storage path '${document.storagePath}': ${storageErr.message}`);
+                    throw new Error(`Failed to load document from storage path '${document.storagePath || document.originalName}': ${storageErr.message}`);
                 }
             }
         }

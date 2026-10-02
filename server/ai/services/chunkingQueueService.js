@@ -161,7 +161,7 @@ const runWorker = async (workerNumber) => {
             },
             {
                 sort: { queuePosition: 1, createdAt: 1 },
-                new: true
+                returnDocument: "after"
             }
         );
 
@@ -339,19 +339,38 @@ const resumeQueue = () => {
     emitLog("SUCCESS", "Chunking queue resumed. Worker pool active.");
     triggerWorkerPool();
     queueEvents.emit("worker_status", { status: "running", isPaused: false });
+    queueEvents.emit("queue_update", {});
     return { isPaused: false, activeWorkersCount: activeWorkers.size };
 };
 
-const startWorkerPool = () => {
+const startWorkerPool = async () => {
     isQueuePaused = false;
     emitLog("SUCCESS", "Chunking worker pool started.");
+
+    // Check if there are queued documents
+    const queuedCount = await Document.countDocuments({ status: "active", embeddingStatus: "queued" });
+    if (queuedCount === 0) {
+        // Automatically enqueue any pending, unindexed, failed, or discovered documents
+        const pendingCount = await Document.countDocuments({
+            status: "active",
+            embeddingStatus: { $in: ["pending", "unindexed", "unregistered", "failed", "cancelled", "paused"] }
+        });
+        if (pendingCount > 0) {
+            emitLog("INFO", `Auto-enqueuing ${pendingCount} pending/unindexed document(s) for worker processing...`);
+            await enqueueDocuments({ allPending: true });
+        }
+    }
+
     triggerWorkerPool();
+    queueEvents.emit("worker_status", { status: getWorkerStatus(), isPaused: false });
+    queueEvents.emit("queue_update", {});
     return { success: true, status: getWorkerStatus() };
 };
 
 const stopWorkerPool = () => {
     isQueuePaused = true;
     emitLog("WARNING", "Chunking worker pool stopped.");
+    queueEvents.emit("worker_status", { status: "offline", isPaused: true });
     return { success: true, status: "offline" };
 };
 
@@ -371,10 +390,29 @@ const restartWorkerPool = async () => {
         }
     );
 
+    // If queue is empty, auto-enqueue pending documents
+    const queuedCount = await Document.countDocuments({ status: "active", embeddingStatus: "queued" });
+    if (queuedCount === 0) {
+        await enqueueDocuments({ allPending: true });
+    }
+
     activeWorkers.clear();
     triggerWorkerPool();
     emitLog("SUCCESS", "Worker pool restarted successfully.");
+    queueEvents.emit("worker_status", { status: getWorkerStatus(), isPaused: false });
+    queueEvents.emit("queue_update", {});
     return { success: true, status: getWorkerStatus() };
+};
+
+const reindexAll = async () => {
+    emitLog("WARNING", "Re-indexing all active documents requested by administrator...");
+    isQueuePaused = false;
+    const docs = await Document.find({ status: "active" }).select("_id");
+    const ids = docs.map((d) => d._id);
+    const result = await enqueueDocuments({ ids, forceRechunk: true });
+    queueEvents.emit("worker_status", { status: getWorkerStatus(), isPaused: false });
+    queueEvents.emit("queue_update", {});
+    return result;
 };
 
 const clearQueue = async () => {
@@ -580,6 +618,8 @@ module.exports = {
     retryDocument: retryJob,
     retryAllFailed,
     retryFailed: retryAllFailed,
+    reindexAll,
+    reindexAllDocuments: reindexAll,
     getQueueStatus,
     recoverQueueOnStartup,
     getLogs,

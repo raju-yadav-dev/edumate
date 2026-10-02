@@ -140,7 +140,33 @@ async function cleanupCorruptedDocuments() {
 // ==========================================
 // 1. Health API (Mission 15.1 & 15.2)
 // ==========================================
+let cachedHealthSnapshot = null;
+let lastHealthCheckTime = 0;
+const HEALTH_CACHE_TTL_MS = 60000; // 60s cache
+
 const handleHealthCheck = async (req, res) => {
+    const isForce = req.query.force === "true";
+    const now = Date.now();
+
+    if (!isForce && cachedHealthSnapshot && (now - lastHealthCheckTime < HEALTH_CACHE_TTL_MS)) {
+        // Quick update dynamic properties without network probing
+        const queueStats = await chunkingQueueService.getQueueStatus();
+        return sendJson(res, 200, "Chunking server runtime health (cached).", {
+            ...cachedHealthSnapshot,
+            uptimeSeconds: Math.floor((now - startTime) / 1000),
+            workerStatus: chunkingQueueService.getWorkerStatus(),
+            activeConnections: activeSseConnections.size,
+            queueSummary: {
+                concurrency: queueStats.concurrency,
+                activeJobs: queueStats.activeJobs.length,
+                waitingJobs: queueStats.totalQueued,
+                completedJobs: queueStats.completedCount,
+                failedJobs: queueStats.failedCount,
+                totalDocuments: queueStats.totalCount
+            }
+        });
+    }
+
     // 1. Probe MongoDB Latency
     let mongoLatency = -1;
     let mongoStatus = "offline";
@@ -167,18 +193,40 @@ const handleHealthCheck = async (req, res) => {
         qdrantStatus = "error";
     }
 
-    // 3. Probe llama.cpp Latency
-    let llamaLatency = -1;
-    let llamaStatus = "offline";
+    // 3. Probe Embedding / LLM API Latency
+    let aiLatency = -1;
+    let aiStatus = "offline";
+    let embeddingHealth = { status: "offline", latencyMs: -1 };
+    let llamaHealth = { status: "offline", latencyMs: -1 };
+
     try {
-        const lStart = Date.now();
-        const llamaBaseUrl = process.env.LLAMA_BASE_URL || process.env.LLM_BASE_URL || "http://127.0.0.1:8080";
-        const axios = require("axios");
-        await axios.get(`${llamaBaseUrl}/health`, { timeout: 1500 });
-        llamaLatency = Date.now() - lStart;
-        llamaStatus = "connected";
+        const { checkEmbeddingHealth, checkLlamaCppHealth } = require("./services/healthService");
+        const [embRes, llmRes] = await Promise.allSettled([
+            checkEmbeddingHealth(3000),
+            checkLlamaCppHealth(1500)
+        ]);
+
+        if (embRes.status === "fulfilled" && embRes.value) {
+            embeddingHealth = embRes.value;
+        }
+        if (llmRes.status === "fulfilled" && llmRes.value) {
+            llamaHealth = llmRes.value;
+        }
+
+        if (embeddingHealth.status === "connected") {
+            aiStatus = "connected";
+            aiLatency = embeddingHealth.latencyMs || embeddingHealth.latency || 0;
+        } else if (llamaHealth.status === "connected") {
+            aiStatus = "connected";
+            aiLatency = llamaHealth.latencyMs || llamaHealth.latency || 0;
+        } else if (embeddingHealth.status === "degraded" || llamaHealth.status === "degraded") {
+            aiStatus = "degraded";
+            aiLatency = embeddingHealth.latencyMs > 0 ? embeddingHealth.latencyMs : llamaHealth.latencyMs;
+        } else {
+            aiStatus = "offline (optional fallback active)";
+        }
     } catch (_) {
-        llamaStatus = "offline (optional fallback active)";
+        aiStatus = "offline (optional fallback active)";
     }
 
     // 4. Probe Local Storage Latency
@@ -196,7 +244,7 @@ const handleHealthCheck = async (req, res) => {
 
     const queueStats = await chunkingQueueService.getQueueStatus();
 
-    return sendJson(res, 200, "Chunking server runtime health.", {
+    const report = {
         service: "edumate-chunking-server",
         status: "online",
         port: CHUNKING_PORT,
@@ -206,7 +254,14 @@ const handleHealthCheck = async (req, res) => {
         services: {
             mongodb: { status: mongoStatus, latencyMs: mongoLatency },
             qdrant: { status: qdrantStatus, latencyMs: qdrantLatency, collection: qdrantCollection },
-            llamaCpp: { status: llamaStatus, latencyMs: llamaLatency },
+            llamaCpp: { 
+                status: aiStatus, 
+                latencyMs: aiLatency,
+                provider: embeddingHealth.provider || llamaHealth.provider || "jina",
+                embedding: embeddingHealth,
+                llm: llamaHealth
+            },
+            embedding: embeddingHealth,
             localStorage: { status: storageStatus, latencyMs: storageLatency, root: localStorageManager.STORAGE_ROOT }
         },
         queueSummary: {
@@ -217,7 +272,12 @@ const handleHealthCheck = async (req, res) => {
             failedJobs: queueStats.failedCount,
             totalDocuments: queueStats.totalCount
         }
-    });
+    };
+
+    cachedHealthSnapshot = report;
+    lastHealthCheckTime = now;
+
+    return sendJson(res, 200, "Chunking server runtime health.", report);
 };
 
 app.get("/health", handleHealthCheck);
@@ -298,7 +358,7 @@ app.post(["/queue/retry/:documentId", "/api/documents/queue/retry/:documentId", 
 
 // Worker Pool Controls
 app.post(["/worker/start", "/api/documents/worker/start", "/api/v1/documents/worker/start"], async (req, res) => {
-    const result = chunkingQueueService.startWorkerPool();
+    const result = await chunkingQueueService.startWorkerPool();
     return sendJson(res, 200, "Worker pool started.", result);
 });
 
@@ -310,6 +370,18 @@ app.post(["/worker/stop", "/api/documents/worker/stop", "/api/v1/documents/worke
 app.post(["/worker/restart", "/api/documents/worker/restart", "/api/v1/documents/worker/restart"], async (req, res) => {
     const result = await chunkingQueueService.restartWorkerPool();
     return sendJson(res, 200, "Worker pool restarted.", result);
+});
+
+// Re-Index All
+app.post(["/qdrant/reindex", "/queue/reindex", "/queue/reindex-all", "/api/documents/queue/reindex", "/api/v1/documents/queue/reindex"], async (req, res) => {
+    const result = await chunkingQueueService.reindexAll();
+    return sendJson(res, 200, "Re-indexing initiated for all active documents.", result);
+});
+
+// Logs Clear
+app.post(["/queue/logs/clear", "/logs/clear", "/api/documents/logs/clear"], async (req, res) => {
+    const result = chunkingQueueService.clearLogs();
+    return sendJson(res, 200, "Runtime logs cleared.", result);
 });
 
 // ==========================================
@@ -422,13 +494,26 @@ app.post(["/queue/logs/clear", "/logs/clear", "/api/documents/queue/logs/clear",
 // ==========================================
 const handleStorageTree = async (req, res) => {
     const storageRoot = localStorageManager.ensureStorageRoot();
+    const exploreRoot = fs.existsSync(localStorageManager.FILE_EXPLORER_DIR)
+        ? localStorageManager.FILE_EXPLORER_DIR
+        : storageRoot;
     const stats = localStorageManager.getLocalStorageStats(true);
 
     const docMap = new Map();
     const allDocs = await Document.find({ status: { $ne: "deleted" } }).lean();
     for (const d of allDocs) {
-        if (d.storagePath) docMap.set(d.storagePath.toLowerCase().replace(/\\/g, "/"), d);
+        if (d.storagePath) {
+            const sp = d.storagePath.toLowerCase().replace(/\\/g, "/");
+            docMap.set(sp, d);
+            docMap.set(sp.replace(/^file_explorer\//, ""), d);
+        }
+        if (d.metadata?.localRelativePath) {
+            const lp = d.metadata.localRelativePath.toLowerCase().replace(/\\/g, "/");
+            docMap.set(lp, d);
+            docMap.set(lp.replace(/^file_explorer\//, ""), d);
+        }
         if (d.storedName) docMap.set(d.storedName.toLowerCase(), d);
+        if (d.originalName) docMap.set(d.originalName.toLowerCase(), d);
     }
 
     const buildTree = (dir, relPrefix = "") => {
@@ -485,7 +570,9 @@ const handleStorageTree = async (req, res) => {
                     stat = fs.statSync(fullPath);
                 } catch (_) {}
 
-                const docRecord = docMap.get(relPath.toLowerCase()) || docMap.get(entry.name.toLowerCase());
+                const docRecord = docMap.get(relPath.toLowerCase()) 
+                    || docMap.get(`file_explorer/${relPath.toLowerCase()}`) 
+                    || docMap.get(entry.name.toLowerCase());
 
                 items.push({
                     name: entry.name,
@@ -510,9 +597,10 @@ const handleStorageTree = async (req, res) => {
         });
     };
 
-    const tree = buildTree(storageRoot);
+    const tree = buildTree(exploreRoot);
     return sendJson(res, 200, "Storage tree retrieved.", {
-        root: storageRoot,
+        root: exploreRoot,
+        displayRoot: "edumate/storage/file_explorer/",
         stats,
         tree
     });
@@ -526,14 +614,17 @@ app.get("/api/v1/documents/storage/tree", handleStorageTree);
 const handleScanSync = async (req, res) => {
     const crypto = require("crypto");
     const storageRoot = localStorageManager.ensureStorageRoot();
+    const scanDir = fs.existsSync(localStorageManager.FILE_EXPLORER_DIR)
+        ? localStorageManager.FILE_EXPLORER_DIR
+        : storageRoot;
     const adminUser = await User.findOne({ role: { $in: ["admin", "super_admin"] } });
     const systemAdminId = adminUser?._id || new mongoose.Types.ObjectId("64a7c8e9f1a2b3c4d5e6f7a8");
 
     // Purge corrupted legacy records
     await cleanupCorruptedDocuments();
 
-    // Scan
-    const { supportedFiles, ignoredFiles } = localStorageManager.scanKnowledgeDocuments(storageRoot);
+    // Scan inside file_explorer directly
+    const { supportedFiles, ignoredFiles } = localStorageManager.scanKnowledgeDocuments(scanDir, scanDir);
 
     const MIME_MAP = {
         ".pdf": "application/pdf",
@@ -551,7 +642,10 @@ const handleScanSync = async (req, res) => {
         let doc = await Document.findOne({
             $or: [
                 { storagePath: file.relPath },
-                { "metadata.localRelativePath": file.relPath }
+                { storagePath: `file_explorer/${file.relPath}` },
+                { "metadata.localRelativePath": file.relPath },
+                { "metadata.localRelativePath": `file_explorer/${file.relPath}` },
+                { originalName: file.fileName }
             ],
             status: { $ne: "deleted" }
         });

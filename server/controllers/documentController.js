@@ -525,11 +525,24 @@ const getLocalStorageTree = asyncHandler(async (req, res) => {
     const Document = require("../models/Document");
 
     const storageRoot = localStorageManager.ensureStorageRoot();
+    const exploreRoot = fs.existsSync(localStorageManager.FILE_EXPLORER_DIR)
+        ? localStorageManager.FILE_EXPLORER_DIR
+        : storageRoot;
     const docMap = new Map();
     const allDocs = await Document.find({ status: { $ne: "deleted" } }).lean();
     for (const d of allDocs) {
-        if (d.storagePath) docMap.set(d.storagePath.toLowerCase().replace(/\\/g, "/"), d);
+        if (d.storagePath) {
+            const sp = d.storagePath.toLowerCase().replace(/\\/g, "/");
+            docMap.set(sp, d);
+            docMap.set(sp.replace(/^file_explorer\//, ""), d);
+        }
+        if (d.metadata?.localRelativePath) {
+            const lp = d.metadata.localRelativePath.toLowerCase().replace(/\\/g, "/");
+            docMap.set(lp, d);
+            docMap.set(lp.replace(/^file_explorer\//, ""), d);
+        }
         if (d.storedName) docMap.set(d.storedName.toLowerCase(), d);
+        if (d.originalName) docMap.set(d.originalName.toLowerCase(), d);
     }
 
     const buildTree = (dir, relPrefix = "") => {
@@ -588,7 +601,9 @@ const getLocalStorageTree = asyncHandler(async (req, res) => {
                     stat = fs.statSync(fullPath);
                 } catch (_) {}
 
-                const docRecord = docMap.get(relPath.toLowerCase()) || docMap.get(entry.name.toLowerCase());
+                const docRecord = docMap.get(relPath.toLowerCase()) 
+                    || docMap.get(`file_explorer/${relPath.toLowerCase()}`) 
+                    || docMap.get(entry.name.toLowerCase());
 
                 items.push({
                     name: entry.name,
@@ -614,11 +629,12 @@ const getLocalStorageTree = asyncHandler(async (req, res) => {
         });
     };
 
-    const tree = buildTree(storageRoot);
+    const tree = buildTree(exploreRoot);
     const stats = localStorageManager.getLocalStorageStats();
 
     return sendSuccess(res, 200, "Storage tree retrieved.", {
-        root: storageRoot,
+        root: exploreRoot,
+        displayRoot: "edumate/storage/file_explorer/",
         stats,
         tree
     });
@@ -634,6 +650,9 @@ const syncLocalStorage = asyncHandler(async (req, res) => {
     const chunkingQueueService = require("../ai/services/chunkingQueueService");
 
     const storageRoot = localStorageManager.ensureStorageRoot();
+    const scanDir = fs.existsSync(localStorageManager.FILE_EXPLORER_DIR)
+        ? localStorageManager.FILE_EXPLORER_DIR
+        : storageRoot;
     const adminUser = await User.findOne({ role: { $in: ["admin", "super_admin"] } });
     const systemAdminId = adminUser?._id || req.user?._id;
 
@@ -647,8 +666,8 @@ const syncLocalStorage = asyncHandler(async (req, res) => {
         });
     } catch (_) {}
 
-    // 2. Strict scan of only supported documents
-    const { supportedFiles, ignoredFiles } = localStorageManager.scanKnowledgeDocuments(storageRoot);
+    // 2. Strict scan inside file_explorer directly
+    const { supportedFiles, ignoredFiles } = localStorageManager.scanKnowledgeDocuments(scanDir, scanDir);
 
     const MIME_MAP = {
         ".pdf": "application/pdf",
@@ -666,7 +685,10 @@ const syncLocalStorage = asyncHandler(async (req, res) => {
         let doc = await Document.findOne({
             $or: [
                 { storagePath: file.relPath },
-                { "metadata.localRelativePath": file.relPath }
+                { storagePath: `file_explorer/${file.relPath}` },
+                { "metadata.localRelativePath": file.relPath },
+                { "metadata.localRelativePath": `file_explorer/${file.relPath}` },
+                { originalName: file.fileName }
             ],
             status: { $ne: "deleted" }
         });

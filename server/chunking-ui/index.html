@@ -124,7 +124,7 @@
                     <div class="card">
                         <div class="card-header">
                             <span class="card-title">Microservice Latencies & Health</span>
-                            <button class="btn btn-sm" onclick="fetchHealth()">🔄 Probe</button>
+                            <button class="btn btn-sm" onclick="fetchHealth(true)">🔄 Probe</button>
                         </div>
                         <div style="display: flex; flex-direction: column; gap: 4px; margin-top: 8px;">
                             <div class="latency-row">
@@ -168,7 +168,7 @@
                 <div class="explorer-header">
                     <div>
                         <h2 style="font-size: 1.25rem; font-weight: 800;">Local Storage Explorer</h2>
-                        <p style="font-size: 0.8rem; color: var(--text-muted);">Root: <code>edumate/storage/</code> &bull; Pure local filesystem scan</p>
+                        <p style="font-size: 0.8rem; color: var(--text-muted);">Root: <code>edumate/storage/file_explorer/</code> &bull; Pure local filesystem scan</p>
                     </div>
                     <div style="display: flex; gap: 10px; align-items: center;">
                         <input type="text" class="search-input" placeholder="Search files..." oninput="filterStorageTree(this.value)">
