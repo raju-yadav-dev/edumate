@@ -81,26 +81,27 @@ const registerSseClient = (res) => {
 };
 
 // ==========================================
-// Multer Configuration for Direct Uploads
+// Multer Configuration for Multi-file & Folder Uploads
 // ==========================================
-const storageDiskConfig = multer.diskStorage({
+const tempUploadDir = path.join(localStorageManager.STORAGE_ROOT, "temp", "uploads");
+if (!fs.existsSync(tempUploadDir)) {
+    fs.mkdirSync(tempUploadDir, { recursive: true });
+}
+
+const stagingDiskStorage = multer.diskStorage({
     destination: (req, file, cb) => {
-        const category = (req.body.category || "general").toLowerCase().replace(/[^a-z0-9_-]/g, "");
-        const targetDir = path.join(localStorageManager.STORAGE_ROOT, category);
-        if (!fs.existsSync(targetDir)) {
-            fs.mkdirSync(targetDir, { recursive: true });
-        }
-        cb(null, targetDir);
+        cb(null, tempUploadDir);
     },
     filename: (req, file, cb) => {
+        const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
         const cleanName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
-        cb(null, cleanName);
+        cb(null, `${uniqueSuffix}_${cleanName}`);
     }
 });
 
 const uploadMiddleware = multer({
-    storage: storageDiskConfig,
-    limits: { fileSize: 100 * 1024 * 1024 }, // 100MB
+    storage: stagingDiskStorage,
+    limits: { fileSize: 100 * 1024 * 1024 }, // 100MB per file
     fileFilter: (req, file, cb) => {
         if (localStorageManager.isSupportedDocument(file.originalname)) {
             cb(null, true);
@@ -159,6 +160,7 @@ const handleHealthCheck = async (req, res) => {
             queueSummary: {
                 concurrency: queueStats.concurrency,
                 activeJobs: queueStats.activeJobs.length,
+                workerUtilizationPct: queueStats.workerUtilizationPct !== undefined ? queueStats.workerUtilizationPct : (queueStats.concurrency > 0 ? Math.round((queueStats.activeJobs.length / queueStats.concurrency) * 100) : 0),
                 waitingJobs: queueStats.totalQueued,
                 completedJobs: queueStats.completedCount,
                 failedJobs: queueStats.failedCount,
@@ -267,6 +269,7 @@ const handleHealthCheck = async (req, res) => {
         queueSummary: {
             concurrency: queueStats.concurrency,
             activeJobs: queueStats.activeJobs.length,
+            workerUtilizationPct: queueStats.workerUtilizationPct !== undefined ? queueStats.workerUtilizationPct : (queueStats.concurrency > 0 ? Math.round((queueStats.activeJobs.length / queueStats.concurrency) * 100) : 0),
             waitingJobs: queueStats.totalQueued,
             completedJobs: queueStats.completedCount,
             failedJobs: queueStats.failedCount,
@@ -493,10 +496,8 @@ app.post(["/queue/logs/clear", "/logs/clear", "/api/documents/queue/logs/clear",
 // 4. Local Storage Explorer & Sync
 // ==========================================
 const handleStorageTree = async (req, res) => {
-    const storageRoot = localStorageManager.ensureStorageRoot();
-    const exploreRoot = fs.existsSync(localStorageManager.FILE_EXPLORER_DIR)
-        ? localStorageManager.FILE_EXPLORER_DIR
-        : storageRoot;
+    localStorageManager.ensureStorageRoot();
+    const exploreRoot = localStorageManager.FILE_EXPLORER_DIR;
     const stats = localStorageManager.getLocalStorageStats(true);
 
     const docMap = new Map();
@@ -613,17 +614,15 @@ app.get("/api/v1/documents/storage/tree", handleStorageTree);
 // Storage Scan & Sync
 const handleScanSync = async (req, res) => {
     const crypto = require("crypto");
-    const storageRoot = localStorageManager.ensureStorageRoot();
-    const scanDir = fs.existsSync(localStorageManager.FILE_EXPLORER_DIR)
-        ? localStorageManager.FILE_EXPLORER_DIR
-        : storageRoot;
+    localStorageManager.ensureStorageRoot();
+    const scanDir = localStorageManager.FILE_EXPLORER_DIR;
     const adminUser = await User.findOne({ role: { $in: ["admin", "super_admin"] } });
     const systemAdminId = adminUser?._id || new mongoose.Types.ObjectId("64a7c8e9f1a2b3c4d5e6f7a8");
 
     // Purge corrupted legacy records
     await cleanupCorruptedDocuments();
 
-    // Scan inside file_explorer directly
+    // Scan inside FILE_EXPLORER_DIR directly
     const { supportedFiles, ignoredFiles } = localStorageManager.scanKnowledgeDocuments(scanDir, scanDir);
 
     const MIME_MAP = {
@@ -793,11 +792,44 @@ app.get(["/chunks/:documentId", "/api/documents/:documentId/chunks", "/api/v1/do
 
 // Analytics Overview
 app.get(["/chunking/analytics", "/api/documents/chunking/analytics", "/api/v1/documents/chunking/analytics"], async (req, res) => {
-    const totalDocs = await Document.countDocuments({ status: "active" });
-    const indexedDocs = await Document.countDocuments({ status: "active", embeddingStatus: { $in: ["completed", "indexed"] } });
-    const failedDocs = await Document.countDocuments({ status: "active", embeddingStatus: "failed" });
+    const mongoTotalDocs = await Document.countDocuments({ status: "active" });
+    const mongoIndexedDocs = await Document.countDocuments({ status: "active", embeddingStatus: { $in: ["completed", "indexed", "Indexed", "Completed"] } });
+    const queuedDocs = await Document.countDocuments({ status: "active", embeddingStatus: { $in: ["queued", "Queued"] } });
+    const processingDocs = await Document.countDocuments({ status: "active", embeddingStatus: { $in: ["processing", "Processing"] } });
+    const failedDocsCount = await Document.countDocuments({ status: "active", embeddingStatus: { $in: ["failed", "Failed", "cancelled", "Cancelled"] } });
     const partialDocs = await Document.countDocuments({ status: "active", embeddingStatus: "partial" });
+    
     const chunkStats = localChunkManager.getAllChunkStats();
+    const storageStats = localStorageManager.getLocalStorageStats(true);
+
+    // Compute physical documents present in storage and their indexed status
+    const physicalDocCount = storageStats.supportedDocuments || 0;
+    const { supportedFiles } = localStorageManager.scanKnowledgeDocuments();
+    
+    let physicalIndexedCount = 0;
+    for (const f of supportedFiles) {
+        const doc = await Document.findOne({
+            $or: [
+                { storagePath: f.relPath },
+                { storagePath: `file_explorer/${f.relPath}` },
+                { "metadata.localRelativePath": f.relPath },
+                { "metadata.localRelativePath": `file_explorer/${f.relPath}` },
+                { originalName: f.fileName }
+            ],
+            status: "active",
+            embeddingStatus: { $in: ["completed", "indexed", "Indexed", "Completed"] }
+        }).select("_id").lean();
+        if (doc) physicalIndexedCount++;
+    }
+
+    const failedDocsList = await Document.find({
+        status: "active",
+        embeddingStatus: { $in: ["failed", "Failed", "cancelled", "Cancelled"] }
+    })
+        .select("originalName category failureInfo currentStage updatedAt department fileSize lastError retryCount storagePath")
+        .sort({ updatedAt: -1 })
+        .limit(50)
+        .lean();
 
     const categoryStats = await Document.aggregate([
         { $match: { status: "active" } },
@@ -805,68 +837,206 @@ app.get(["/chunking/analytics", "/api/documents/chunking/analytics", "/api/v1/do
         { $sort: { count: -1 } }
     ]);
 
+    const totalStorageSizeBytes = storageStats.used || 0;
+
     return sendJson(res, 200, "Chunking analytics retrieved.", {
-        totalDocuments: totalDocs,
-        indexedDocuments: indexedDocs,
-        failedDocuments: failedDocs,
-        partialDocuments: partialDocs,
+        // Physical local storage metrics
+        storageDocuments: physicalDocCount,
+        storageFolders: storageStats.folders || 0,
+        storageSizeBytes: totalStorageSizeBytes,
+        storageSizeFormatted: storageStats.usedFormatted,
         totalChunks: chunkStats.totalChunks,
         totalChunkFiles: chunkStats.totalFiles,
-        totalChunkSizeBytes: chunkStats.totalSizeBytes,
+        totalChunkSizeBytes: chunkStats.totalBytes,
+        indexedDocuments: physicalIndexedCount,
+        
+        // Historical database metrics
+        totalDocuments: physicalDocCount,
+        mongoTotalDocuments: mongoTotalDocs,
+        mongoIndexedDocuments: mongoIndexedDocs,
+        mongoFailedDocuments: failedDocsCount,
+        
+        queuedDocuments: queuedDocs,
+        processingDocuments: processingDocs,
+        failedDocuments: failedDocsCount,
+        partialDocuments: partialDocs,
+        failedDocs: failedDocsList,
+        totalStorageSizeBytes,
+        storageDetails: {
+            files: storageStats.files,
+            folders: storageStats.folders,
+            supportedDocuments: storageStats.supportedDocuments,
+            ignoredFiles: storageStats.ignoredFiles,
+            usedBytes: storageStats.used,
+            usedFormatted: storageStats.usedFormatted,
+            totalFormatted: storageStats.usedFormatted
+        },
         categoryDistribution: categoryStats
     });
 });
 
 // ==========================================
-// 6. Direct Document Upload
+// 6. Direct Document Upload (Single, Multi & Folder)
 // ==========================================
-app.post(["/upload", "/documents/upload", "/api/documents", "/api/v1/documents"], uploadMiddleware.single("document"), async (req, res) => {
+const handleDocumentUpload = async (req, res) => {
     try {
-        if (!req.file) {
-            return res.status(400).json({ success: false, message: "No document file uploaded." });
+        const files = req.files && Array.isArray(req.files) ? req.files : (req.file ? [req.file] : []);
+        if (files.length === 0) {
+            return res.status(400).json({ success: false, message: "No document files uploaded." });
         }
 
-        const category = (req.body.category || "general").toLowerCase();
-        const relPath = `${category}/${req.file.filename}`.replace(/\\/g, "/");
+        const baseCategory = String(req.body.category || req.body.folderPath || "").trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+        const autoChunk = req.body.autoChunk !== "false" && req.body.autoChunk !== false;
+
+        let relativePathsMap = {};
+        if (req.body.relPaths) {
+            try {
+                relativePathsMap = typeof req.body.relPaths === "string" ? JSON.parse(req.body.relPaths) : req.body.relPaths;
+            } catch (_) {}
+        }
+
         const adminUser = await User.findOne({ role: { $in: ["admin", "super_admin"] } });
         const systemAdminId = adminUser?._id || new mongoose.Types.ObjectId("64a7c8e9f1a2b3c4d5e6f7a8");
-
         const crypto = require("crypto");
-        let checksum = "local-checksum";
-        try {
-            const buf = fs.readFileSync(req.file.path);
-            checksum = crypto.createHash("sha256").update(buf).digest("hex");
-        } catch (_) {}
 
-        const doc = await Document.create({
-            originalName: req.file.originalname,
-            storagePath: relPath,
-            storedName: req.file.filename,
-            fileSize: req.file.size,
-            mimeType: req.file.mimetype || "application/octet-stream",
-            checksum,
-            createdBy: systemAdminId,
-            category,
-            department: req.body.department || "",
-            status: "active",
-            embeddingStatus: "queued",
-            progress: 0,
-            currentStage: "Uploaded and enqueued for chunking",
-            metadata: {
-                title: req.body.title || req.file.originalname,
-                institution: req.body.institution || "",
-                department: req.body.department || "",
-                version: req.body.version || "1.0",
-                notes: req.body.notes || "",
-                uploadedFrom: "chunking_server_upload",
-                localRelativePath: relPath
+        const MIME_MAP = {
+            ".pdf": "application/pdf",
+            ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".doc": "application/msword",
+            ".txt": "text/plain",
+            ".md": "text/markdown",
+            ".markdown": "text/markdown"
+        };
+
+        const createdDocs = [];
+        const enqueuedIds = [];
+
+        for (const file of files) {
+            // Determine relative path (from relativePathsMap or fallback to original name)
+            let itemRelPath = relativePathsMap[file.originalname] || file.originalname;
+            // Sanitize relative path: remove directory traversal & invalid characters
+            itemRelPath = itemRelPath.replace(/\\/g, "/").replace(/^[/\\]+/, "").replace(/\.\./g, "").replace(/\/+/g, "/");
+
+            let finalRelPath = itemRelPath;
+            if (baseCategory && baseCategory !== "storage" && baseCategory !== "root") {
+                if (itemRelPath.toLowerCase().startsWith(baseCategory.toLowerCase() + "/")) {
+                    finalRelPath = itemRelPath;
+                } else {
+                    finalRelPath = `${baseCategory}/${itemRelPath}`;
+                }
             }
+
+            finalRelPath = finalRelPath.replace(/\\/g, "/").replace(/^\/+/, "");
+            const category = finalRelPath.includes("/") ? finalRelPath.split("/")[0].toLowerCase() : (baseCategory || "general").toLowerCase();
+
+            // Destination path on disk inside FILE_EXPLORER_DIR
+            localStorageManager.ensureStorageRoot();
+            const destPath = path.join(localStorageManager.FILE_EXPLORER_DIR, finalRelPath);
+            const parentDir = path.dirname(destPath);
+            if (!fs.existsSync(parentDir)) {
+                fs.mkdirSync(parentDir, { recursive: true });
+            }
+
+            // Move from staging upload dir to destination
+            if (fs.existsSync(destPath)) {
+                try { fs.unlinkSync(destPath); } catch (_) {}
+            }
+            fs.renameSync(file.path, destPath);
+
+            // Calculate sha256 checksum
+            let checksum = "local-checksum";
+            try {
+                const buf = fs.readFileSync(destPath);
+                checksum = crypto.createHash("sha256").update(buf).digest("hex");
+            } catch (_) {}
+
+            const ext = path.extname(file.originalname).toLowerCase();
+            const mimeType = MIME_MAP[ext] || file.mimetype || "application/octet-stream";
+
+            let doc = await Document.findOne({
+                $or: [{ storagePath: finalRelPath }, { "metadata.localRelativePath": finalRelPath }],
+                status: { $ne: "deleted" }
+            });
+
+            if (!doc) {
+                doc = await Document.create({
+                    originalName: path.basename(itemRelPath),
+                    storagePath: finalRelPath,
+                    storedName: path.basename(finalRelPath),
+                    fileSize: file.size,
+                    mimeType,
+                    checksum,
+                    createdBy: systemAdminId,
+                    category,
+                    department: req.body.department || "",
+                    status: "active",
+                    embeddingStatus: autoChunk ? "queued" : "pending",
+                    progress: 0,
+                    currentStage: autoChunk ? "Uploaded and enqueued for chunking" : "Uploaded to local storage",
+                    metadata: {
+                        title: path.basename(itemRelPath),
+                        institution: req.body.institution || "",
+                        department: req.body.department || "",
+                        version: "1.0",
+                        notes: "",
+                        uploadedFrom: "chunking_server_upload",
+                        localRelativePath: finalRelPath,
+                        folderPath: path.dirname(finalRelPath) === "." ? "" : path.dirname(finalRelPath)
+                    }
+                });
+            } else {
+                doc.fileSize = file.size;
+                doc.checksum = checksum;
+                doc.originalName = path.basename(itemRelPath);
+                doc.storedName = path.basename(finalRelPath);
+                doc.category = category;
+                doc.embeddingStatus = autoChunk ? "queued" : "pending";
+                doc.progress = 0;
+                doc.currentStage = autoChunk ? "Re-uploaded and enqueued for chunking" : "Updated in local storage";
+                if (doc.metadata) {
+                    doc.metadata.localRelativePath = finalRelPath;
+                    doc.metadata.folderPath = path.dirname(finalRelPath) === "." ? "" : path.dirname(finalRelPath);
+                }
+                await doc.save();
+            }
+
+            createdDocs.push(doc);
+            if (autoChunk) {
+                enqueuedIds.push(doc._id);
+            }
+        }
+
+        if (autoChunk && enqueuedIds.length > 0) {
+            await chunkingQueueService.enqueueDocuments({ ids: enqueuedIds });
+            chunkingQueueService.triggerWorkerPool();
+        }
+
+        chunkingQueueService.emitLog("SUCCESS", `Uploaded ${createdDocs.length} document(s) to [${baseCategory || "storage"}]. Enqueued.`);
+        return sendJson(res, 201, `Successfully uploaded ${createdDocs.length} document(s).`, {
+            filesCount: createdDocs.length,
+            documents: createdDocs,
+            queuedIds: enqueuedIds
         });
+    } catch (err) {
+        chunkingQueueService.emitLog("ERROR", `Upload handler error: ${err.message}`);
+        return res.status(500).json({ success: false, message: err.message });
+    }
+};
 
-        chunkingQueueService.emitLog("SUCCESS", `Uploaded "${doc.originalName}" to [${category}]. Enqueued.`);
-        chunkingQueueService.triggerWorkerPool();
+app.post(["/upload", "/documents/upload", "/api/documents", "/api/v1/documents", "/storage/upload", "/api/documents/storage/upload"], uploadMiddleware.any(), handleDocumentUpload);
 
-        return sendJson(res, 201, "Document uploaded and queued for processing.", { document: doc });
+// Storage File Download Endpoint
+app.get(["/storage/file/download", "/api/documents/storage/file/download"], async (req, res) => {
+    try {
+        const filePath = String(req.query.path || "").trim();
+        if (!filePath) {
+            return res.status(400).json({ success: false, message: "File path required." });
+        }
+        const safePath = localStorageManager.resolveSafePath(filePath);
+        if (!fs.existsSync(safePath)) {
+            return res.status(404).json({ success: false, message: `File not found: ${filePath}` });
+        }
+        return res.download(safePath, path.basename(safePath));
     } catch (err) {
         return res.status(500).json({ success: false, message: err.message });
     }
@@ -896,7 +1066,7 @@ app.get(["/storage/stats", "/api/documents/storage/stats", "/api/v1/documents/st
 });
 
 app.get(["/storage/categories", "/api/documents/storage/categories", "/api/v1/documents/storage/categories"], async (req, res) => {
-    const categories = localStorageManager.DEFAULT_FOLDERS || [];
+    const categories = localStorageManager.getStorageCategories();
     return sendJson(res, 200, "Storage categories retrieved.", { categories });
 });
 
@@ -1167,126 +1337,6 @@ app.post(["/storage/chunk/folder", "/api/documents/storage/chunk/folder"], async
     }
 });
 
-// 7. Dynamic Folder Upload
-const dynamicUploadStorage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        const targetFolder = String(req.body.folderPath || req.body.category || "others").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
-        const targetDir = path.join(localStorageManager.STORAGE_ROOT, targetFolder);
-        if (!fs.existsSync(targetDir)) {
-            fs.mkdirSync(targetDir, { recursive: true });
-        }
-        cb(null, targetDir);
-    },
-    filename: (req, file, cb) => {
-        const cleanName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
-        cb(null, cleanName);
-    }
-});
-
-const dynamicUploadMiddleware = multer({
-    storage: dynamicUploadStorage,
-    limits: { fileSize: 100 * 1024 * 1024 },
-    fileFilter: (req, file, cb) => {
-        if (localStorageManager.isSupportedDocument(file.originalname)) {
-            cb(null, true);
-        } else {
-            cb(new Error(`Unsupported file format: ${path.extname(file.originalname)}. Only PDF, DOCX, TXT, and Markdown are allowed.`));
-        }
-    }
-});
-
-app.post(["/storage/upload", "/api/documents/storage/upload"], dynamicUploadMiddleware.array("files", 50), async (req, res) => {
-    try {
-        const files = req.files || (req.file ? [req.file] : []);
-        if (files.length === 0) {
-            return res.status(400).json({ success: false, message: "No files uploaded." });
-        }
-
-        const folderPath = String(req.body.folderPath || req.body.category || "others").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
-        const autoChunk = req.body.autoChunk !== "false" && req.body.autoChunk !== false;
-        const adminUser = await User.findOne({ role: { $in: ["admin", "super_admin"] } });
-        const systemAdminId = adminUser?._id || new mongoose.Types.ObjectId("64a7c8e9f1a2b3c4d5e6f7a8");
-        const crypto = require("crypto");
-
-        const MIME_MAP = {
-            ".pdf": "application/pdf",
-            ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            ".doc": "application/msword",
-            ".txt": "text/plain",
-            ".md": "text/markdown",
-            ".markdown": "text/markdown"
-        };
-
-        const createdDocs = [];
-        const enqueuedIds = [];
-
-        for (const file of files) {
-            const relPath = folderPath ? `${folderPath}/${file.filename}`.replace(/\\/g, "/") : file.filename;
-            const category = folderPath.split("/")[0]?.toLowerCase() || "others";
-            const ext = path.extname(file.originalname).toLowerCase();
-            const mimeType = MIME_MAP[ext] || file.mimetype || "application/octet-stream";
-
-            let checksum = "local-checksum";
-            try {
-                const buf = fs.readFileSync(file.path);
-                checksum = crypto.createHash("sha256").update(buf).digest("hex");
-            } catch (_) {}
-
-            let doc = await Document.findOne({
-                $or: [{ storagePath: relPath }, { "metadata.localRelativePath": relPath }],
-                status: { $ne: "deleted" }
-            });
-
-            if (!doc) {
-                doc = await Document.create({
-                    originalName: file.originalname,
-                    storagePath: relPath,
-                    storedName: file.filename,
-                    fileSize: file.size,
-                    mimeType,
-                    checksum,
-                    createdBy: systemAdminId,
-                    category,
-                    department: req.body.department || "",
-                    status: "active",
-                    embeddingStatus: autoChunk ? "queued" : "pending",
-                    progress: 0,
-                    currentStage: autoChunk ? "Uploaded and enqueued for chunking" : "Uploaded to local storage",
-                    metadata: {
-                        uploadedFrom: "storage_explorer_upload",
-                        localRelativePath: relPath,
-                        folderPath
-                    }
-                });
-            } else {
-                doc.fileSize = file.size;
-                doc.checksum = checksum;
-                doc.embeddingStatus = autoChunk ? "queued" : "pending";
-                doc.progress = 0;
-                await doc.save();
-            }
-
-            createdDocs.push(doc);
-            if (autoChunk) {
-                enqueuedIds.push(doc._id);
-            }
-        }
-
-        if (autoChunk && enqueuedIds.length > 0) {
-            await chunkingQueueService.enqueueDocuments({ ids: enqueuedIds });
-            chunkingQueueService.triggerWorkerPool();
-        }
-
-        chunkingQueueService.emitLog("SUCCESS", `Uploaded ${createdDocs.length} document(s) to [storage/${folderPath}].`);
-        return sendJson(res, 201, `Successfully uploaded ${createdDocs.length} file(s).`, {
-            filesCount: createdDocs.length,
-            documents: createdDocs,
-            folderPath
-        });
-    } catch (err) {
-        return res.status(500).json({ success: false, message: err.message });
-    }
-});
 
 // Serve static Chunking Studio frontend (Mission 15.3)
 const uiPath = path.join(__dirname, "chunking-ui");

@@ -8,6 +8,7 @@ queueEvents.setMaxListeners(100);
 const CONCURRENCY = Math.max(1, parseInt(process.env.CHUNKING_QUEUE_CONCURRENCY || "2", 10));
 
 let isQueuePaused = false;
+let workerPoolState = "RUNNING"; // "RUNNING" | "PAUSED" | "STOPPED"
 const activeWorkers = new Map(); // workerId -> { documentId, originalName, stage, progress, startTime, timer }
 const pausedDocIds = new Set();
 const cancelledDocIds = new Set();
@@ -71,12 +72,12 @@ const isJobPaused = (documentId) => pausedDocIds.has(String(documentId));
 const isJobCancelled = (documentId) => cancelledDocIds.has(String(documentId));
 
 /**
- * Get current overall worker status: running | idle | offline
+ * Get current overall worker operational status: RUNNING | PAUSED | STOPPED
  */
 const getWorkerStatus = () => {
-    if (isQueuePaused) return "offline";
-    if (activeWorkers.size > 0) return "running";
-    return "idle";
+    if (workerPoolState === "PAUSED" || isQueuePaused) return "PAUSED";
+    if (workerPoolState === "STOPPED") return "STOPPED";
+    return "RUNNING";
 };
 
 /**
@@ -327,33 +328,39 @@ const triggerWorkerPool = () => {
 /**
  * Global queue controls
  */
+/**
+ * Global queue controls
+ */
 const pauseQueue = () => {
     isQueuePaused = true;
+    workerPoolState = "PAUSED";
     emitLog("WARNING", "Chunking queue paused by administrator.");
-    queueEvents.emit("worker_status", { status: "offline", isPaused: true });
-    return { isPaused: true, activeWorkersCount: activeWorkers.size };
+    queueEvents.emit("worker_status", { status: "PAUSED", isPaused: true });
+    return { isPaused: true, status: "PAUSED", activeWorkersCount: activeWorkers.size };
 };
 
 const resumeQueue = () => {
     isQueuePaused = false;
+    workerPoolState = "RUNNING";
     emitLog("SUCCESS", "Chunking queue resumed. Worker pool active.");
     triggerWorkerPool();
-    queueEvents.emit("worker_status", { status: "running", isPaused: false });
+    queueEvents.emit("worker_status", { status: "RUNNING", isPaused: false });
     queueEvents.emit("queue_update", {});
-    return { isPaused: false, activeWorkersCount: activeWorkers.size };
+    return { isPaused: false, status: "RUNNING", activeWorkersCount: activeWorkers.size };
 };
 
 const startWorkerPool = async () => {
     isQueuePaused = false;
+    workerPoolState = "RUNNING";
     emitLog("SUCCESS", "Chunking worker pool started.");
 
     // Check if there are queued documents
-    const queuedCount = await Document.countDocuments({ status: "active", embeddingStatus: "queued" });
+    const queuedCount = await Document.countDocuments({ status: "active", embeddingStatus: { $in: ["queued", "Queued"] } });
     if (queuedCount === 0) {
         // Automatically enqueue any pending, unindexed, failed, or discovered documents
         const pendingCount = await Document.countDocuments({
             status: "active",
-            embeddingStatus: { $in: ["pending", "unindexed", "unregistered", "failed", "cancelled", "paused"] }
+            embeddingStatus: { $in: ["pending", "unindexed", "unregistered", "failed", "Failed", "cancelled", "paused"] }
         });
         if (pendingCount > 0) {
             emitLog("INFO", `Auto-enqueuing ${pendingCount} pending/unindexed document(s) for worker processing...`);
@@ -369,18 +376,20 @@ const startWorkerPool = async () => {
 
 const stopWorkerPool = () => {
     isQueuePaused = true;
+    workerPoolState = "STOPPED";
     emitLog("WARNING", "Chunking worker pool stopped.");
-    queueEvents.emit("worker_status", { status: "offline", isPaused: true });
-    return { success: true, status: "offline" };
+    queueEvents.emit("worker_status", { status: "STOPPED", isPaused: true });
+    return { success: true, status: "STOPPED" };
 };
 
 const restartWorkerPool = async () => {
     emitLog("WARNING", "Restarting worker pool & cleaning up stuck tasks...");
     isQueuePaused = false;
+    workerPoolState = "RUNNING";
 
     // Reset stuck processing tasks
     await Document.updateMany(
-        { status: "active", embeddingStatus: "processing" },
+        { status: "active", embeddingStatus: { $in: ["processing", "Processing"] } },
         {
             $set: {
                 embeddingStatus: "queued",
@@ -391,7 +400,7 @@ const restartWorkerPool = async () => {
     );
 
     // If queue is empty, auto-enqueue pending documents
-    const queuedCount = await Document.countDocuments({ status: "active", embeddingStatus: "queued" });
+    const queuedCount = await Document.countDocuments({ status: "active", embeddingStatus: { $in: ["queued", "Queued"] } });
     if (queuedCount === 0) {
         await enqueueDocuments({ allPending: true });
     }
@@ -407,6 +416,7 @@ const restartWorkerPool = async () => {
 const reindexAll = async () => {
     emitLog("WARNING", "Re-indexing all active documents requested by administrator...");
     isQueuePaused = false;
+    workerPoolState = "RUNNING";
     const docs = await Document.find({ status: "active" }).select("_id");
     const ids = docs.map((d) => d._id);
     const result = await enqueueDocuments({ ids, forceRechunk: true });
@@ -417,7 +427,7 @@ const reindexAll = async () => {
 
 const clearQueue = async () => {
     const result = await Document.updateMany(
-        { status: "active", embeddingStatus: "queued" },
+        { status: "active", embeddingStatus: { $in: ["queued", "Queued"] } },
         {
             $set: {
                 embeddingStatus: "pending",
@@ -480,7 +490,7 @@ const retryJob = async (documentId) => {
 const retryAllFailed = async () => {
     const failedDocs = await Document.find({
         status: "active",
-        embeddingStatus: { $in: ["failed", "cancelled"] }
+        embeddingStatus: { $in: ["failed", "Failed", "cancelled", "Cancelled"] }
     }).select("_id");
     const ids = failedDocs.map((d) => d._id);
     emitLog("RETRY", `Retrying all ${ids.length} failed/cancelled ingestion jobs.`);
@@ -494,7 +504,7 @@ const recoverQueueOnStartup = async () => {
     try {
         // Reset stuck processing documents to queued
         const stuckDocs = await Document.updateMany(
-            { status: "active", embeddingStatus: "processing" },
+            { status: "active", embeddingStatus: { $in: ["processing", "Processing"] } },
             {
                 $set: {
                     embeddingStatus: "queued",
@@ -508,7 +518,7 @@ const recoverQueueOnStartup = async () => {
             emitLog("WARNING", `Recovered ${stuckDocs.modifiedCount} interrupted jobs back to "queued" state.`);
         }
 
-        const queuedCount = await Document.countDocuments({ status: "active", embeddingStatus: "queued" });
+        const queuedCount = await Document.countDocuments({ status: "active", embeddingStatus: { $in: ["queued", "Queued"] } });
         if (queuedCount > 0) {
             emitLog("INFO", `Found ${queuedCount} queued documents on startup. Starting worker pool...`);
             triggerWorkerPool();
@@ -531,16 +541,17 @@ const getQueueStatus = async () => {
 
     if (mongoose.connection?.readyState === 1) {
         [queuedDocs, completedCount, failedCount, totalCount, failedDocsList] = await Promise.all([
-            Document.find({ status: "active", embeddingStatus: "queued" })
+            Document.find({ status: "active", embeddingStatus: { $in: ["queued", "Queued"] } })
                 .select("originalName category queuePosition createdAt fileSize department mimeType")
                 .sort({ queuePosition: 1 }),
-            Document.countDocuments({ status: "active", embeddingStatus: { $in: ["indexed", "completed"] } }),
-            Document.countDocuments({ status: "active", embeddingStatus: "failed" }),
+            Document.countDocuments({ status: "active", embeddingStatus: { $in: ["indexed", "completed", "Indexed", "Completed"] } }),
+            Document.countDocuments({ status: "active", embeddingStatus: { $in: ["failed", "Failed", "cancelled", "Cancelled"] } }),
             Document.countDocuments({ status: "active" }),
-            Document.find({ status: "active", embeddingStatus: "failed" })
-                .select("originalName category failureInfo currentStage updatedAt department fileSize")
+            Document.find({ status: "active", embeddingStatus: { $in: ["failed", "Failed", "cancelled", "Cancelled"] } })
+                .select("originalName category failureInfo currentStage updatedAt department fileSize lastError retryCount storagePath")
                 .sort({ updatedAt: -1 })
                 .limit(50)
+                .lean()
         ]);
     }
 
@@ -548,6 +559,7 @@ const getQueueStatus = async () => {
     const overallProgressPct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 100;
     const workerStatus = getWorkerStatus();
     const idleWorkers = Math.max(0, CONCURRENCY - activeList.length);
+    const workerUtilizationPct = CONCURRENCY > 0 ? Math.round((activeList.length / CONCURRENCY) * 100) : 0;
 
     // Calculate throughput metrics
     let avgDurationMs = 2500; // fallback 2.5s
@@ -555,7 +567,7 @@ const getQueueStatus = async () => {
         if (mongoose.connection?.readyState === 1) {
             const recentCompleted = await Document.find({
                 status: "active",
-                embeddingStatus: { $in: ["completed", "indexed"] },
+                embeddingStatus: { $in: ["completed", "indexed", "Indexed", "Completed"] },
                 processingDuration: { $gt: 0 }
             }).select("processingDuration").limit(20).lean();
 
@@ -597,12 +609,15 @@ const getQueueStatus = async () => {
             completed: completedCount,
             failed: failedCount,
             total: totalCount
-        }
+        },
+        workerUtilizationPct,
+        activeWorkersCount: activeList.length
     };
 };
 
 module.exports = {
     enqueueDocuments,
+    triggerWorkerPool,
     pauseQueue,
     resumeQueue,
     startWorkerPool,

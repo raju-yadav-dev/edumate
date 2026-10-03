@@ -40,43 +40,19 @@ const verifyDependencies = () => {
     
     const rootPath = path.resolve(__dirname, "..");
     const rootNodeModules = path.join(rootPath, "node_modules");
-    const clientNodeModules = path.join(rootPath, "client", "node_modules");
-    const serverNodeModules = path.join(rootPath, "server", "node_modules");
 
-    // 1. If root node_modules is missing completely, run full npm install
+    // 1. If root node_modules is missing completely, run full workspace npm install
     if (!fs.existsSync(rootNodeModules)) {
-        console.log(logger.yellow("⚠️ Root node_modules not found. Auto-installing dependencies..."));
+        console.log(logger.yellow("⚠️ Root node_modules not found. Auto-installing workspace dependencies..."));
         try {
             execSync("npm install", { stdio: "inherit", cwd: rootPath, shell: true });
-            console.log(logger.green("✓ Root dependencies installed successfully."));
+            console.log(logger.green("✓ Workspace dependencies installed successfully."));
         } catch (err) {
             console.error(logger.red(`❌ Failed to run npm install: ${err.message}`));
         }
     }
 
-    // 2. If client node_modules is missing completely
-    if (!fs.existsSync(clientNodeModules) && fs.existsSync(path.join(rootPath, "client", "package.json"))) {
-        console.log(logger.yellow("⚠️ Client dependencies not found. Auto-installing client..."));
-        try {
-            execSync("npm install", { stdio: "inherit", cwd: path.join(rootPath, "client"), shell: true });
-            console.log(logger.green("✓ Client dependencies installed successfully."));
-        } catch (err) {
-            console.error(logger.red(`❌ Failed to install client dependencies: ${err.message}`));
-        }
-    }
-
-    // 3. If server node_modules is missing completely
-    if (!fs.existsSync(serverNodeModules) && fs.existsSync(path.join(rootPath, "server", "package.json"))) {
-        console.log(logger.yellow("⚠️ Server dependencies not found. Auto-installing server..."));
-        try {
-            execSync("npm install", { stdio: "inherit", cwd: path.join(rootPath, "server"), shell: true });
-            console.log(logger.green("✓ Server dependencies installed successfully."));
-        } catch (err) {
-            console.error(logger.red(`❌ Failed to install server dependencies: ${err.message}`));
-        }
-    }
-
-    // 4. Verify individual packages across manifests
+    // 2. Verify individual packages across workspace manifests (root, server, client)
     const paths = [
         path.join(rootPath, "package.json"),
         path.join(rootPath, "server", "package.json"),

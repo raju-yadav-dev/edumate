@@ -21,7 +21,7 @@
         <!-- Global Live Status Badges -->
         <div class="top-badges">
             <div class="status-badge" id="topWorkerStatus">
-                <span class="dot pulse"></span> Worker: IDLE
+                <span class="dot pulse"></span> Worker: IDLE (0%)
             </div>
             <div class="status-badge" id="topMongoStatus">
                 <span class="dot"></span> MongoDB: Online
@@ -88,10 +88,10 @@
                     <div class="card">
                         <div class="card-header">
                             <span class="card-title">Worker Pool</span>
-                            <span class="tag-status tag-completed" id="dashWorkerStatus">IDLE</span>
+                            <span class="tag-status tag-completed" id="dashWorkerStatus">RUNNING · 0%</span>
                         </div>
-                        <div class="card-metric" id="dashConcurrency">2 Workers</div>
-                        <div class="card-subtext">Active async queue worker pool</div>
+                        <div class="card-metric" id="dashConcurrency">2 Workers (0 active)</div>
+                        <div class="card-subtext" id="dashWorkerSubtext">Utilization: 0%</div>
                     </div>
                     <div class="card">
                         <div class="card-header">
@@ -103,19 +103,19 @@
                     </div>
                     <div class="card">
                         <div class="card-header">
-                            <span class="card-title">Completed Documents</span>
-                            <span style="font-size: 1.1rem; color: var(--accent);">✓</span>
+                            <span class="card-title">Storage Documents</span>
+                            <span style="font-size: 1.1rem; color: var(--accent);">📄</span>
                         </div>
-                        <div class="card-metric" id="dashCompletedJobs" style="color: var(--accent);">0</div>
-                        <div class="card-subtext" id="dashFailedJobs">0 failed / retryable</div>
+                        <div class="card-metric" id="dashStorageDocs" style="color: var(--accent);">0</div>
+                        <div class="card-subtext" id="dashHistoricalDocs">0 historical in DB</div>
                     </div>
                     <div class="card">
                         <div class="card-header">
-                            <span class="card-title">Storage Root</span>
-                            <span style="font-size: 1.1rem; color: var(--purple);">📂</span>
+                            <span class="card-title">Storage & Chunks</span>
+                            <span style="font-size: 1.1rem; color: var(--purple);">💾</span>
                         </div>
-                        <div class="card-metric" style="font-size: 1.25rem; padding-top: 6px;">edumate/storage</div>
-                        <div class="card-subtext">Live filesystem watching active</div>
+                        <div class="card-metric" id="dashStorageSize" style="font-size: 1.25rem; padding-top: 6px;">0 B</div>
+                        <div class="card-subtext" id="dashLocalChunks">0 Local Chunks</div>
                     </div>
                 </div>
 
@@ -168,15 +168,29 @@
                 <div class="explorer-header">
                     <div>
                         <h2 style="font-size: 1.25rem; font-weight: 800;">Local Storage Explorer</h2>
-                        <p style="font-size: 0.8rem; color: var(--text-muted);">Root: <code>edumate/storage/file_explorer/</code> &bull; Pure local filesystem scan</p>
+                        <p style="font-size: 0.8rem; color: var(--text-muted);">Root: <code>edumate/storage/file_explorer/</code> &bull; Right-click any folder or document for actions</p>
                     </div>
                     <div style="display: flex; gap: 10px; align-items: center;">
                         <input type="text" class="search-input" placeholder="Search files..." oninput="filterStorageTree(this.value)">
+                        <button class="btn btn-sm" onclick="promptNewFolder('')">➕ New Folder</button>
+                        <button class="btn btn-sm" onclick="openUploadForFolder('')">⬆️ Upload Files</button>
                         <button class="btn btn-primary" onclick="triggerStorageSync()">🔄 Scan & Sync</button>
                     </div>
                 </div>
 
-                <div class="tree-container" id="storageTreeContainer">
+                <!-- Multi-Selection Action Toolbar -->
+                <div id="storageSelectionBar" class="storage-selection-bar" style="display: none;">
+                    <div>
+                        <strong id="selectedCountText">Selected: 0 items</strong>
+                    </div>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn btn-sm btn-accent" onclick="enqueueSelectedDocuments()">⚡ Enqueue Selected</button>
+                        <button class="btn btn-sm btn-danger" onclick="deleteSelectedDocuments()">🗑️ Delete Selected</button>
+                        <button class="btn btn-sm" onclick="clearStorageSelection()">✖ Clear Selection</button>
+                    </div>
+                </div>
+
+                <div class="tree-container" id="storageTreeContainer" oncontextmenu="handleEmptyContextMenu(event)">
                     <div style="padding: 30px; text-align: center; color: var(--text-muted);">
                         Loading local storage tree...
                     </div>
@@ -185,34 +199,63 @@
 
             <!-- TAB 3: UPLOAD STUDIO -->
             <section class="tab-pane" id="tab-upload">
-                <div style="max-width: 700px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px;">
+                <div style="max-width: 780px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px;">
                     <div>
                         <h2 style="font-size: 1.25rem; font-weight: 800;">Upload & Enqueue Documents</h2>
-                        <p style="font-size: 0.8rem; color: var(--text-muted);">Uploaded files are written directly into <code>edumate/storage/</code> and automatically enqueued.</p>
+                        <p style="font-size: 0.8rem; color: var(--text-muted);">Uploaded files and folders are saved directly into <code>edumate/storage/file_explorer/</code> and automatically enqueued for chunking.</p>
                     </div>
 
-                    <div style="display: flex; gap: 12px;">
+                    <div style="display: flex; gap: 12px; align-items: flex-end;">
                         <div style="flex: 1;">
-                            <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 6px;">Target Category</label>
-                            <select id="uploadCategory" style="width: 100%; background: var(--bg-input); border: 1px solid var(--border); color: var(--text-main); padding: 8px 12px; border-radius: 8px; font-size: 0.85rem;">
-                                <option value="admissions">admissions</option>
-                                <option value="academics">academics</option>
-                                <option value="fees">fees</option>
-                                <option value="hostel">hostel</option>
-                                <option value="departments">departments</option>
-                                <option value="placements">placements</option>
-                                <option value="scholarships">scholarships</option>
-                                <option value="rules">rules</option>
-                                <option value="general" selected>general / others</option>
+                            <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 6px;">Target Category / Folder</label>
+                            <select id="uploadCategory" style="width: 100%; background: var(--bg-input); border: 1px solid var(--border); color: var(--text-main); padding: 8px 12px; border-radius: 8px; font-size: 0.85rem;" onchange="handleCategoryChange(this.value)">
+                                <!-- Dynamically populated from actual filesystem -->
                             </select>
+                        </div>
+                        <div id="customCategoryContainer" style="flex: 1; display: none;">
+                            <label style="font-size: 0.8rem; font-weight: 600; color: var(--primary); display: block; margin-bottom: 6px;">New Folder Name</label>
+                            <input type="text" id="customCategoryInput" placeholder="e.g. syllabus, examinations" style="width: 100%; background: var(--bg-input); border: 1px solid var(--border-light); color: var(--text-main); padding: 8px 12px; border-radius: 8px; font-size: 0.85rem;">
                         </div>
                     </div>
 
+                    <div style="display: flex; gap: 10px;">
+                        <button class="btn btn-sm btn-primary" onclick="document.getElementById('fileInput').click()">📄 Select Files (Multiple)</button>
+                        <button class="btn btn-sm btn-accent" onclick="document.getElementById('folderInput').click()">📂 Select Entire Folder</button>
+                        <span style="font-size: 0.78rem; color: var(--text-dim); margin-left: auto; align-self: center;">Supported: PDF, DOCX, TXT, MD (Max 100MB)</span>
+                    </div>
+
+                    <!-- Hidden Inputs -->
+                    <input type="file" id="fileInput" multiple style="display: none;" accept=".pdf,.docx,.doc,.txt,.md">
+                    <input type="file" id="folderInput" webkitdirectory directory style="display: none;">
+
+                    <!-- Drag & Drop Zone -->
                     <div class="upload-zone" id="dropZone">
-                        <input type="file" id="fileInput" style="display: none;" accept=".pdf,.docx,.doc,.txt,.md">
                         <div class="upload-icon">📁</div>
-                        <div style="font-weight: 700; font-size: 1rem;">Click or Drag & Drop Documents Here</div>
-                        <div style="font-size: 0.8rem; color: var(--text-muted);">Supported formats: PDF, DOCX, TXT, Markdown (Max: 100MB)</div>
+                        <div style="font-weight: 700; font-size: 1rem;">Click or Drag & Drop Documents / Folders Here</div>
+                        <div style="font-size: 0.8rem; color: var(--text-muted);">Drop individual documents or complete directories</div>
+                    </div>
+
+                    <!-- Staged Files Preview Area -->
+                    <div id="uploadStagedContainer" class="upload-staged-container" style="display: none;">
+                        <div class="staged-header">
+                            <span id="stagedSummaryTitle">Selected: 0 files (0 B)</span>
+                            <div style="display: flex; gap: 8px;">
+                                <button class="btn btn-sm btn-accent" id="btnStartUpload" onclick="startStagedUpload()">🚀 Upload Files</button>
+                                <button class="btn btn-sm btn-danger" onclick="clearStagedFiles()">🗑️ Clear Selection</button>
+                            </div>
+                        </div>
+                        <div class="staged-list" id="stagedFilesList"></div>
+                    </div>
+
+                    <!-- Upload Progress & Status -->
+                    <div id="uploadProgressContainer" style="display: none; background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 14px;">
+                        <div style="display: flex; justify-content: space-between; font-size: 0.82rem; margin-bottom: 8px;">
+                            <span id="uploadProgressText">Uploading...</span>
+                            <span id="uploadProgressPercent">0%</span>
+                        </div>
+                        <div class="progress-bar-container">
+                            <div class="progress-bar" id="uploadProgressBar" style="width: 0%;"></div>
+                        </div>
                     </div>
 
                     <div id="uploadStatus" style="display: none; padding: 12px 16px; background: var(--bg-card); border-radius: 8px; border: 1px solid var(--border); font-size: 0.85rem;"></div>
@@ -228,20 +271,31 @@
                     </div>
                     <div style="display: flex; gap: 8px;">
                         <button class="btn btn-sm" onclick="fetchQueue()">🔄 Refresh</button>
-                        <button class="btn btn-sm" onclick="retryFailedJobs()">🔁 Retry Failed</button>
-                        <button class="btn btn-sm btn-danger" onclick="clearQueue()">🗑️ Clear</button>
+                        <button class="btn btn-sm" onclick="retryFailedJobs()">🔁 Retry All Failed</button>
+                        <button class="btn btn-sm btn-danger" onclick="clearQueue()">🗑️ Clear Queue</button>
                     </div>
                 </div>
 
                 <div style="display: flex; flex-direction: column; gap: 16px;">
+                    <!-- Active Worker Jobs -->
                     <div>
                         <h3 style="font-size: 0.95rem; font-weight: 700; margin-bottom: 10px; color: var(--primary);">Active Worker Jobs</h3>
                         <div id="activeJobsContainer"></div>
                     </div>
 
+                    <!-- Waiting Queue -->
                     <div>
                         <h3 style="font-size: 0.95rem; font-weight: 700; margin-bottom: 10px; color: var(--text-muted);">Waiting Queue</h3>
                         <div id="queuedDocsList"></div>
+                    </div>
+
+                    <!-- Failed & Retryable Documents -->
+                    <div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                            <h3 style="font-size: 0.95rem; font-weight: 700; color: var(--danger);">Failed & Retryable Documents</h3>
+                            <span id="failedDocsCountBadge" style="font-size: 0.78rem; color: var(--text-dim);">0 failed</span>
+                        </div>
+                        <div id="failedDocsContainer"></div>
                     </div>
                 </div>
             </section>
@@ -285,24 +339,60 @@
 
                 <div class="grid-4">
                     <div class="card">
-                        <div class="card-title">Total Active Documents</div>
+                        <div class="card-title">Storage Documents</div>
                         <div class="card-metric" id="anTotalDocs">0</div>
-                        <div class="card-subtext">Registered in database</div>
+                        <div class="card-subtext" id="anMongoSubtext">0 historical in database</div>
                     </div>
                     <div class="card">
                         <div class="card-title">Indexed Documents</div>
                         <div class="card-metric" style="color: var(--accent);" id="anIndexedDocs">0</div>
-                        <div class="card-subtext">Vectors synced in Qdrant</div>
+                        <div class="card-subtext" id="anIndexedSubtext">0 historical completed in DB</div>
                     </div>
                     <div class="card">
                         <div class="card-title">Total Local Chunks</div>
                         <div class="card-metric" style="color: var(--primary);" id="anTotalChunks">0</div>
-                        <div class="card-subtext">Processed text segments</div>
+                        <div class="card-subtext" id="anChunksSubtext">0 chunk files on disk</div>
                     </div>
                     <div class="card">
                         <div class="card-title">Total Storage Size</div>
                         <div class="card-metric" id="anStorageSize">0 B</div>
-                        <div class="card-subtext">Local chunks & files</div>
+                        <div class="card-subtext">Real size of edumate/storage</div>
+                    </div>
+                </div>
+
+                <!-- Secondary Analytics Grid -->
+                <div class="grid-2" style="margin-top: 16px;">
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="card-title">Storage & Filesystem Breakdown</span>
+                        </div>
+                        <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 8px;">
+                            <div class="latency-row">
+                                <span class="latency-name"><span>📁</span> Total Storage Folders</span>
+                                <span class="latency-val" id="anStorageFolders">0</span>
+                            </div>
+                            <div class="latency-row">
+                                <span class="latency-name"><span>📄</span> Total Supported Files</span>
+                                <span class="latency-val" id="anStorageFiles">0</span>
+                            </div>
+                            <div class="latency-row">
+                                <span class="latency-name"><span>🧩</span> Chunk Files Generated</span>
+                                <span class="latency-val" id="anTotalChunkFiles">0</span>
+                            </div>
+                            <div class="latency-row">
+                                <span class="latency-name"><span>🚫</span> Ignored / Cache Files</span>
+                                <span class="latency-val" id="anIgnoredFiles">0</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="card-title">Documents by Category</span>
+                        </div>
+                        <div id="anCategoryBreakdown" style="display: flex; flex-direction: column; gap: 8px; margin-top: 8px; max-height: 200px; overflow-y: auto;">
+                            <div style="color: var(--text-muted); font-size: 0.8rem; text-align: center; padding: 20px;">Loading distribution...</div>
+                        </div>
                     </div>
                 </div>
             </section>
@@ -321,6 +411,44 @@
             <button class="btn btn-sm" onclick="closeChunkDrawer()">✖ Close</button>
         </div>
         <div class="drawer-body" id="drawerBody"></div>
+    </div>
+
+    <!-- Right-Click Context Menu -->
+    <div id="contextMenu" class="context-menu" style="display: none;"></div>
+
+    <!-- Generic Input Modal (New Folder / Rename) -->
+    <div id="inputModal" class="modal-overlay" style="display: none;">
+        <div class="modal-box">
+            <div class="modal-header">
+                <span id="inputModalTitle">New Folder</span>
+                <button class="btn btn-sm" onclick="closeInputModal()">✖</button>
+            </div>
+            <div class="modal-body">
+                <label id="inputModalLabel" style="font-size: 0.82rem; color: var(--text-muted);">Enter name:</label>
+                <input type="text" id="inputModalField" style="width: 100%; background: var(--bg-input); border: 1px solid var(--border-light); color: var(--text-main); padding: 8px 12px; border-radius: 8px; font-size: 0.85rem;" onkeydown="if(event.key==='Enter') submitInputModal()">
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-sm" onclick="closeInputModal()">Cancel</button>
+                <button class="btn btn-sm btn-primary" onclick="submitInputModal()">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Document Content Preview Modal -->
+    <div id="previewModal" class="modal-overlay" style="display: none;">
+        <div class="modal-box" style="width: 720px; max-width: 90vw;">
+            <div class="modal-header">
+                <span id="previewModalTitle">Document Preview</span>
+                <button class="btn btn-sm" onclick="closePreviewModal()">✖</button>
+            </div>
+            <div class="modal-body" style="max-height: 480px; overflow-y: auto;">
+                <div id="previewMetaDetails" style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 10px;"></div>
+                <div id="previewTextContent" class="chunk-text" style="max-height: 380px;"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-sm btn-primary" onclick="closePreviewModal()">Close</button>
+            </div>
+        </div>
     </div>
 
     <script src="/js/app.js"></script>

@@ -88,30 +88,53 @@ function isSupportedDocument(fileName) {
 }
 
 /**
- * Resolves a safe absolute path inside STORAGE_ROOT or file_explorer, preventing path traversal.
+ * Ensures that STORAGE_ROOT and FILE_EXPLORER_DIR exist.
+ * Automatically creates 'file_explorer' folder whenever missing.
+ */
+function ensureStorageRoot() {
+    if (!fs.existsSync(STORAGE_ROOT)) {
+        try { fs.mkdirSync(STORAGE_ROOT, { recursive: true }); } catch (_) {}
+    }
+    if (!fs.existsSync(FILE_EXPLORER_DIR)) {
+        try { fs.mkdirSync(FILE_EXPLORER_DIR, { recursive: true }); } catch (_) {}
+    }
+    return STORAGE_ROOT;
+}
+
+// Automatically ensure root and file_explorer folder on module load
+ensureStorageRoot();
+
+/**
+ * Resolves a safe absolute path inside FILE_EXPLORER_DIR or STORAGE_ROOT, preventing path traversal.
  */
 function resolveSafePath(relativePath = "", fallbackName = "") {
+    ensureStorageRoot();
     const cleanRelative = String(relativePath || "")
         .replace(/^[/\\]+/, "")
         .replace(/\.\./g, "");
 
-    // 1. Direct path inside file_explorer
+    // Path with any leading redundant storage/ or file_explorer/ stripped
+    const strippedFe = cleanRelative
+        .replace(/^(edumate[/\\])?storage[/\\]file_explorer[/\\]?/i, "")
+        .replace(/^(edumate[/\\])?storage[/\\]?/i, "")
+        .replace(/^file_explorer[/\\]?/i, "");
+
+    // 1. Direct path inside file_explorer with stripped relative
+    const feStrippedPath = path.join(FILE_EXPLORER_DIR, strippedFe);
+    if (fs.existsSync(feStrippedPath)) {
+        return feStrippedPath;
+    }
+
+    // 2. Direct path inside file_explorer with original relative
     const fePath = path.join(FILE_EXPLORER_DIR, cleanRelative);
     if (fs.existsSync(fePath)) {
         return fePath;
     }
 
-    // 2. Direct path inside STORAGE_ROOT
+    // 3. Direct path inside STORAGE_ROOT
     const directPath = path.join(STORAGE_ROOT, cleanRelative);
     if (fs.existsSync(directPath)) {
         return directPath;
-    }
-
-    // 3. Path without 'file_explorer/' prefix if present
-    const strippedFe = cleanRelative.replace(/^file_explorer[/\\]/i, "");
-    const strippedFePath = path.join(FILE_EXPLORER_DIR, strippedFe);
-    if (fs.existsSync(strippedFePath)) {
-        return strippedFePath;
     }
 
     // 4. Try suffix segments (e.g. 'Admissions/course_eligibility/file.pdf' -> 'course_eligibility/file.pdf')
@@ -154,34 +177,40 @@ function resolveSafePath(relativePath = "", fallbackName = "") {
         if (foundInStorage) return foundInStorage;
     }
 
-    // Default fallback
-    return fs.existsSync(FILE_EXPLORER_DIR) ? fePath : directPath;
+    // Default fallback: resolve inside FILE_EXPLORER_DIR
+    return feStrippedPath;
 }
 
 /**
- * Ensures that STORAGE_ROOT and file_explorer directory exist.
+ * Dynamically gets available storage categories/folders from FILE_EXPLORER_DIR
  */
-function ensureStorageRoot() {
-    if (!fs.existsSync(STORAGE_ROOT)) {
-        fs.mkdirSync(STORAGE_ROOT, { recursive: true });
+function getStorageCategories() {
+    ensureStorageRoot();
+    const categories = [];
+    try {
+        const entries = fs.readdirSync(FILE_EXPLORER_DIR, { withFileTypes: true });
+        for (const entry of entries) {
+            if (entry.isDirectory() && !isIgnoredDirectory(entry.name)) {
+                categories.push(entry.name);
+            }
+        }
+    } catch (_) {}
+
+    if (categories.length === 0) {
+        categories.push("general");
     }
 
-    // Only ensure file_explorer folder exists
-    if (!fs.existsSync(FILE_EXPLORER_DIR)) {
-        fs.mkdirSync(FILE_EXPLORER_DIR, { recursive: true });
-    }
-
-    return STORAGE_ROOT;
+    return categories.sort();
 }
 
 /**
  * Strict Recursive Storage Scanner (Mission 15.1)
- * Scans only supported document types and skips all cache/generated artifacts.
+ * Scans only supported document types inside edumate/storage/file_explorer/.
  */
 function scanKnowledgeDocuments(dir = FILE_EXPLORER_DIR, rootDir = dir) {
     ensureStorageRoot();
-    const effectiveDir = (dir === STORAGE_ROOT && fs.existsSync(FILE_EXPLORER_DIR)) ? FILE_EXPLORER_DIR : dir;
-    const effectiveRootDir = (rootDir === STORAGE_ROOT && fs.existsSync(FILE_EXPLORER_DIR)) ? FILE_EXPLORER_DIR : rootDir;
+    const effectiveDir = dir;
+    const effectiveRootDir = rootDir;
     const supportedFiles = [];
     const ignoredFiles = [];
 
@@ -251,7 +280,7 @@ function getLocalStorageStats(force = false) {
     let ignoredCount = 0;
     let largestFile = null;
 
-    const statsRoot = fs.existsSync(FILE_EXPLORER_DIR) ? FILE_EXPLORER_DIR : STORAGE_ROOT;
+    const statsRoot = FILE_EXPLORER_DIR;
 
     function walkDir(currentDir, relativePrefix = "") {
         let entries = [];
@@ -305,6 +334,28 @@ function getLocalStorageStats(force = false) {
 
     walkDir(statsRoot);
 
+    // Compute total physical disk bytes across entire edumate/storage root (including chunks & explorer)
+    let totalStorageBytes = 0;
+    function computeStorageDirBytes(dir) {
+        try {
+            const entries = fs.readdirSync(dir, { withFileTypes: true });
+            for (const entry of entries) {
+                const fullPath = path.join(dir, entry.name);
+                if (entry.isDirectory()) {
+                    computeStorageDirBytes(fullPath);
+                } else if (entry.isFile()) {
+                    try {
+                        const s = fs.statSync(fullPath);
+                        totalStorageBytes += s.size;
+                    } catch (_) {}
+                }
+            }
+        } catch (_) {}
+    }
+    computeStorageDirBytes(STORAGE_ROOT);
+
+    const effectiveUsedBytes = totalStorageBytes > 0 ? totalStorageBytes : totalBytes;
+
     // Get real filesystem disk capacity and free space
     let diskTotal = 50 * 1024 * 1024 * 1024; // 50 GB default fallback
     let diskFree = 25 * 1024 * 1024 * 1024;
@@ -321,24 +372,27 @@ function getLocalStorageStats(force = false) {
 
     const quota = diskTotal;
     const remaining = diskFree;
-    const usage = quota > 0 ? Number(((totalBytes / quota) * 100).toFixed(1)) : 0;
+    const usage = quota > 0 ? Number(((effectiveUsedBytes / quota) * 100).toFixed(1)) : 0;
     const averageFileSize = fileCount > 0 ? Math.round(totalBytes / fileCount) : 0;
 
     return {
         configured: true,
         connected: true,
         rootPath: STORAGE_ROOT,
+        fileExplorerPath: FILE_EXPLORER_DIR,
         files: fileCount,
         folders: folderCount,
         supportedDocuments: supportedCount,
         ignoredFiles: ignoredCount,
-        used: totalBytes,
+        used: effectiveUsedBytes,
+        fileExplorerUsedBytes: totalBytes,
         quota,
         remaining,
         usage,
         averageFileSize,
         largestFile,
-        usedFormatted: formatBytes(totalBytes),
+        usedFormatted: formatBytes(effectiveUsedBytes),
+        fileExplorerUsedFormatted: formatBytes(totalBytes),
         quotaFormatted: formatBytes(quota),
         remainingFormatted: formatBytes(remaining),
         averageFileSizeFormatted: formatBytes(averageFileSize)
@@ -483,5 +537,6 @@ module.exports = {
     copyFile,
     createFolder,
     deleteFolder,
+    getStorageCategories,
     formatBytes
 };
