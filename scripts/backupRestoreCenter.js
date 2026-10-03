@@ -14,15 +14,16 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const mongoose = require("mongoose");
+const paths = require("../server/config/paths");
 
-const rootDir = path.resolve(__dirname, "..");
+const rootDir = paths.REPO_ROOT;
 const envPath = path.join(rootDir, ".env");
 
 if (fs.existsSync(envPath)) {
     require("dotenv").config({ path: envPath });
 }
 
-const BACKUP_DIR = path.join(rootDir, "storage", "backups");
+const BACKUP_DIR = paths.BACKUP_ROOT;
 const BACKUP_SECRET = process.env.BACKUP_SIGNING_SECRET || process.env.JWT_SECRET || "edumate_master_backup_secret_2026";
 
 if (!fs.existsSync(BACKUP_DIR)) {
@@ -87,7 +88,7 @@ async function performBackup() {
     }
 
     // 2. Count storage chunk & embedding files
-    const chunksDir = path.join(rootDir, "storage", "chunks");
+    const chunksDir = paths.CHUNKS_ROOT;
     if (fs.existsSync(chunksDir)) {
         backupPayload.storageStats.chunkFilesCount = fs.readdirSync(chunksDir).length;
     }

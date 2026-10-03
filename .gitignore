@@ -28,12 +28,12 @@ dist-release/
 build/
 
 # ===============================================
-# AI Models & Weights
+# AI Models, Weights & Binaries (Local Only)
 # ===============================================
+llama.cpp/
+models/
 server/ai/ai-models/*
 backend/ai-models/*
-models/*
-llama.cpp/
 *.gguf
 *.bin
 *.onnx
@@ -41,21 +41,28 @@ llama.cpp/
 *.pth
 
 # ===============================================
-# OCR / Tesseract Trained Data
+# OCR / Tesseract Trained Data (Local Only)
 # ===============================================
 *.traineddata
 
 # ===============================================
-# Local Storage & Knowledge Documents
+# Local Storage, Chunks, Embeddings & Data Roots
 # ===============================================
-storage/*
+edumate-data/
+storage/
+chunks/
+embeddings/
+backups/
+temp/
 *.chunks.json
+*.cache.json
+*.cache.json.gz
 
 # ===============================================
 # Uploads & Temporary Direct Files
 # ===============================================
-uploads/*
-server/uploads/*
+uploads/
+server/uploads/
 
 # ===============================================
 # Vector DB, Embeddings & Cache
@@ -69,7 +76,7 @@ vector_cache/
 # ===============================================
 # Logs & Debugging
 # ===============================================
-logs/*
+logs/
 *.log
 npm-debug.log*
 yarn-debug.log*

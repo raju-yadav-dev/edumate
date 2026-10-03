@@ -1,9 +1,11 @@
 const fs = require("fs");
 const path = require("path");
 
-// Single Source of Truth for Knowledge Storage Root: edumate/storage/
-const STORAGE_ROOT = path.resolve(__dirname, "../../storage");
-const FILE_EXPLORER_DIR = path.resolve(STORAGE_ROOT, "file_explorer");
+const paths = require("../config/paths");
+
+// Single Source of Truth for Knowledge Storage Root: external edumate-data/storage/
+const STORAGE_ROOT = paths.STORAGE_ROOT;
+const FILE_EXPLORER_DIR = paths.FILE_EXPLORER_DIR;
 
 const DEFAULT_FOLDERS = [
     "file_explorer"

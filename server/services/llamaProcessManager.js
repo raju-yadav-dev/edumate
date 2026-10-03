@@ -36,28 +36,30 @@ class LlamaProcessManager {
      * Resolve llama-server executable path
      */
     findExecutablePath() {
-        const customPath = process.env.LLAMA_SERVER_PATH;
+        const paths = require("../config/paths");
+        const customPath = process.env.LLAMA_CPP_PATH || process.env.LLAMA_SERVER_PATH;
         if (customPath && fs.existsSync(customPath)) {
             return customPath;
         }
 
         const candidatePaths = [
-            path.resolve(process.cwd(), "llama.cpp", "llama-server.exe"),
-            path.resolve(process.cwd(), "llama.cpp", "llama-server"),
+            paths.LLAMA_CPP_PATH,
+            path.join(paths.LLAMA_CPP_DIR, "llama-server.exe"),
+            path.join(paths.LLAMA_CPP_DIR, "llama-server"),
             path.resolve(process.cwd(), "..", "llama.cpp", "llama-server.exe"),
             path.resolve(process.cwd(), "..", "llama.cpp", "llama-server"),
-            path.resolve(__dirname, "..", "..", "llama.cpp", "llama-server.exe"),
-            path.resolve(__dirname, "..", "..", "llama.cpp", "llama-server"),
+            path.resolve(__dirname, "..", "..", "..", "llama.cpp", "llama-server.exe"),
+            path.resolve(__dirname, "..", "..", "..", "llama.cpp", "llama-server"),
+            path.resolve(process.cwd(), "llama.cpp", "llama-server.exe"),
+            path.resolve(process.cwd(), "llama.cpp", "llama-server"),
             path.resolve(process.cwd(), "bin", "llama-server.exe"),
             path.resolve(process.cwd(), "bin", "llama-server"),
             path.resolve(process.cwd(), "llama-server.exe"),
-            path.resolve(process.cwd(), "llama-server"),
-            path.resolve(__dirname, "..", "..", "bin", "llama-server.exe"),
-            path.resolve(__dirname, "..", "..", "llama-server.exe")
+            path.resolve(process.cwd(), "llama-server")
         ];
 
         for (const p of candidatePaths) {
-            if (fs.existsSync(p)) return p;
+            if (p && fs.existsSync(p)) return p;
         }
 
         return null;

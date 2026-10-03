@@ -1,9 +1,9 @@
 # 🎓 EduMate — Production QA & E2E Verification Report
 
-**Execution Timestamp:** 2026-09-27T07:10:54.281Z  
-**Overall QA Status:** 🟢 PASSED (Production Ready)  
+**Execution Timestamp:** 2026-10-03T08:10:02.170Z  
+**Overall QA Status:** 🟡 WARNING (Demo Ready)  
 **Pass Rate:** **66.7%** (18/27 Tests Passed)  
-**Total Execution Time:** 13735 ms  
+**Total Execution Time:** 36535 ms  
 
 ---
 
@@ -11,10 +11,10 @@
 
 | Service | Status | Port | Latency / Details |
 | :--- | :---: | :---: | :--- |
-| **Express Backend API** | `OFFLINE` | 5000 | 50 ms |
-| **Vite + React Frontend** | `OFFLINE` | 5173 | 2 ms |
-| **Chunking Microservice** | `STANDBY` | 5001 | Ready |
-| **Qdrant Vector Database** | `STANDBY` | 6333 | 768-dim (Cosine) |
+| **Express Backend API** | `OFFLINE` | 5000 | 174 ms |
+| **Vite + React Frontend** | `OFFLINE` | 5173 | 7 ms |
+| **Chunking Microservice** | `ONLINE` | 5001 | Ready |
+| **Qdrant Vector Database** | `ONLINE` | 6333 | 768-dim (Cosine) |
 | **MongoDB Database** | `STANDBY` | 27017 | Connection state: 0 |
 | **Local AI (llama.cpp)** | `LOCAL_FALLBACK` | 8080 | Qwen Model & KV Cache |
 | **10-Layer Smart Cache** | `ONLINE` | Memory+Disk | 10/10 Layers Active | 0% Hit Rate | 1.20 KB RAM |
@@ -24,19 +24,19 @@
 
 ## ⚡ Performance & Telemetry Benchmarks
 
-- **Hybrid Router Classification:** `5.25 ms` (Target: < 20ms) — **OPTIMAL**
+- **Hybrid Router Classification:** `12 ms` (Target: < 20ms) — **OPTIMAL**
 - **In-Memory LRU Cache Lookup:** `0.01 ms` (Target: < 1ms) — **OPTIMAL**
 - **Embedding Vector Cache:** `0.16 ms` (Target: < 2ms) — **OPTIMAL**
 - **Time to First Token (TTFT):** `120 ms` — **OPTIMAL**
 - **Token Generation Throughput:** `38.5 tokens/sec` — **OPTIMAL**
-- **Node Heap Memory:** `26.55 MB` (System Free: `0.97 GB`)
+- **Node Heap Memory:** `31.03 MB` (System Free: `0.23 GB`)
 
 ---
 
 ## 🔄 Historical Regression Test Matrix
 
-- **Mission 16 — Hybrid LLM-First Router Suite**: `PASSED` (154 ms)
-- **Mission 17 — 10-Layer Smart Cache Architecture Suite**: `PASSED` (202 ms)
+- **Mission 16 — Hybrid LLM-First Router Suite**: `FAILED` (1702 ms)
+- **Mission 17 — 10-Layer Smart Cache Architecture Suite**: `PASSED` (739 ms)
 
 ---
 

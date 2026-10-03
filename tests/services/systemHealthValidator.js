@@ -153,9 +153,10 @@ async function validateSystemHealth() {
     };
 
     // 8. Storage & File System Check
-    const storageRoot = path.join(__dirname, "..", "..", "storage");
-    const chunksDir = path.join(storageRoot, "chunks");
-    const cacheDir = path.join(storageRoot, "cache");
+    const paths = require("../../server/config/paths");
+    const storageRoot = paths.STORAGE_ROOT;
+    const chunksDir = paths.CHUNKS_ROOT;
+    const cacheDir = paths.CACHE_ROOT;
 
     const storageOk = fs.existsSync(storageRoot) && fs.existsSync(chunksDir) && fs.existsSync(cacheDir);
     results.services.storage = {

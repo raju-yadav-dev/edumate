@@ -15,11 +15,12 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const zlib = require("zlib");
+const paths = require("../../config/paths");
 const localStorageManager = require("../../storage/localStorageManager");
 
 class Layer10_PersistentDiskCache {
     constructor() {
-        this.cacheRootDir = path.join(localStorageManager.STORAGE_ROOT, "cache");
+        this.cacheRootDir = paths.CACHE_ROOT;
         this.version = "1.0";
         this.compressionThresholdBytes = 1024; // 1 KB
 

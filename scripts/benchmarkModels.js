@@ -120,12 +120,13 @@ async function runBenchmark() {
     }
 
     // Save benchmark report
-    const benchmarkFilePath = path.join(rootDir, "storage", "demo", "model_benchmarks.json");
+    const paths = require("../server/config/paths");
+    const benchmarkFilePath = path.join(paths.STORAGE_ROOT, "demo", "model_benchmarks.json");
     fs.mkdirSync(path.dirname(benchmarkFilePath), { recursive: true });
     fs.writeFileSync(benchmarkFilePath, JSON.stringify(results, null, 2), "utf8");
 
     console.log("=======================================================");
-    console.log("🎉 MODEL BENCHMARKS SAVED: storage/demo/model_benchmarks.json");
+    console.log(`🎉 MODEL BENCHMARKS SAVED: ${benchmarkFilePath}`);
     console.log("=======================================================\n");
 }
 

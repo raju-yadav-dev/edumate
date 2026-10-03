@@ -80,7 +80,8 @@ async function runSecuritySuite() {
     // ----------------------------------------------------
     console.log("\n🔍 Test 3: Local Storage Sandbox & Path Traversal Guard");
     {
-        const baseStorageDir = path.resolve(__dirname, "../../storage");
+        const paths = require("../config/paths");
+        const baseStorageDir = paths.STORAGE_ROOT;
         
         const testSafePath = (dir, target) => {
             try {

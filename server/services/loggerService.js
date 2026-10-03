@@ -1,6 +1,8 @@
 const fs = require("fs");
 const path = require("path");
 
+const paths = require("../config/paths");
+
 /**
  * EduMate Mission 12.5 — Production Logging Service
  * 
@@ -14,7 +16,7 @@ const path = require("path");
 
 class LoggerService {
     constructor() {
-        this.logDir = path.resolve(process.cwd(), "logs");
+        this.logDir = paths.LOG_ROOT;
         this._ensureLogDirectory();
         
         this.logStreams = {

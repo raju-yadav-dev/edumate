@@ -1,15 +1,16 @@
 const fs = require("fs");
 const path = require("path");
+const paths = require("../config/paths");
 const localStorageManager = require("./localStorageManager");
 
-// Dedicated directory for document chunks inside EduMate storage root
-const CHUNK_STORAGE_DIR = path.join(localStorageManager.STORAGE_ROOT, "chunks");
+// Dedicated directory for document chunks in external edumate-data/chunks/
+const CHUNK_STORAGE_DIR = paths.CHUNKS_ROOT;
 
 /**
  * Ensures that the chunk storage directory exists.
  */
 function ensureChunkStorageRoot() {
-    localStorageManager.ensureStorageRoot();
+    paths.ensureAllDirectories();
     if (!fs.existsSync(CHUNK_STORAGE_DIR)) {
         fs.mkdirSync(CHUNK_STORAGE_DIR, { recursive: true });
     }

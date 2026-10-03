@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+const paths = require("./paths");
 const { detectModelProfile, getAllModelProfiles, MODEL_REGISTRY } = require("../ai/config/modelRegistry");
 
 /**
@@ -63,14 +64,13 @@ const inspectModelFile = (filePath, rawModel = "") => {
     }
     const modelName = rawModel || (filePath ? path.basename(filePath) : "");
     if (modelName) {
-        candidates.push(path.resolve(process.cwd(), "server", "ai", "ai-models", modelName));
-        candidates.push(path.resolve(process.cwd(), "server", "ai", "ai-models", modelName.toLowerCase()));
-        candidates.push(path.resolve(process.cwd(), "ai", "ai-models", modelName));
-        candidates.push(path.resolve(process.cwd(), "ai", "ai-models", modelName.toLowerCase()));
-        candidates.push(path.resolve(__dirname, "..", "ai", "ai-models", modelName));
-        candidates.push(path.resolve(__dirname, "..", "ai", "ai-models", modelName.toLowerCase()));
+        candidates.push(path.join(paths.MODELS_DIR, modelName));
+        candidates.push(path.join(paths.MODELS_DIR, modelName.toLowerCase()));
+        candidates.push(paths.LLAMA_MODEL_PATH);
         candidates.push(path.resolve(process.cwd(), "models", modelName));
         candidates.push(path.resolve(process.cwd(), "models", modelName.toLowerCase()));
+        candidates.push(path.resolve(process.cwd(), "server", "ai", "ai-models", modelName));
+        candidates.push(path.resolve(process.cwd(), "server", "ai", "ai-models", modelName.toLowerCase()));
     }
 
     for (const resolvedPath of candidates) {
@@ -172,7 +172,7 @@ const getLlmConfig = () => {
     let baseUrl = process.env.LLAMA_BASE_URL || process.env.LLM_BASE_URL || defaultBaseUrl;
     baseUrl = baseUrl.replace(/\/v1\/?$/, "").replace(/\/$/, "");
 
-    const modelPath = process.env.LLM_MODEL_PATH || `./models/${rawModel}`;
+    const modelPath = process.env.LLAMA_MODEL_PATH || process.env.LLM_MODEL_PATH || path.join(paths.MODELS_DIR, rawModel);
     const modelInspection = inspectModelFile(modelPath, rawModel);
 
     const cpuCores = Math.max(1, (os.cpus()?.length || 4) - 1);

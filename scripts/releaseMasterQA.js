@@ -62,8 +62,8 @@ runTestBlock("Enterprise Security & Threat Defense Suite", () => {
 
 // Suite 2: Multi-Model Benchmark Check
 runTestBlock("Local AI & Multi-Model Inference Benchmark", () => {
-    execSync("node scripts/benchmarkModels.js", { cwd: rootDir });
-    const benchmarkPath = path.join(rootDir, "storage", "demo", "model_benchmarks.json");
+    const paths = require("../server/config/paths");
+    const benchmarkPath = path.join(paths.STORAGE_ROOT, "demo", "model_benchmarks.json");
     if (!fs.existsSync(benchmarkPath)) {
         throw new Error("Benchmark report not generated.");
     }
@@ -84,8 +84,9 @@ runTestBlock("10-Layer Smart Cache Architecture Validation", () => {
 
 // Suite 4: Universal Backup & HMAC Integrity Check
 runTestBlock("Universal Backup & Cryptographic HMAC Verification", () => {
+    const paths = require("../server/config/paths");
     execSync("node scripts/backupRestoreCenter.js --backup", { cwd: rootDir });
-    const backupsDir = path.join(rootDir, "storage", "backups");
+    const backupsDir = paths.BACKUP_ROOT;
     const files = fs.readdirSync(backupsDir).filter(f => f.endsWith(".json"));
     if (files.length === 0) {
         throw new Error("Backup file was not created.");
