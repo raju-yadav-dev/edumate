@@ -1,7 +1,10 @@
+const mongoose = require("mongoose");
 const Chat = require("../../models/Chat");
 const tokenizer = require("../utils/tokenizer");
 const promptBuilder = require("../utils/promptBuilder");
 const llmService = require("./llmService");
+
+const isValidObjectId = (id) => id && mongoose.Types.ObjectId.isValid(id) && String(new mongoose.Types.ObjectId(id)) === String(id);
 
 /**
  * Retrieves and trims recent message memory for a conversation thread
@@ -12,7 +15,7 @@ const llmService = require("./llmService");
  * @returns {Promise<Object>} - { historyText: string, rawHistory: Array }
  */
 const getRecentMemory = async ({ userId, conversationId, maxTokens = 500, parentId = null }) => {
-    if (!userId || !conversationId) {
+    if (!userId || !conversationId || !isValidObjectId(userId) || !isValidObjectId(conversationId)) {
         return {
             historyText: "",
             rawHistory: []
@@ -163,11 +166,11 @@ const summarizeHistory = async (historyText) => {
 };
 
 const getOrCreateChat = async ({ user, conversationId, question }) => {
-    if (!user?._id) {
+    if (!user?._id || !isValidObjectId(user._id)) {
         return null;
     }
 
-    if (conversationId) {
+    if (conversationId && isValidObjectId(conversationId)) {
         const existingChat = await Chat.findOne({
             _id: conversationId,
             user: user._id,

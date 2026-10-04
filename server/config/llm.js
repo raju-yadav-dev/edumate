@@ -126,6 +126,31 @@ const calculateDynamicOutputBudget = (question = "", intent = "") => {
     const q = String(question || "").toLowerCase();
     const words = q.trim().split(/\s+/).filter(Boolean);
 
+    // Direct small factual questions (< 2s generation)
+    const isDirectFact = (
+        q.startsWith("who ") ||
+        q.startsWith("where ") ||
+        q.startsWith("when ") ||
+        q.startsWith("which room") ||
+        q.startsWith("what is the name") ||
+        q.startsWith("who's") ||
+        q.includes("hod") ||
+        q.includes("head of") ||
+        q.includes("phone number") ||
+        q.includes("contact number") ||
+        q.includes("email") ||
+        intent === "HOD_QUERY" ||
+        intent === "LOCATION_QUERY"
+    );
+
+    if (isDirectFact && words.length < 14) {
+        return {
+            maxTokens: Math.min(160, numberFromEnv("LLM_MAX_TOKENS", 160)),
+            tier: "SMALL",
+            targetLatencySec: "1-2s"
+        };
+    }
+
     // Large questions
     if (
         words.length >= 14 ||
@@ -133,9 +158,9 @@ const calculateDynamicOutputBudget = (question = "", intent = "") => {
         intent === "COMPARISON"
     ) {
         return {
-            maxTokens: Math.min(900, numberFromEnv("LLM_MAX_TOKENS", 768)),
+            maxTokens: Math.min(650, numberFromEnv("LLM_MAX_TOKENS", 650)),
             tier: "LARGE",
-            targetLatencySec: "6-9s"
+            targetLatencySec: "5-8s"
         };
     }
 
@@ -146,17 +171,17 @@ const calculateDynamicOutputBudget = (question = "", intent = "") => {
         intent === "FEE_QUERY" || intent === "ADMISSION_QUERY"
     ) {
         return {
-            maxTokens: Math.min(500, numberFromEnv("LLM_MAX_TOKENS", 512)),
+            maxTokens: Math.min(320, numberFromEnv("LLM_MAX_TOKENS", 320)),
             tier: "MEDIUM",
-            targetLatencySec: "3-6s"
+            targetLatencySec: "2-4s"
         };
     }
 
-    // Small factual questions
+    // Default small factual
     return {
-        maxTokens: Math.min(250, numberFromEnv("LLM_MAX_TOKENS", 250)),
+        maxTokens: Math.min(180, numberFromEnv("LLM_MAX_TOKENS", 180)),
         tier: "SMALL",
-        targetLatencySec: "1-3s"
+        targetLatencySec: "1-2s"
     };
 };
 

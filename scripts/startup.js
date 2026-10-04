@@ -145,26 +145,86 @@ const startDev = async () => {
         workerStatus: "Idle"
     });
 
+    // Stage 5.5: Port Reconciliation (Free ports 5000, 5001, 5173 if held by stale processes)
+    const freePortIfOccupied = (port) => {
+        try {
+            if (process.platform === "win32") {
+                const { execSync } = require("child_process");
+                const output = execSync(`netstat -ano | findstr :${port} | findstr LISTENING`, { shell: true, stdio: ["pipe", "pipe", "ignore"] }).toString();
+                const lines = output.trim().split("\n");
+                for (const line of lines) {
+                    const parts = line.trim().split(/\s+/);
+                    const pid = parts[parts.length - 1];
+                    if (pid && !isNaN(Number(pid)) && Number(pid) !== process.pid) {
+                        try {
+                            execSync(`taskkill /F /PID ${pid}`, { stdio: "ignore" });
+                            console.log(logger.yellow(`  [Port Cleaner] Freed port ${port} by terminating stale process (PID ${pid})`));
+                        } catch (_) {}
+                    }
+                }
+            }
+        } catch (_) {}
+    };
+
+    freePortIfOccupied(5000);
+    freePortIfOccupied(5001);
+    freePortIfOccupied(5173);
+
     // Stage 6: Spawn Microservices
     console.log(logger.cyan("Spawning EduMate microservice child processes...\n"));
 
-    const backendProcess = spawn("node", ["server/server.js"], {
-        cwd: rootPath,
-        stdio: "pipe",
-        shell: true
-    });
+    let backendProcess = null;
+    let chunkingProcess = null;
+    let frontendProcess = null;
+    let isShuttingDown = false;
 
-    const chunkingProcess = spawn("node", ["server/chunkingServer.js"], {
-        cwd: rootPath,
-        stdio: "pipe",
-        shell: true
-    });
+    const startBackend = () => {
+        if (isShuttingDown) return;
+        backendProcess = spawn("node", ["server/server.js"], {
+            cwd: rootPath,
+            stdio: "pipe",
+            shell: true
+        });
+        setupLogger(backendProcess, "Backend", logger.green);
+        backendProcess.on("close", (code) => {
+            if (!isShuttingDown && code !== 0 && code !== null) {
+                console.log(logger.yellow(`Backend process exited (code ${code}). Auto-restarting in 2s...`));
+                setTimeout(startBackend, 2000);
+            }
+        });
+    };
 
-    const frontendProcess = spawn("npx", ["vite"], {
-        cwd: path.join(rootPath, "client"),
-        stdio: "pipe",
-        shell: true
-    });
+    const startStudio = () => {
+        if (isShuttingDown) return;
+        chunkingProcess = spawn("node", ["server/chunkingServer.js"], {
+            cwd: rootPath,
+            stdio: "pipe",
+            shell: true
+        });
+        setupLogger(chunkingProcess, "Studio", logger.yellow);
+        chunkingProcess.on("close", (code) => {
+            if (!isShuttingDown && code !== 0 && code !== null) {
+                console.log(logger.yellow(`Studio process exited (code ${code}). Auto-restarting in 2s...`));
+                setTimeout(startStudio, 2000);
+            }
+        });
+    };
+
+    const startFrontend = () => {
+        if (isShuttingDown) return;
+        frontendProcess = spawn("npm", ["run", "dev", "--prefix", "client"], {
+            cwd: rootPath,
+            stdio: "pipe",
+            shell: true
+        });
+        setupLogger(frontendProcess, "Frontend", logger.blue);
+        frontendProcess.on("close", (code) => {
+            if (!isShuttingDown && code !== 0 && code !== null) {
+                console.log(logger.yellow(`Frontend process exited (code ${code}). Auto-restarting in 2s...`));
+                setTimeout(startFrontend, 2000);
+            }
+        });
+    };
 
     // Stream log multiplexer
     const setupLogger = (proc, prefix, colorFn) => {
@@ -192,9 +252,39 @@ const startDev = async () => {
         });
     };
 
-    setupLogger(backendProcess, "Backend", logger.green);
-    setupLogger(chunkingProcess, "Studio", logger.yellow);
-    setupLogger(frontendProcess, "Frontend", logger.blue);
+    startBackend();
+    startStudio();
+    startFrontend();
+
+    // Stage 7: Health Monitoring & Browser Auto-Launch
+    let browserOpened = false;
+    const pollReadiness = setInterval(async () => {
+        if (browserOpened || isShuttingDown) return;
+        const [backendUp, frontendUp] = await Promise.all([
+            checkHttpService("http://localhost:5000/api/health", 800),
+            checkHttpService("http://localhost:5173", 800)
+        ]);
+
+        if (backendUp && frontendUp && !browserOpened) {
+            browserOpened = true;
+            clearInterval(pollReadiness);
+            console.log("\n" + logger.green("======================================================="));
+            console.log(logger.green("  🎉 EDUMATE PLATFORM READY & ACTIVE"));
+            console.log(logger.cyan("  ➜ Web App (Frontend):  http://localhost:5173"));
+            console.log(logger.cyan("  ➜ REST API (Backend):  http://localhost:5000"));
+            console.log(logger.cyan("  ➜ Knowledge Studio:    http://localhost:5001"));
+            console.log(logger.green("=======================================================\n"));
+
+            // Open browser automatically on Windows / macOS / Linux
+            try {
+                const openCmd = process.platform === "win32" ? "start" : (process.platform === "darwin" ? "open" : "xdg-open");
+                require("child_process").exec(`${openCmd} http://localhost:5173`);
+            } catch (_) {}
+        }
+    }, 1500);
+
+    // Clear poll after 30s max
+    setTimeout(() => clearInterval(pollReadiness), 30000);
 
     // Optional Debug Memory Monitor (Only in debug mode)
     if (isDebug) {
@@ -206,33 +296,16 @@ const startDev = async () => {
 
     // Graceful Shutdown Cleanup
     const cleanExit = () => {
-        try { backendProcess.kill(); } catch (_) {}
-        try { chunkingProcess.kill(); } catch (_) {}
-        try { frontendProcess.kill(); } catch (_) {}
+        isShuttingDown = true;
+        try { backendProcess?.kill(); } catch (_) {}
+        try { chunkingProcess?.kill(); } catch (_) {}
+        try { frontendProcess?.kill(); } catch (_) {}
         process.exit();
     };
 
     process.on("SIGINT", cleanExit);
     process.on("SIGTERM", cleanExit);
     process.on("exit", cleanExit);
-
-    backendProcess.on("close", (code) => {
-        if (code !== 0 && code !== null) {
-            console.log(logger.yellow(`Backend process exited with code ${code}`));
-        }
-    });
-
-    chunkingProcess.on("close", (code) => {
-        if (code !== 0 && code !== null) {
-            console.log(logger.yellow(`Studio process exited with code ${code}`));
-        }
-    });
-
-    frontendProcess.on("close", (code) => {
-        if (code !== 0 && code !== null) {
-            console.log(logger.yellow(`Frontend process exited with code ${code}`));
-        }
-    });
 };
 
 startDev().catch((err) => {

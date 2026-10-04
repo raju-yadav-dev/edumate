@@ -118,28 +118,33 @@ export async function authFetch(url, options = {}) {
                     const refreshed = await refreshAccessToken();
                     isRefreshing = false;
                     onRefreshed(refreshed.accessToken);
+                    const retryHeaders = {
+                        ...headers,
+                        Authorization: `Bearer ${refreshed.accessToken}`
+                    };
+                    return await fetch(url, { ...options, headers: retryHeaders });
                 } catch (refreshErr) {
                     isRefreshing = false;
                     refreshSubscribers = [];
                     throw refreshErr;
                 }
-            }
-
-            // Return a promise that waits for the refresh to finish and retries
-            return new Promise((resolve, reject) => {
-                subscribeTokenRefresh(async (newToken) => {
-                    try {
-                        const retryHeaders = {
-                            ...headers,
-                            Authorization: `Bearer ${newToken}`
-                        };
-                        const retryResponse = await fetch(url, { ...options, headers: retryHeaders });
-                        resolve(retryResponse);
-                    } catch (retryErr) {
-                        reject(retryErr);
-                    }
+            } else {
+                // Return a promise that waits for the in-progress refresh to finish and retries
+                return new Promise((resolve, reject) => {
+                    subscribeTokenRefresh(async (newToken) => {
+                        try {
+                            const retryHeaders = {
+                                ...headers,
+                                Authorization: `Bearer ${newToken}`
+                            };
+                            const retryResponse = await fetch(url, { ...options, headers: retryHeaders });
+                            resolve(retryResponse);
+                        } catch (retryErr) {
+                            reject(retryErr);
+                        }
+                    });
                 });
-            });
+            }
         }
     }
 

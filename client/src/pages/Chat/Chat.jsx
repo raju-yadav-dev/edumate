@@ -650,28 +650,36 @@ function Chat() {
     }, [activeThreadId, attachments, conversationId, loading, gpsCoords, activeBranchMessages, activeChildMap, activeLang]);
 
     const visibleMessages = useMemo(() => {
-        if (!activeBranchMessages.length) {
+        if (!activeBranchMessages?.length) {
             return [];
         }
 
-        if (!messageSearch.trim()) {
-            return activeBranchMessages;
+        let filtered = activeBranchMessages.filter((message) => {
+            if (!message) return false;
+            if (message.id === streamingMessageId && !message.content && !streamingText) {
+                return false;
+            }
+            return true;
+        });
+
+        if (!messageSearch?.trim()) {
+            return filtered;
         }
 
         const query = messageSearch.trim().toLowerCase();
 
-        return activeBranchMessages.filter((message) => message.content.toLowerCase().includes(query));
-    }, [activeBranchMessages, messageSearch]);
+        return filtered.filter((message) => String(message?.content || "").toLowerCase().includes(query));
+    }, [activeBranchMessages, messageSearch, streamingMessageId, streamingText]);
 
     const groupedSections = useMemo(() => {
-        const query = chatSearch.trim().toLowerCase();
+        const query = (chatSearch || "").trim().toLowerCase();
 
-        const filteredThreads = threads.filter((thread) => {
+        const filteredThreads = (threads || []).filter((thread) => {
             if (!query) {
                 return true;
             }
 
-            return [thread.title, thread.preview, ...(thread.messages || []).map((message) => message.content)].join(" ").toLowerCase().includes(query);
+            return [thread.title, thread.preview, ...(thread.messages || []).map((message) => message?.content || "")].join(" ").toLowerCase().includes(query);
         });
 
         return [
@@ -1118,7 +1126,7 @@ function Chat() {
                                 );
                             })}
 
-                            {loading ? <TypingIndicator /> : null}
+                            {loading && !streamingText ? <TypingIndicator /> : null}
                             <div ref={bottomRef} />
                         </div>
                     )}

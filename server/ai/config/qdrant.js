@@ -27,13 +27,43 @@ let QdrantClientClass = null;
 try {
     QdrantClientClass = require("@qdrant/js-client-rest").QdrantClient;
 } catch (e) {}
-
 const { withTimeoutAndRetry } = require("../../utils/fetchHelper");
 
 const qdrantUrl = process.env.QDRANT_URL || "http://127.0.0.1:6333";
 const qdrantApiKey = process.env.QDRANT_API_KEY || undefined;
 const collectionName = process.env.QDRANT_COLLECTION || "edumate";
 const qdrantVectorName = process.env.QDRANT_VECTOR_NAME || "default";
+
+// Circuit Breaker State
+let qdrantOfflineUntil = 0;
+const OFFLINE_COOLDOWN_MS = 8000;
+
+const isQdrantAvailable = async (probeTimeoutMs = 600) => {
+    const now = Date.now();
+    if (now < qdrantOfflineUntil) {
+        return false;
+    }
+
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), probeTimeoutMs);
+        const res = await fetch(`${qdrantUrl}/collections`, {
+            method: "GET",
+            headers: qdrantApiKey ? { "api-key": qdrantApiKey } : {},
+            signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        if (res && res.ok) {
+            qdrantOfflineUntil = 0;
+            return true;
+        }
+        qdrantOfflineUntil = Date.now() + OFFLINE_COOLDOWN_MS;
+        return false;
+    } catch (_) {
+        qdrantOfflineUntil = Date.now() + OFFLINE_COOLDOWN_MS;
+        return false;
+    }
+};
 
 // Initialize Qdrant Client lazily
 let rawClient = null;
@@ -55,14 +85,22 @@ const client = new Proxy({}, {
         }
         const origMethod = rawClient[prop];
         if (typeof origMethod === "function") {
-            return function (...args) {
-                return withTimeoutAndRetry(
-                    () => origMethod.apply(rawClient, args),
-                    15000,
-                    3,
-                    1000,
-                    `Qdrant.${prop}`
-                );
+            return async function (...args) {
+                if (Date.now() < qdrantOfflineUntil) {
+                    throw new Error("Qdrant service is currently offline (circuit breaker active)");
+                }
+                try {
+                    return await withTimeoutAndRetry(
+                        () => origMethod.apply(rawClient, args),
+                        3000,
+                        2,
+                        300,
+                        `Qdrant.${prop}`
+                    );
+                } catch (err) {
+                    qdrantOfflineUntil = Date.now() + OFFLINE_COOLDOWN_MS;
+                    throw err;
+                }
             };
         }
         return origMethod;
@@ -200,5 +238,6 @@ module.exports = {
     client,
     collectionName,
     ensureCollection,
+    isQdrantAvailable,
     vectorName: qdrantVectorName
 };

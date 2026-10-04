@@ -543,122 +543,94 @@ const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL
     let usedFilter = undefined;
     let filteredCount = 0;
 
-    // 2. Metadata-First Qdrant Vector Search
-    try {
-        const queryEmbedding = await embeddingService.getQueryEmbedding(expandedQuestion);
+    // 2. Metadata-First Qdrant Vector Search (Guarded by fast availability check)
+    const { isQdrantAvailable } = require("../config/qdrant");
+    const qdrantIsUp = await isQdrantAvailable(400);
 
-        // Build strict metadata filter first
-        const strictFilter = buildPlannerQdrantFilter({
-            queryPlan,
-            user,
-            ignoreInstitution,
-            filter
-        });
+    if (qdrantIsUp) {
+        try {
+            const queryEmbedding = await embeddingService.getQueryEmbedding(expandedQuestion);
 
-        usedFilter = strictFilter;
-        console.log(`[RAG DEBUG] Executing Metadata-Filtered Qdrant search. Filter:`, JSON.stringify(strictFilter));
-
-        semanticCandidates = await retrieveRelevantChunks({
-            queryEmbedding,
-            limit: currentFetchK,
-            filter: strictFilter,
-            isRawFilter: true
-        });
-
-        // Controlled relaxation: If strict filter with heading/documentType yields 0 results, relax heading/docType while strictly preserving department & category
-        if (semanticCandidates.length === 0 && (queryPlan.heading || queryPlan.documentType)) {
-            console.log(`[RAG DEBUG] Strict filter returned 0 results. Relaxing heading/docType constraints while preserving category & department.`);
-            const relaxedFilter = buildPlannerQdrantFilter({
+            // Build strict metadata filter first
+            const strictFilter = buildPlannerQdrantFilter({
                 queryPlan,
                 user,
                 ignoreInstitution,
-                filter,
-                relaxHeading: true,
-                relaxDocType: true
+                filter
             });
-            usedFilter = relaxedFilter;
-            semanticCandidates = await retrieveRelevantChunks({
-                queryEmbedding,
-                limit: currentFetchK,
-                filter: relaxedFilter,
-                isRawFilter: true
-            });
-        }
 
-        // Final semantic fallback: If filtered search still returns 0 results, search Qdrant by embedding
-        if (semanticCandidates.length === 0) {
-            console.log(`[RAG DEBUG] Filtered search returned 0 results. Falling back to semantic similarity vector search.`);
+            usedFilter = strictFilter;
+            console.log(`[RAG DEBUG] Executing Metadata-Filtered Qdrant search. Filter:`, JSON.stringify(strictFilter));
+
             semanticCandidates = await retrieveRelevantChunks({
                 queryEmbedding,
                 limit: currentFetchK,
-                filter: (user?.institution && !ignoreInstitution && user.institution !== "all") ? {
-                    should: [
-                        { key: "institution", match: { value: user.institution } },
-                        { key: "institution", match: { value: "all" } },
-                        { key: "institution", match: { value: "general" } },
-                        { key: "institution", match: { value: "" } }
-                    ]
-                } : {},
+                filter: strictFilter,
                 isRawFilter: true
             });
+
+            // Controlled relaxation: If strict filter with heading/documentType yields 0 results, relax heading/docType while strictly preserving department & category
+            if (semanticCandidates.length === 0 && (queryPlan.heading || queryPlan.documentType)) {
+                console.log(`[RAG DEBUG] Strict filter returned 0 results. Relaxing heading/docType constraints while preserving category & department.`);
+                const relaxedFilter = buildPlannerQdrantFilter({
+                    queryPlan,
+                    user,
+                    ignoreInstitution,
+                    filter,
+                    relaxHeading: true,
+                    relaxDocType: true
+                });
+                usedFilter = relaxedFilter;
+                semanticCandidates = await retrieveRelevantChunks({
+                    queryEmbedding,
+                    limit: currentFetchK,
+                    filter: relaxedFilter,
+                    isRawFilter: true
+                });
+            }
+
+            // Final semantic fallback: If filtered search still returns 0 results, search Qdrant by embedding
+            if (semanticCandidates.length === 0) {
+                console.log(`[RAG DEBUG] Filtered search returned 0 results. Falling back to semantic similarity vector search.`);
+                semanticCandidates = await retrieveRelevantChunks({
+                    queryEmbedding,
+                    limit: currentFetchK,
+                    filter: (user?.institution && !ignoreInstitution && user.institution !== "all") ? {
+                        should: [
+                            { key: "institution", match: { value: user.institution } },
+                            { key: "institution", match: { value: "all" } },
+                            { key: "institution", match: { value: "general" } },
+                            { key: "institution", match: { value: "" } }
+                        ]
+                    } : {},
+                    isRawFilter: true
+                });
+            }
+        } catch (vectorErr) {
+            console.error("[Retrieval Service] Semantic search failed:", vectorErr.message);
         }
-    } catch (vectorErr) {
-        console.error("[Retrieval Service] Semantic search failed:", vectorErr.message);
+    } else {
+        console.log("[Retrieval Service] Qdrant is offline/unavailable. Falling back instantly to local high-precision knowledge search.");
     }
 
-    // 3. Mongo Keyword Search restricted to same metadata constraints
+    // 3. Local Chunk Keyword & Semantic Search restricted to same metadata constraints
     try {
-        const cleanQuery = question.toLowerCase().replace(/[^a-z0-9\s]/g, " ").trim();
-        const words = cleanQuery.split(/\s+/).filter(w => w.length > 1);
-        const stopWords = new Set(["what", "is", "the", "for", "tell", "me", "show", "who", "where", "when", "why", "which", "are", "am", "a", "an", "of", "in", "on", "at", "to", "with", "by", "from", "and", "or", "about"]);
-        let keywords = words.filter(w => !stopWords.has(w));
+        const localSearchFilters = {
+            category: queryPlan.category || filter?.category,
+            department: queryPlan.department || filter?.department,
+            program: queryPlan.program || filter?.program,
+            documentType: queryPlan.documentType || filter?.documentType,
+            institution: (user?.institution && !ignoreInstitution) ? user.institution : "all"
+        };
 
-        if (keywords.length > 0) {
-            const regexes = keywords.map(kw => new RegExp(`\\b${kw.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')}\\b`, "i"));
-            const mustConditions = [
-                { $or: regexes.map(r => ({ content: r })) }
-            ];
-
-            if (user?.institution && !ignoreInstitution) {
-                mustConditions.push({
-                    "metadata.institution": { $in: [user.institution, "all", "general", "", null] }
-                });
-            }
-            if (filter?.sourceType) {
-                mustConditions.push({ "metadata.sourceType": filter.sourceType });
-            }
-            if (queryPlan.category) {
-                mustConditions.push({ "metadata.category": queryPlan.category });
-            }
-            if (queryPlan.department) {
-                mustConditions.push({
-                    $or: [
-                        { "metadata.department": queryPlan.department },
-                        { "metadata.departments": queryPlan.department }
-                    ]
-                });
-            }
-            if (queryPlan.program) {
-                mustConditions.push({
-                    $or: [
-                        { "metadata.program": queryPlan.program },
-                        { "metadata.course": queryPlan.program },
-                        { "metadata.programs": queryPlan.program }
-                    ]
-                });
-            }
-
-            keywordCandidates = localChunkManager.searchLocalChunks(
-                queryStr,
-                {
-                    category: queryPlan.category,
-                    department: queryPlan.department
-                },
-                30
-            );
-        }
+        keywordCandidates = localChunkManager.searchLocalChunks(
+            expandedQuestion,
+            localSearchFilters,
+            currentFetchK
+        );
+        console.log(`[Retrieval Service] Local chunk search returned ${keywordCandidates.length} candidate chunks.`);
     } catch (searchErr) {
-        // Silently continue if local chunk search encountered warning
+        console.error("[Retrieval Service] Local chunk search warning:", searchErr.message);
     }
 
     // 4. Multi-tier Deduplication

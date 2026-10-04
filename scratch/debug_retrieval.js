@@ -1,69 +1,50 @@
-const mongoose = require("mongoose");
 const path = require("path");
-const queryRewriterService = require("../server/ai/services/queryRewriterService");
-const retrievalService = require("../server/ai/services/retrievalService");
-const { decide } = require("../server/services/decisionEngine");
+require("dotenv").config({ path: path.resolve(__dirname, "../.env") });
 
-require("dotenv").config({ path: path.join(__dirname, "../server/.env") });
+async function debugRetrieval() {
+    const { client, collectionName } = require("../server/ai/config/qdrant");
+    const { embedText } = require("../server/ai/config/embeddings");
+    const { planQuery } = require("../server/ai/utils/queryPlanner");
+    const { buildPlannerQdrantFilter } = require("../server/ai/services/retrievalService");
 
-async function debugQuery(question) {
-    console.log(`\n==================================================`);
-    console.log(`DEBUGGING QUERY: "${question}"`);
-    console.log(`==================================================`);
+    const query = "engineering building";
+    const vector = await embedText(query, { task: "retrieval.query" });
+    const queryPlan = planQuery(query);
+    console.log("Query Plan:", JSON.stringify(queryPlan, null, 2));
 
-    // 1. Intent & Rewriting
-    const analysis = await queryRewriterService.analyzeQuery({
-        question,
-        historyText: "",
-        conversationContext: {},
-        user: { institution: "Brainware University" }
-    });
+    const filter = buildPlannerQdrantFilter({ queryPlan, user: { institution: "all" } });
+    console.log("Built Filter:", JSON.stringify(filter, null, 2));
 
-    console.log("\n[A] Query Analysis:");
-    console.log("  - Rewritten Query:", analysis.rewrittenQuery);
-    console.log("  - Detected Intent:", JSON.stringify(analysis.intent));
-    console.log("  - Subqueries:", JSON.stringify(analysis.subqueries));
-    console.log("  - Entities:", JSON.stringify(analysis.entities));
-
-    // 2. Decision Routing
-    const primaryIntent = Array.isArray(analysis.intent) ? analysis.intent[0] : analysis.intent;
-    const decision = decide({ intent: primaryIntent, question: analysis.rewrittenQuery });
-    console.log("\n[B] Decision Routing:");
-    console.log("  - Decision service:", decision.service);
-
-    // 3. Retrieval
-    console.log("\n[C] Retrieving Chunks (Simulating RAG Retrieval)...");
+    // Test search with filter
     try {
-        const results = await retrievalService.retrieve({
-            question: analysis.rewrittenQuery,
-            user: { institution: "Brainware University", role: "student" },
-            limit: 5
+        console.log("Testing search WITH filter...");
+        const resWithFilter = await client.search(collectionName, {
+            vector: vector,
+            limit: 5,
+            filter: filter,
+            with_payload: true
         });
+        console.log("Search with filter success! Results count:", resWithFilter.length);
+    } catch (e) {
+        console.error("Search with filter failed:", e.message);
+        if (e.data) console.error("Error data:", JSON.stringify(e.data));
+    }
 
-        console.log(`\n[D] Retrieved Candidate count: ${results.length}`);
-        results.forEach((chunk, index) => {
-            console.log(`  [Candidate ${index + 1}]`);
-            console.log(`    - Score: ${chunk.score}`);
-            console.log(`    - Document Name: ${chunk.metadata?.originalName || chunk.metadata?.filename}`);
-            console.log(`    - Document ID: ${chunk.metadata?.documentId}`);
-            console.log(`    - Document Type: ${chunk.metadata?.documentType}`);
-            console.log(`    - Category: ${chunk.metadata?.category}`);
-            console.log(`    - Source Type: ${chunk.metadata?.sourceType}`);
-            console.log(`    - Content Preview: "${chunk.content.substring(0, 150).replace(/\n/g, " ")}..."`);
+    // Test search WITHOUT filter
+    try {
+        console.log("\nTesting search WITHOUT filter...");
+        const resNoFilter = await client.search(collectionName, {
+            vector: vector,
+            limit: 5,
+            with_payload: true
         });
-    } catch (err) {
-        console.error("  - Retrieval failed:", err);
+        console.log("Search without filter success! Results count:", resNoFilter.length);
+        if (resNoFilter.length > 0) {
+            console.log("Sample result payload:", resNoFilter[0].payload);
+        }
+    } catch (e) {
+        console.error("Search without filter failed:", e.message);
     }
 }
 
-async function main() {
-    await mongoose.connect(process.env.MONGODB_URI);
-    console.log("Connected to MongoDB");
-
-    await debugQuery("what is the eligibility for btech");
-    await debugQuery("tell me about bca");
-
-    await mongoose.disconnect();
-}
-
-main().catch(console.error);
+debugRetrieval().catch(console.error);

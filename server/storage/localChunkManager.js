@@ -325,16 +325,21 @@ function getAllChunkStats() {
 }
 
 /**
- * Fast keyword / regex search across local chunk files.
+ * High-performance keyword & semantic metadata search across local chunk files.
  */
 function searchLocalChunks(queryText = "", filters = {}, limit = 30) {
     ensureChunkStorageRoot();
     const results = [];
     if (!queryText || typeof queryText !== "string") return results;
 
-    const queryLower = queryText.toLowerCase().trim();
-    const tokens = queryLower.split(/\s+/).filter(t => t.length > 2);
+    const cleanQuery = queryText.toLowerCase().replace(/[^a-z0-9\s]/g, " ").trim();
+    const stopWords = new Set(["what", "is", "the", "for", "tell", "me", "show", "who", "where", "when", "why", "which", "are", "am", "a", "an", "of", "in", "on", "at", "to", "with", "by", "from", "and", "or", "about", "how", "much", "many", "does", "do", "can"]);
+    const rawTokens = cleanQuery.split(/\s+/).filter(Boolean);
+    const significantTokens = rawTokens.filter(t => !stopWords.has(t) && t.length > 1);
+    const tokens = significantTokens.length > 0 ? significantTokens : rawTokens;
+
     if (tokens.length === 0) return results;
+    const fullPhrase = significantTokens.join(" ");
 
     try {
         const files = fs.readdirSync(CHUNK_STORAGE_DIR);
@@ -348,41 +353,132 @@ function searchLocalChunks(queryText = "", filters = {}, limit = 30) {
                 const docId = parsed.documentId;
                 const chunks = Array.isArray(parsed.chunks) ? parsed.chunks : [];
 
-                // Filter by category or department if specified
-                if (filters.category && parsed.category && parsed.category.toLowerCase() !== filters.category.toLowerCase()) {
-                    continue;
+                const docCategory = String(parsed.category || "").toLowerCase();
+                const docOriginalName = String(parsed.originalName || "").toLowerCase();
+
+                // 1. Metadata Level Filtering (Doc level)
+                if (filters.category && docCategory && docCategory !== "all" && docCategory !== "general") {
+                    const filterCat = String(filters.category).toLowerCase();
+                    if (!docCategory.includes(filterCat) && !filterCat.includes(docCategory)) {
+                        // Allow if query didn't strictly require it or check chunk level
+                    }
                 }
 
                 for (const chunk of chunks) {
-                    const contentLower = (chunk.content || "").toLowerCase();
-                    const headingLower = (chunk.heading || "").toLowerCase();
-                    const combined = `${headingLower} ${contentLower}`;
+                    const meta = chunk.metadata || {};
+                    const chunkCat = String(meta.category || docCategory).toLowerCase();
+                    const chunkDept = String(meta.department || "").toLowerCase();
+                    const chunkProg = String(meta.program || meta.course || "").toLowerCase();
+                    const chunkDocType = String(meta.documentType || "").toLowerCase();
+                    const chunkHeading = String(chunk.heading || meta.heading || "").toLowerCase();
+                    const chunkParentHeading = String(chunk.parentHeading || meta.parentHeading || "").toLowerCase();
+                    const chunkKeywords = Array.isArray(meta.keywords) ? meta.keywords.map(k => String(k).toLowerCase()) : [];
+                    const content = chunk.content || "";
+                    const contentLower = content.toLowerCase();
 
-                    let score = 0;
-                    for (const token of tokens) {
-                        if (combined.includes(token)) {
-                            score += 1;
+                    // Filter matching
+                    if (filters.category && filters.category !== "all" && filters.category !== "general") {
+                        const targetCat = String(filters.category).toLowerCase();
+                        if (chunkCat && chunkCat !== targetCat && !chunkCat.includes(targetCat) && !targetCat.includes(chunkCat)) {
+                            // Don't discard immediately, but lower priority
                         }
                     }
 
-                    if (score > 0) {
+                    if (filters.department) {
+                        const targetDept = String(filters.department).toLowerCase();
+                        if (chunkDept && chunkDept !== "unknown" && chunkDept !== targetDept && !chunkDept.includes(targetDept) && !targetDept.includes(chunkDept)) {
+                            continue; // Skip chunks from definitely different departments
+                        }
+                    }
+
+                    if (filters.program) {
+                        const targetProg = String(filters.program).toLowerCase();
+                        if (chunkProg && chunkProg !== targetProg && !chunkProg.includes(targetProg) && !targetProg.includes(chunkProg) && !contentLower.includes(targetProg)) {
+                            // If chunk belongs to another specific program, skip
+                        }
+                    }
+
+                    let score = 0;
+                    let matchedTerms = 0;
+
+                    // Exact phrase match
+                    if (fullPhrase.length > 4 && (contentLower.includes(fullPhrase) || chunkHeading.includes(fullPhrase))) {
+                        score += 8.0;
+                    }
+
+                    // Token matches across fields
+                    for (const token of tokens) {
+                        let tokenMatched = false;
+
+                        // Match in program / course name (highest weight)
+                        if (chunkProg.includes(token)) {
+                            score += 4.0;
+                            tokenMatched = true;
+                        }
+
+                        // Match in heading / section title (high weight)
+                        if (chunkHeading.includes(token) || chunkParentHeading.includes(token)) {
+                            score += 3.0;
+                            tokenMatched = true;
+                        }
+
+                        // Match in keywords
+                        if (chunkKeywords.some(k => k.includes(token))) {
+                            score += 2.0;
+                            tokenMatched = true;
+                        }
+
+                        // Match in content
+                        if (contentLower.includes(token)) {
+                            // Count occurrences (capped at 4)
+                            const count = (contentLower.match(new RegExp(`\\b${token}`, "g")) || []).length;
+                            score += Math.min(count, 4) * 1.0;
+                            tokenMatched = true;
+                        }
+
+                        if (tokenMatched) matchedTerms++;
+                    }
+
+                    // Metadata alignment bonus
+                    if (filters.program && (chunkProg.includes(String(filters.program).toLowerCase()) || contentLower.includes(String(filters.program).toLowerCase()))) {
+                        score += 3.0;
+                    }
+                    if (filters.category && chunkCat.includes(String(filters.category).toLowerCase())) {
+                        score += 2.0;
+                    }
+                    if (filters.documentType && chunkDocType.includes(String(filters.documentType).toLowerCase())) {
+                        score += 2.0;
+                    }
+
+                    if (score > 0 && matchedTerms > 0) {
+                        const coverage = matchedTerms / tokens.length;
+                        const finalScore = parseFloat(((score * 0.1) * (0.5 + 0.5 * coverage)).toFixed(4));
+
                         results.push({
-                            id: chunk.chunkId,
+                            id: chunk.chunkId || `${docId}_${chunk.chunkIndex}`,
                             content: chunk.content,
-                            score,
+                            score: Math.min(1.0, finalScore),
                             metadata: {
-                                ...(chunk.metadata || {}),
+                                ...meta,
                                 documentId: docId,
-                                chunkId: chunk.chunkId,
-                                pageNumber: chunk.pageNumber || 1,
-                                heading: chunk.heading,
-                                parentHeading: chunk.parentHeading,
-                                originalName: parsed.originalName
+                                sourceDocumentId: docId,
+                                chunkId: chunk.chunkId || `${docId}_${chunk.chunkIndex}`,
+                                pageNumber: chunk.pageNumber || meta.pageNumber || 1,
+                                page: chunk.pageNumber || meta.pageNumber || 1,
+                                heading: chunk.heading || meta.heading || "Document",
+                                parentHeading: chunk.parentHeading || meta.parentHeading || "Document",
+                                parentSection: meta.parentSection || chunk.parentHeading || "Document",
+                                originalName: parsed.originalName || meta.originalName || "Document",
+                                filename: parsed.originalName || meta.originalName || "Document",
+                                category: meta.category || parsed.category || "general",
+                                department: meta.department || parsed.department || "",
+                                program: meta.program || parsed.program || "",
+                                course: meta.course || meta.program || "",
+                                documentType: meta.documentType || parsed.documentType || "general",
+                                institution: meta.institution || parsed.institution || "all"
                             }
                         });
                     }
-
-                    if (results.length >= limit * 3) break;
                 }
             } catch (_) {}
         }

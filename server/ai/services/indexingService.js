@@ -786,7 +786,21 @@ const runIndexingPipeline = async (documentId, initialBuffer = null, options = {
             return;
         }
 
-        await deleteDocumentIndex(documentId);
+        // Purge previous vectors from Qdrant for this document before upserting new ones
+        try {
+            await withTimeout(
+                client.delete(collectionName, {
+                    filter: {
+                        should: [
+                            { key: "documentId", match: { value: String(documentId) } },
+                            { key: "sourceDocumentId", match: { value: String(documentId) } }
+                        ]
+                    }
+                }),
+                15000,
+                "Qdrant delete index timed out (15s)"
+            );
+        } catch (_) {}
 
         // Determine whether Qdrant collection uses named or unnamed vector
         let isNamedVector = false;

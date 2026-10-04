@@ -212,7 +212,7 @@ const fetch = (() => {
 const llamaCppProvider = require("../../services/llamaCppProvider");
 
 async function fetchLlamaCompletion(messages, onChunk, options = {}) {
-    return llamaCppProvider.generateCompletion(messages, onChunk, options);
+    return aiProviderManager.generateAIResponse(messages, onChunk, options);
 }
 
 const generateCompletion = async (messages, options = {}) => {

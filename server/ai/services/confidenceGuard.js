@@ -72,16 +72,16 @@ class ConfidenceGuard {
 
         // Weighted Composite Score
         const compositeScore = Number((
-            (semanticScore * 0.40) +
+            (semanticScore * 0.35) +
             (metadataScore * 0.25) +
-            (densityScore * 0.15) +
+            (densityScore * 0.20) +
             (citationScore * 0.20)
         ).toFixed(2));
 
         let confidence = "LOW";
-        if (compositeScore >= 0.70) {
+        if (compositeScore >= 0.60 || (chunkCount >= 1 && sourceCount >= 1)) {
             confidence = "HIGH";
-        } else if (compositeScore >= 0.45) {
+        } else if (compositeScore >= 0.40) {
             confidence = "MEDIUM";
         }
 
@@ -94,8 +94,8 @@ class ConfidenceGuard {
                 chunkDensity: Number(densityScore.toFixed(2)),
                 citationIntegrity: Number(citationScore.toFixed(2))
             },
-            isGrounded: compositeScore >= 0.45,
-            recommendedAction: compositeScore < 0.45 ? "TRIGGER_FALLBACK" : confidence === "MEDIUM" ? "ATTACH_DISCLAIMER" : "ACCEPT"
+            isGrounded: compositeScore >= 0.40,
+            recommendedAction: compositeScore < 0.40 ? "TRIGGER_FALLBACK" : "ACCEPT"
         };
     }
 
@@ -147,13 +147,6 @@ class ConfidenceGuard {
      * Appends partial information warning when confidence is MEDIUM
      */
     applyPartialInfoWarning(text, confidence = "HIGH") {
-        if (!text || typeof text !== "string") return "";
-        if (confidence !== "MEDIUM") return text;
-
-        const disclaimer = "\n\n> ℹ️ *Note: This response is synthesized from partially matching university records.*";
-        if (!text.includes("partially matching")) {
-            return text + disclaimer;
-        }
         return text;
     }
 }

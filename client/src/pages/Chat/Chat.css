@@ -1736,3 +1736,33 @@
 .edu-chat-message-user .edu-chat-markdown h6{
     color:#071018;
 }
+
+/* Typing effect cursor for live streaming responses */
+.edu-chat-typing-cursor {
+    display: inline-block;
+    width: 3px;
+    height: 1.15em;
+    margin-left: 4px;
+    vertical-align: -0.15em;
+    background-color: var(--primary, #d8ff1f);
+    border-radius: 2px;
+    box-shadow: 0 0 8px var(--primary, #d8ff1f);
+    animation: eduCursorBlink 0.8s infinite ease-in-out;
+}
+
+[data-theme="light"] .edu-chat-typing-cursor {
+    background-color: #655bf0;
+    box-shadow: 0 0 6px rgba(101, 91, 240, 0.6);
+}
+
+@keyframes eduCursorBlink {
+    0%, 100% {
+        opacity: 1;
+        transform: scaleY(1);
+    }
+    50% {
+        opacity: 0.15;
+        transform: scaleY(0.85);
+    }
+}
+

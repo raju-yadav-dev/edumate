@@ -8,7 +8,7 @@ const AI_CONSTANTS = require("../constants/aiConstants");
 // AI module services
 const llmService = require("./llmService");
 const llama = require("../../config/llama");
-const { getLlmConfig } = require("../../config/llm");
+const { getLlmConfig, calculateDynamicOutputBudget } = require("../../config/llm");
 const rerankService = require("./rerankService");
 const conversationService = require("./conversationService");
 const intentDetectionService = require("./intentDetectionService");
@@ -553,7 +553,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
         try {
             const SearchManager = require("../../knowledge/SearchManager");
             retrievedChunksRaw = await Promise.race([
-                SearchManager.searchLocalPdfs(rewrittenQuery, activeUser, 8),
+                SearchManager.searchLocalPdfs(rewrittenQuery, activeUser, 6),
                 retrievalTimeoutPromise
             ]);
         } catch (retrieveErr) {
@@ -586,7 +586,9 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
         } else {
             const RankingEngine = require("../../knowledge/RankingEngine");
             const rankedChunks = await RankingEngine.rerankCandidates(rewrittenQuery, retrievedChunksRaw, activeUser);
-            combinedDocChunks = selectDiverseChunks(rankedChunks, 8);
+            const isCompare = recPrimaryIntent === "comparison" || String(rewrittenQuery).toLowerCase().includes("compare") || String(rewrittenQuery).toLowerCase().includes(" vs ");
+            const chunkLimit = (chatQueryPlan?.complexity === "high" || isCompare) ? 5 : 3;
+            combinedDocChunks = selectDiverseChunks(rankedChunks, chunkLimit);
             if (rawChunkIds.length > 0 && combinedDocChunks.length > 0) {
                 cacheService.setContextCache(rawChunkIds, combinedDocChunks).catch(() => {});
             }
@@ -678,13 +680,16 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
         const stopLlmTimer = tracker.startTimer("llm");
         llmStart = Date.now();
 
+        const dynamicBudget = calculateDynamicOutputBudget(rewrittenQuery, recPrimaryIntent || intent);
+        const resolvedMaxTokens = maxOutputTokens || dynamicBudget.maxTokens || 250;
+
         // STAGE 7: llama.cpp Request Payload
         console.log(`[STAGE 7: llama.cpp Request Payload]`, {
             model: llmConfig.model,
             baseUrl: llmConfig.baseUrl,
             temperature: llmConfig.temperature,
             topP: llmConfig.topP,
-            maxTokens: maxOutputTokens || llmConfig.maxTokens,
+            maxTokens: resolvedMaxTokens,
             stream: Boolean(onChunk && llmConfig.stream)
         });
 
@@ -694,7 +699,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
                 messages: tempMessages,
                 temperature: llmConfig.temperature,
                 top_p: llmConfig.topP,
-                max_tokens: maxOutputTokens || llmConfig.maxTokens,
+                max_tokens: resolvedMaxTokens,
                 stream: Boolean(onChunk && llmConfig.stream),
                 onChunk,
                 signal,
@@ -725,7 +730,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
                 provider: llmConfig.provider
             });
         } catch (llmErr) {
-            console.error("[STAGE 8: llama.cpp Response Status] Error:", llmErr.message || llmErr);
+            console.error("[STAGE 8: LLM Response Status] Error:", llmErr.message || llmErr);
             if (routeChosen === "CONVERSATIONAL") {
                 const greeting = deterministicGreeting(activeUser, language);
                 textResponse = greeting.answer;
@@ -733,8 +738,28 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
             } else if (routeChosen === "GENERAL_KNOWLEDGE") {
                 textResponse = `Here is information on your query: ${rawQuestion}. For comprehensive technical or academic details, feel free to explore specific curriculum resources.`;
                 if (onChunk) onChunk(textResponse);
+            } else if (combinedDocChunks.length > 0) {
+                // Intelligent Grounded Extraction from Retrieved Chunks when LLM server is offline
+                const keyExtracts = [];
+                for (const chunk of combinedDocChunks.slice(0, 3)) {
+                    const meta = chunk.metadata || {};
+                    const heading = meta.heading && meta.heading !== "Document" ? `**${meta.heading}**\n` : "";
+                    const content = String(chunk.content || "").trim();
+                    const meaningfulLines = content
+                        .split("\n")
+                        .map(l => l.trim())
+                        .filter(l => l.length > 15 && !l.toLowerCase().startsWith("page "));
+                    if (meaningfulLines.length > 0) {
+                        keyExtracts.push(`${heading}${meaningfulLines.slice(0, 4).join("\n")}`);
+                    }
+                }
+                textResponse = keyExtracts.length > 0
+                    ? `Based on official university documents:\n\n${keyExtracts.join("\n\n")}`
+                    : "I couldn't find matching information in the university knowledge base for that request.";
+                if (onChunk) onChunk(textResponse);
             } else {
                 textResponse = "I could not retrieve an answer from the local model at this moment. Please check with official university resources.";
+                if (onChunk) onChunk(textResponse);
             }
         }
 

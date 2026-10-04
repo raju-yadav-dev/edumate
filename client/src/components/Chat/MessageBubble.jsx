@@ -266,17 +266,17 @@ function MessageBubble({
     onExportDocx,
     isStreaming
 }) {
-    const isUser = message.role === "user";
+    const isUser = message?.role === "user";
     const [isEditing, setIsEditing] = useState(false);
-    const [editText, setEditText] = useState(message.content);
-    const hasSources = Array.isArray(message.sources) && message.sources.length > 0;
+    const [editText, setEditText] = useState(message?.content || "");
+    const hasSources = Array.isArray(message?.sources) && message.sources.length > 0;
     const showCitations = !isUser && hasSources;
 
     const displayContent = (() => {
         if (!isUser && showCitations && isCitationsOnlyRequest(prevMessage)) {
             return "Here are the supportive documents:";
         }
-        return message.content;
+        return message?.content || "";
     })();
 
     const handleCitationClick = (citation) => {
@@ -302,13 +302,13 @@ function MessageBubble({
                     <div className="edu-chat-message-meta" style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
                         <strong>{isUser ? "You" : "EduMate"}</strong>
                         <span>{message.timestamp}</span>
-                        {message.confidence ? <ConfidenceBadge value={message.confidence} /> : null}
+                        {message.confidence && !isStreaming ? <ConfidenceBadge value={message.confidence} /> : null}
                         {message.bookmarked ? <span className="edu-chat-bookmark-pill">Bookmarked</span> : null}
                         {message.reaction ? <span className={`edu-chat-reaction-pill edu-chat-reaction-${message.reaction}`}>{message.reaction}</span> : null}
                         {message.pinned ? <span className="edu-chat-pinned-pill" style={{ background: "var(--warning)", color: "#000", padding: "1px 6px", borderRadius: "8px", fontSize: "11px" }}>Pinned</span> : null}
 
                         {/* Sibling Branch Switcher */}
-                        {siblings && siblings.length > 1 && (
+                        {siblings && siblings.length > 1 && !isStreaming && (
                             <div className="branch-selector" style={{ display: "inline-flex", alignItems: "center", gap: "4px", background: "rgba(0,0,0,0.05)", padding: "2px 6px", borderRadius: "12px", fontSize: "11px", marginLeft: "8px" }}>
                                 <button
                                     type="button"
@@ -343,38 +343,40 @@ function MessageBubble({
                         )}
 
                         {/* Quick Actions (Edit, Pin, Delete) */}
-                        <div style={{ marginLeft: "auto", display: "flex", gap: "6px", opacity: 0.7 }}>
-                            {isUser && !isEditing && onEditMessage && (
-                                <button
-                                    type="button"
-                                    onClick={() => setIsEditing(true)}
-                                    style={{ border: "none", background: "none", cursor: "pointer", padding: "2px", display: "flex", alignItems: "center" }}
-                                    title="Edit query"
-                                >
-                                    <Edit2 size={12} />
-                                </button>
-                            )}
-                            {onPinMessage && (
-                                <button
-                                    type="button"
-                                    onClick={() => onPinMessage(message)}
-                                    style={{ border: "none", background: "none", cursor: "pointer", padding: "2px", display: "flex", alignItems: "center" }}
-                                    title={message.pinned ? "Unpin message" : "Pin message"}
-                                >
-                                    <Pin size={12} style={message.pinned ? { fill: "currentColor" } : {}} />
-                                </button>
-                            )}
-                            {onDeleteMessage && (
-                                <button
-                                    type="button"
-                                    onClick={() => onDeleteMessage(message)}
-                                    style={{ border: "none", background: "none", cursor: "pointer", padding: "2px", display: "flex", alignItems: "center", color: "var(--danger)" }}
-                                    title="Delete message"
-                                >
-                                    <Trash size={12} />
-                                </button>
-                            )}
-                        </div>
+                        {!isStreaming && (
+                            <div style={{ marginLeft: "auto", display: "flex", gap: "6px", opacity: 0.7 }}>
+                                {isUser && !isEditing && onEditMessage && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsEditing(true)}
+                                        style={{ border: "none", background: "none", cursor: "pointer", padding: "2px", display: "flex", alignItems: "center" }}
+                                        title="Edit query"
+                                    >
+                                        <Edit2 size={12} />
+                                    </button>
+                                )}
+                                {onPinMessage && (
+                                    <button
+                                        type="button"
+                                        onClick={() => onPinMessage(message)}
+                                        style={{ border: "none", background: "none", cursor: "pointer", padding: "2px", display: "flex", alignItems: "center" }}
+                                        title={message.pinned ? "Unpin message" : "Pin message"}
+                                    >
+                                        <Pin size={12} style={message.pinned ? { fill: "currentColor" } : {}} />
+                                    </button>
+                                )}
+                                {onDeleteMessage && (
+                                    <button
+                                        type="button"
+                                        onClick={() => onDeleteMessage(message)}
+                                        style={{ border: "none", background: "none", cursor: "pointer", padding: "2px", display: "flex", alignItems: "center", color: "var(--danger)" }}
+                                        title="Delete message"
+                                    >
+                                        <Trash size={12} />
+                                    </button>
+                                )}
+                            </div>
+                        )}
                     </div>
 
                     {isEditing ? (
@@ -470,6 +472,9 @@ function MessageBubble({
                         >
                             {displayContent}
                         </ReactMarkdown>
+                        {isStreaming ? (
+                            <span className="edu-chat-typing-cursor" aria-hidden="true" />
+                        ) : null}
                     </div>)}
 
                     {/* Interactive Map Block */}

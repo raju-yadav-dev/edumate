@@ -423,11 +423,17 @@ const applyUniversityTemplate = (text, formatType, queryPlan = {}, question = ""
     const sentences = splitIntoSentences(trimmed);
     if (sentences.length === 0) return trimmed;
 
-    // 1. Faculty Directory Template
+    // Direct factual statements (e.g. 1-2 sentences answering who, what, when, where) should remain clean natural text!
+    if (sentences.length <= 2 && !formatType.includes("table") && !formatType.includes("guide")) {
+        return trimmed;
+    }
+
+    // 1. Faculty Directory Template (Only apply table when there are multiple faculty members and not a single fact sentence)
     if (
-        formatType === FORMAT_TYPES.FACULTY_DIRECTORY ||
+        (formatType === FORMAT_TYPES.FACULTY_DIRECTORY ||
         formatType === FORMAT_TYPES.FACULTY_DIRECTORY_TABLE ||
-        formatType === FORMAT_TYPES.DEPARTMENT_DIRECTORY
+        formatType === FORMAT_TYPES.DEPARTMENT_DIRECTORY) &&
+        sentences.length >= 3
     ) {
         const rows = ["| Faculty Name | Designation / Role | Department / Specialization |", "|---|---|---|"];
         const intro = (sentences[0].toLowerCase().includes("faculty") || sentences[0].toLowerCase().includes("department")) && !sentences[0].includes("is")
@@ -435,22 +441,31 @@ const applyUniversityTemplate = (text, formatType, queryPlan = {}, question = ""
             : "Here is the department faculty directory:";
         const items = (sentences[0] === intro) ? sentences.slice(1) : sentences;
 
+        let validRowCount = 0;
         items.forEach(item => {
             const isMatch = item.match(/^(.+?)\s+(?:is the|is|working as|serves as)\s+(.+?)(?:\s+(?:of|in|at|specializing in)\s+(.+))?$/i);
-            if (isMatch) {
+            if (isMatch && isMatch[1].length < 40) {
                 const name = isMatch[1].trim();
                 const role = isMatch[2].trim();
-                const dept = (isMatch[3] || queryPlan?.department || "Computer Science").replace(/[.]+$/, "").trim();
+                const dept = (isMatch[3] || queryPlan?.department || "Computational Sciences").replace(/[.]+$/, "").trim();
                 rows.push(`| ${name} | ${role} | ${dept} |`);
-            } else {
-                const parts = item.split(/[,-]/).map(p => p.trim()).filter(Boolean);
-                const name = parts[0] || item.trim();
-                const role = parts[1] || "Faculty Member";
-                const dept = parts[2] || queryPlan?.department || "Department Staff";
-                rows.push(`| ${name} | ${role} | ${dept} |`);
+                validRowCount++;
+            } else if (item.includes(" - ") || item.includes(": ")) {
+                const parts = item.split(/[-:]/).map(p => p.trim()).filter(Boolean);
+                if (parts.length >= 2) {
+                    const name = parts[0] || item.trim();
+                    const role = parts[1] || "Faculty Member";
+                    const dept = parts[2] || queryPlan?.department || "Department Staff";
+                    rows.push(`| ${name} | ${role} | ${dept} |`);
+                    validRowCount++;
+                }
             }
         });
-        return `${intro}\n\n${rows.join("\n")}`;
+
+        if (validRowCount >= 2) {
+            return `${intro}\n\n${rows.join("\n")}`;
+        }
+        return trimmed;
     }
 
     // 2. Fee Structure Template
@@ -620,14 +635,9 @@ const attachSectionMetadata = (structuredText, sources = []) => {
 const applyConfidenceNotice = (text, confidence) => {
     const conf = String(confidence || "high").toLowerCase();
 
-    if (conf === "medium") {
-        const mediumNotice = "> ℹ️ **Notice**: This response is based on partial matching institutional records. Please verify specific details with the departmental office.";
-        if (!text.includes("partial matching institutional records")) {
-            return `${mediumNotice}\n\n${text}`;
-        }
-    } else if (conf === "low") {
+    if (conf === "low") {
         const lowNotice = "> ⚠️ **Notice**: The available university documents contain limited information for this query. The details below may be incomplete. Please consult the official university desk for full confirmation.";
-        if (!text.includes("available university documents contain limited information")) {
+        if (!text.includes("available university documents contain limited information") && !text.includes("Notice:")) {
             return `${lowNotice}\n\n${text}`;
         }
     }

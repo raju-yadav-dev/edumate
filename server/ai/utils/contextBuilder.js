@@ -139,17 +139,39 @@ const cleanChunkText = (content) => {
 
 /**
  * Determines the adaptive token context budget based on query complexity.
- * 
- * Adaptive Rules:
- * - Small factual question: 250–400 tokens (target ~380)
- * - Medium question: 500–800 tokens (target ~750)
- * - Large informational question: 900–1400 tokens (target ~1300)
  */
 const determineAdaptiveBudget = (question, queryPlan) => {
     const q = String(question || "").toLowerCase();
     const words = q.trim().split(/\s+/).filter(Boolean);
 
-    // 1. Large informational question (900–1400 tokens)
+    // 1. Small direct factual questions take priority (who is, where is, when was, which room, hod of, head of, etc.)
+    const isDirectFact = (
+        q.startsWith("who ") ||
+        q.startsWith("where ") ||
+        q.startsWith("when ") ||
+        q.startsWith("which room") ||
+        q.startsWith("what is the name") ||
+        q.startsWith("who's") ||
+        q.includes("hod") ||
+        q.includes("head of") ||
+        q.includes("phone number") ||
+        q.includes("contact number") ||
+        q.includes("email") ||
+        queryPlan?.intent === "HOD_QUERY" ||
+        queryPlan?.intent === "LOCATION_QUERY"
+    );
+
+    if (isDirectFact && words.length < 14) {
+        return {
+            type: "SMALL_FACTUAL",
+            minTokens: 150,
+            maxTokens: 350,
+            targetTokens: 250,
+            description: "Small factual question (150–350 tokens)"
+        };
+    }
+
+    // 2. Large informational question (900–1400 tokens)
     if (
         words.length >= 14 ||
         /\b(?:compare|comparison|versus|vs\.?|difference|complete\s+guide|full\s+overview|everything\s+about|all\s+details|handbook|comprehensive|all\s+courses|entire\s+syllabus|curriculum)\b/i.test(q) ||
@@ -165,7 +187,7 @@ const determineAdaptiveBudget = (question, queryPlan) => {
         };
     }
 
-    // 2. Medium question (500–800 tokens)
+    // 3. Medium question (400–650 tokens)
     if (
         words.length >= 7 ||
         queryPlan?.intent === "FEE_QUERY" ||
@@ -178,10 +200,10 @@ const determineAdaptiveBudget = (question, queryPlan) => {
     ) {
         return {
             type: "MEDIUM",
-            minTokens: 500,
-            maxTokens: 800,
-            targetTokens: 750,
-            description: "Medium question (500–800 tokens)"
+            minTokens: 350,
+            maxTokens: 650,
+            targetTokens: 500,
+            description: "Medium question (350–650 tokens)"
         };
     }
 
