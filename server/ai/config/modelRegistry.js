@@ -7,6 +7,28 @@
 
 const MODEL_REGISTRY = Object.freeze({
     // --- Qwen Family ---
+    "qwen2-0.5b": {
+        id: "qwen2-0.5b",
+        displayName: "Qwen 2 0.5B Instruct",
+        filenameMatch: /qwen.*2.*0\.5b/i,
+        provider: "llama.cpp",
+        family: "qwen",
+        contextSize: 2048,
+        recommendedMaxTokens: 256,
+        recommendedTemperature: 0.2,
+        recommendedTopP: 0.9,
+        recommendedTopK: 40,
+        recommendedRepeatPenalty: 1.1,
+        recommendedMinP: 0.05,
+        recommendedThreads: 4,
+        recommendedBatchSize: 256,
+        recommendedGpuLayers: 0,
+        supportsStreaming: true,
+        supportsThinking: false,
+        supportsVision: false,
+        stopSequences: ["<|im_end|>", "<|endoftext|>", "<|im_start|>"],
+        description: "Lightweight Qwen 2 0.5B instruct model for rapid student queries."
+    },
     "qwen3-1.7b": {
         id: "qwen3-1.7b",
         displayName: "Qwen 3 1.7B Instruct",

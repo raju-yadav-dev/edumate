@@ -65,6 +65,23 @@ const isQdrantAvailable = async (probeTimeoutMs = 600) => {
     }
 };
 
+const isNetworkError = (err) => {
+    if (!err) return false;
+    const msg = (err.message || "").toLowerCase();
+    const code = err.code || (err.cause && err.cause.code) || "";
+    return msg.includes("econnrefused") ||
+           msg.includes("enotfound") ||
+           msg.includes("enetunreach") ||
+           msg.includes("abort") ||
+           msg.includes("timeout") ||
+           msg.includes("service is currently offline") ||
+           code === "ECONNREFUSED" ||
+           code === "ENOTFOUND" ||
+           err.status === 502 ||
+           err.status === 503 ||
+           err.status === 504;
+};
+
 // Initialize Qdrant Client lazily
 let rawClient = null;
 const client = new Proxy({}, {
@@ -92,13 +109,18 @@ const client = new Proxy({}, {
                 try {
                     return await withTimeoutAndRetry(
                         () => origMethod.apply(rawClient, args),
-                        3000,
+                        Number(process.env.QDRANT_TIMEOUT_MS) || 5000,
                         2,
                         300,
                         `Qdrant.${prop}`
                     );
                 } catch (err) {
-                    qdrantOfflineUntil = Date.now() + OFFLINE_COOLDOWN_MS;
+                    if (isNetworkError(err)) {
+                        console.warn(`[QDRANT] Network/connectivity failure detected on Qdrant.${prop}. Tripping circuit breaker for ${OFFLINE_COOLDOWN_MS}ms.`);
+                        qdrantOfflineUntil = Date.now() + OFFLINE_COOLDOWN_MS;
+                    } else {
+                        console.warn(`[QDRANT] Client error on Qdrant.${prop}: ${err.message}. Circuit breaker not tripped.`);
+                    }
                     throw err;
                 }
             };
@@ -106,6 +128,62 @@ const client = new Proxy({}, {
         return origMethod;
     }
 });
+
+let cachedVectorFormat = null;
+
+/**
+ * Dynamically resolves whether target collection vectors are named or unnamed.
+ * @returns {Promise<{ isNamed: boolean, vectorName: string }>}
+ */
+const getVectorFormat = async () => {
+    if (cachedVectorFormat) return cachedVectorFormat;
+    try {
+        const info = await client.getCollection(collectionName);
+        const vConfig = info?.config?.params?.vectors;
+        if (vConfig && typeof vConfig === "object") {
+            if (vConfig.size) {
+                cachedVectorFormat = { isNamed: false, vectorName: "" };
+            } else {
+                const availableNames = Object.keys(vConfig);
+                const targetName = (qdrantVectorName && vConfig[qdrantVectorName])
+                    ? qdrantVectorName
+                    : (vConfig.default ? "default" : (availableNames[0] || "default"));
+                cachedVectorFormat = { isNamed: true, vectorName: targetName };
+            }
+        } else {
+            cachedVectorFormat = { isNamed: false, vectorName: "" };
+        }
+    } catch (e) {
+        cachedVectorFormat = { isNamed: false, vectorName: "" };
+    }
+    return cachedVectorFormat;
+};
+
+/**
+ * Formats vector payload for Qdrant search dynamically based on collection schema.
+ * @param {Array<number>} queryEmbedding
+ * @returns {Promise<Array<number>|{ name: string, vector: Array<number> }>}
+ */
+const formatSearchVector = async (queryEmbedding) => {
+    const fmt = await getVectorFormat();
+    if (fmt.isNamed) {
+        return { name: fmt.vectorName, vector: queryEmbedding };
+    }
+    return queryEmbedding;
+};
+
+/**
+ * Formats vector payload for Qdrant point upsert dynamically based on collection schema.
+ * @param {Array<number>} pointEmbedding
+ * @returns {Promise<Array<number>|Object>}
+ */
+const formatPointVector = async (pointEmbedding) => {
+    const fmt = await getVectorFormat();
+    if (fmt.isNamed) {
+        return { [fmt.vectorName]: pointEmbedding };
+    }
+    return pointEmbedding;
+};
 
 let isCollectionEnsured = false;
 
@@ -239,5 +317,8 @@ module.exports = {
     collectionName,
     ensureCollection,
     isQdrantAvailable,
-    vectorName: qdrantVectorName
+    vectorName: qdrantVectorName,
+    getVectorFormat,
+    formatSearchVector,
+    formatPointVector
 };

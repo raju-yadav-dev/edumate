@@ -190,14 +190,16 @@ const repairDocument = async (documentId) => {
     }
 
     // Repair embeddings and Qdrant points
+    const { formatPointVector } = require("../config/qdrant");
     const texts = chunks.map(c => c.content);
     const generated = await embeddingService.getChunksEmbeddings(texts);
 
-    const points = chunks.map((chunk, index) => {
+    const points = await Promise.all(chunks.map(async (chunk, index) => {
         const pointId = chunk.chunkId || deterministicChunkId(documentId, index);
+        const vectorParam = await formatPointVector(generated[index]);
         return {
             id: pointId,
-            vector: generated[index],
+            vector: vectorParam,
             payload: {
                 ...(chunk.metadata || {}),
                 id: pointId,
@@ -208,7 +210,7 @@ const repairDocument = async (documentId) => {
                 pageNumber: chunk.pageNumber || 1
             }
         };
-    });
+    }));
 
     await qdrantClient.upsert(collectionName, { wait: true, points });
     await localChunkManager.replaceDocumentChunks(documentId, chunks, {

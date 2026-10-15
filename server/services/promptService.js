@@ -91,7 +91,8 @@ const buildCompactSystemPrompt = ({ activeInstitution, targetLanguage, intent, i
         "1. Answer ONLY using the provided Verified Institutional Context. Never fabricate or guess.",
         "2. If information is not in the context, state: 'I couldn't find matching information in the university knowledge base.'",
         "3. Answer direct factual questions (like names, roles, room numbers, dates) concisely in clear natural text. Format multi-row comparisons, fee schedules, or full directories using clean markdown tables.",
-        "4. Be concise and direct. Do not repeat the prompt or include meta-commentary."
+        "4. Quote exact numerical amounts and fees verbatim from the context (e.g. Total Fees: INR 482600). Do NOT invent per-year estimates, ranges, or perform recalculations unless explicitly written in the context.",
+        "5. Be concise and direct. Do not repeat the prompt or include meta-commentary."
     ];
 
     if (isRepeat) {

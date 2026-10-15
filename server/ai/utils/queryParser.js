@@ -94,23 +94,23 @@ const normalizeQueryText = (query) => {
     // Normalize whitespace
     q = q.replace(/\s+/g, " ").trim();
     
-    // Acronym and abbreviation expansion
-    q = q.replace(/\bdept\b/g, "department");
-    q = q.replace(/\bh\.?o\.?d\b/g, "head of department");
-    q = q.replace(/\bug\b/g, "undergraduate");
-    q = q.replace(/\bpg\b/g, "postgraduate");
-    q = q.replace(/\bcss\b/g, "computational sciences");
-    q = q.replace(/\bcse\b/g, "computer science and engineering");
-    q = q.replace(/\bb\.?tech\b/g, "bachelor of technology");
-    q = q.replace(/\bbca\b/g, "bachelor of computer applications");
-    q = q.replace(/\bmca\b/g, "master of computer applications");
-    q = q.replace(/\bbba\b/g, "bachelor of business administration");
-    q = q.replace(/\bmba\b/g, "master of business administration");
+    // Acronym and abbreviation expansion (retains acronym for exact-match chunks e.g. "HoD", "CSS")
+    q = q.replace(/\bdept\b/g, "department dept");
+    q = q.replace(/\bh\.?o\.?d\b/g, "head of department hod");
+    q = q.replace(/\bug\b/g, "undergraduate ug");
+    q = q.replace(/\bpg\b/g, "postgraduate pg");
+    q = q.replace(/\bcss\b/g, "computational sciences css");
+    q = q.replace(/\bcse\b/g, "computer science and engineering cse");
+    q = q.replace(/\bb\.?tech\b/g, "bachelor of technology btech");
+    q = q.replace(/\bbca\b/g, "bachelor of computer applications bca");
+    q = q.replace(/\bmca\b/g, "master of computer applications mca");
+    q = q.replace(/\bbba\b/g, "bachelor of business administration bba");
+    q = q.replace(/\bmba\b/g, "master of business administration mba");
     q = q.replace(/\brm\b/g, "room");
     q = q.replace(/\broom\s+(?:no|num|number)\b/g, "room");
     q = q.replace(/\bmaths?\b/g, "mathematics");
     q = q.replace(/\bphysics\b/g, "physics");
-    q = q.replace(/\bplacement\s+cell\b/g, "training & placement cell");
+    q = q.replace(/\bplacement\s+cell\b/g, "training & placement cell placement cell");
     q = q.replace(/\bdocuments?\b/g, "document");
     
     return q.replace(/\s+/g, " ").trim();

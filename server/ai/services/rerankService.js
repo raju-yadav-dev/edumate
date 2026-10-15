@@ -43,7 +43,16 @@ const rerank = async (query, chunks, queryPlan = null) => {
         // Signal 2: Keyword Overlap (0..1)
         let matchedTerms = 0;
         queryTerms.forEach(term => {
-            if (content.includes(term) || heading.includes(term) || filename.includes(term) || chunkKeywords.some(k => k.includes(term))) {
+            const matchesContent = content.includes(term) ||
+                (term === "hod" && (content.includes("head of department") || heading.includes("head of department"))) ||
+                (term === "head" && (content.includes("hod") || heading.includes("hod"))) ||
+                (term === "department" && (content.includes("hod") || heading.includes("hod") || filename.includes("department")));
+            if (
+                matchesContent ||
+                heading.includes(term) ||
+                filename.includes(term) ||
+                chunkKeywords.some(k => k.includes(term))
+            ) {
                 matchedTerms++;
             }
         });
@@ -59,15 +68,27 @@ const rerank = async (query, chunks, queryPlan = null) => {
         let metaTotal = 0;
         if (plan.category) {
             metaTotal += 0.25;
-            if (category === plan.category.toLowerCase()) metaMatches += 0.25;
+            const targetCat = plan.category.toLowerCase();
+            if (category === targetCat || category.includes(targetCat) || targetCat.includes(category) || category === "general") {
+                metaMatches += 0.25;
+            }
         }
         if (plan.department) {
             metaTotal += 0.30;
-            if (department === plan.department.toLowerCase() || (chunk.metadata?.departments && chunk.metadata.departments.includes(plan.department))) metaMatches += 0.30;
+            const targetDept = plan.department.toLowerCase();
+            const deptsArray = Array.isArray(chunk.metadata?.departments) ? chunk.metadata.departments.map(d => String(d).toLowerCase()) : [];
+            const isCssMatch = (targetDept.includes("computational") || targetDept === "css") &&
+                (department.includes("computational") || department === "css" || deptsArray.includes("css") || filename.includes("computational"));
+            if (department === targetDept || department.includes(targetDept) || targetDept.includes(department) || deptsArray.includes(targetDept) || isCssMatch) {
+                metaMatches += 0.30;
+            }
         }
         if (plan.program) {
             metaTotal += 0.25;
-            if (program === plan.program.toLowerCase() || (chunk.metadata?.programs && chunk.metadata.programs.includes(plan.program))) metaMatches += 0.25;
+            const targetProg = plan.program.toLowerCase();
+            if (program === targetProg || program.includes(targetProg) || (chunk.metadata?.programs && chunk.metadata.programs.includes(plan.program))) {
+                metaMatches += 0.25;
+            }
         }
         if (plan.documentType) {
             metaTotal += 0.20;
@@ -75,7 +96,12 @@ const rerank = async (query, chunks, queryPlan = null) => {
         }
         if (plan.heading) {
             metaTotal += 0.25;
-            if (heading.includes(plan.heading.toLowerCase()) || plan.heading.toLowerCase().includes(heading)) metaMatches += 0.25;
+            const targetHeading = plan.heading.toLowerCase();
+            const isHodMatch = (targetHeading === "hod" || targetHeading.includes("head")) &&
+                (content.includes("hod") || content.includes("head of department") || heading.includes("hod"));
+            if (heading.includes(targetHeading) || targetHeading.includes(heading) || isHodMatch) {
+                metaMatches += 0.25;
+            }
         }
         const metadataScore = metaTotal > 0 ? Math.max(0, Math.min(1, metaMatches / metaTotal)) : 0.5;
         

@@ -51,7 +51,15 @@ const buildQdrantFilter = (filter) => {
 /**
  * Builds Qdrant payload filters from Query Planner output for metadata-first retrieval.
  */
-const buildPlannerQdrantFilter = ({ queryPlan, user, ignoreInstitution = false, filter = null, relaxHeading = false, relaxDocType = false }) => {
+const buildPlannerQdrantFilter = ({ 
+    queryPlan, 
+    user, 
+    ignoreInstitution = false, 
+    filter = null, 
+    relaxHeading = false, 
+    relaxDocType = false,
+    relaxCategory = false 
+}) => {
     const must = [];
 
     // 1. User institution constraint
@@ -75,9 +83,15 @@ const buildPlannerQdrantFilter = ({ queryPlan, user, ignoreInstitution = false, 
         return must.length > 0 ? { must } : undefined;
     }
 
-    // 3. Category filter
-    if (queryPlan.category) {
-        must.push({ key: "category", match: { value: queryPlan.category } });
+    // 3. Category filter (matches target category, lowercase variant, or 'general' repository files)
+    if (queryPlan.category && !relaxCategory) {
+        must.push({
+            should: [
+                { key: "category", match: { value: queryPlan.category } },
+                { key: "category", match: { value: queryPlan.category.toLowerCase() } },
+                { key: "category", match: { value: "general" } }
+            ]
+        });
     }
 
     // 4. Department filter (Never retrieve unrelated departments when department is known)
@@ -103,7 +117,12 @@ const buildPlannerQdrantFilter = ({ queryPlan, user, ignoreInstitution = false, 
 
     // 6. DocumentType filter
     if (queryPlan.documentType && !relaxDocType) {
-        must.push({ key: "documentType", match: { value: queryPlan.documentType } });
+        must.push({
+            should: [
+                { key: "documentType", match: { value: queryPlan.documentType } },
+                { key: "documentType", match: { value: queryPlan.documentType.toLowerCase() } }
+            ]
+        });
     }
 
     // 7. Heading filter
@@ -136,7 +155,7 @@ const retrieveRelevantChunks = async ({
     filter = {},
     isRawFilter = false
 }) => {
-    const { ensureCollection } = require("../config/qdrant");
+    const { ensureCollection, formatSearchVector, getVectorFormat } = require("../config/qdrant");
     await ensureCollection().catch(err => {
         console.error("⚠️ Lazy Qdrant collection initialization failed:", err.message);
     });
@@ -150,9 +169,9 @@ const retrieveRelevantChunks = async ({
         return cachedVectorSearch;
     }
 
-    const vectorParam = (vectorName && vectorName !== "unnamed" && vectorName !== "default" && vectorName !== "") 
-        ? { name: vectorName, vector: queryEmbedding } 
-        : queryEmbedding;
+    const vectorParam = await formatSearchVector(queryEmbedding);
+    const vectorFmt = await getVectorFormat();
+    console.log(`[RAG DIAGNOSTIC: Qdrant Search] Collection: "${collectionName}" | Vector: ${vectorFmt.isNamed ? `named("${vectorFmt.vectorName}")` : "unnamed"} | Dim: ${queryEmbedding.length} | Limit: ${limit} | Filter: ${JSON.stringify(qdrantFilter || null)}`);
 
     for (let attempt = 1; attempt <= 2; attempt++) {
         try {
@@ -164,8 +183,11 @@ const retrieveRelevantChunks = async ({
             });
 
             if (!Array.isArray(results) || results.length === 0) {
+                console.log(`[RAG DIAGNOSTIC: Zero Matches] Qdrant search returned 0 matches for filter: ${JSON.stringify(qdrantFilter || null)}`);
                 return [];
             }
+
+            console.log(`[RAG DIAGNOSTIC: Matches Found] Qdrant search returned ${results.length} hit(s). Top score: ${results[0]?.score !== undefined ? results[0].score.toFixed(4) : "N/A"}`);
 
             const mappedResults = results.map((point) => {
                 const payload = point.payload || {};
@@ -221,6 +243,7 @@ const retrieveRelevantChunks = async ({
 
             return mappedResults;
         } catch (e) {
+            console.error(`[RAG DIAGNOSTIC: Qdrant Error] Attempt ${attempt} failed: ${e.message}`);
             if (attempt === 1) {
                 console.warn(`[Retrieval Service] Transient Qdrant search failure on attempt 1 (${e.message}). Retrying in 300ms...`);
                 await new Promise(r => setTimeout(r, 300));
@@ -347,8 +370,12 @@ const computeKeywordScore = (query, chunk, queryPlan) => {
 
     let matchedTerms = 0;
     queryTerms.forEach(term => {
+        const matchesContent = content.includes(term) ||
+            (term === "hod" && (content.includes("head of department") || heading.includes("head of department"))) ||
+            (term === "head" && (content.includes("hod") || heading.includes("hod"))) ||
+            (term === "department" && (content.includes("hod") || heading.includes("hod") || filename.includes("department")));
         if (
-            content.includes(term) ||
+            matchesContent ||
             heading.includes(term) ||
             filename.includes(term) ||
             chunkKeywords.some(k => k.includes(term))
@@ -387,6 +414,7 @@ const computeMetadataScore = (queryPlan, chunk) => {
     const chunkProg = String(metadata.program || metadata.course || "").toLowerCase();
     const chunkDocType = String(metadata.documentType || "").toLowerCase();
     const chunkHeading = String(metadata.heading || metadata.parentSection || "").toLowerCase();
+    const filename = String(metadata.originalName || metadata.filename || "").toLowerCase();
     const chunkKeywords = Array.isArray(metadata.keywords)
         ? metadata.keywords.map(k => String(k).toLowerCase())
         : [];
@@ -394,7 +422,8 @@ const computeMetadataScore = (queryPlan, chunk) => {
     // Category match
     if (queryPlan.category) {
         totalWeights += 0.25;
-        if (chunkCat === queryPlan.category.toLowerCase()) {
+        const targetCat = queryPlan.category.toLowerCase();
+        if (chunkCat === targetCat || chunkCat.includes(targetCat) || targetCat.includes(chunkCat) || chunkCat === "general") {
             score += 0.25;
         }
     }
@@ -403,7 +432,10 @@ const computeMetadataScore = (queryPlan, chunk) => {
     if (queryPlan.department) {
         totalWeights += 0.30;
         const targetDept = queryPlan.department.toLowerCase();
-        if (chunkDept === targetDept || (metadata.departments && metadata.departments.includes(queryPlan.department))) {
+        const deptsArray = Array.isArray(metadata.departments) ? metadata.departments.map(d => String(d).toLowerCase()) : [];
+        const isCssMatch = (targetDept.includes("computational") || targetDept === "css") &&
+            (chunkDept.includes("computational") || chunkDept === "css" || deptsArray.includes("css") || filename.includes("computational"));
+        if (chunkDept === targetDept || chunkDept.includes(targetDept) || targetDept.includes(chunkDept) || deptsArray.includes(targetDept) || isCssMatch) {
             score += 0.30;
         }
     }
@@ -429,7 +461,10 @@ const computeMetadataScore = (queryPlan, chunk) => {
     if (queryPlan.heading) {
         totalWeights += 0.25;
         const targetHeading = queryPlan.heading.toLowerCase();
-        if (chunkHeading.includes(targetHeading) || targetHeading.includes(chunkHeading)) {
+        const contentLower = String(chunk.content || "").toLowerCase();
+        const isHodMatch = (targetHeading === "hod" || targetHeading.includes("head")) &&
+            (contentLower.includes("hod") || contentLower.includes("head of department") || chunkHeading.includes("hod"));
+        if (chunkHeading.includes(targetHeading) || targetHeading.includes(chunkHeading) || isHodMatch) {
             score += 0.25;
         }
     }
@@ -528,7 +563,12 @@ const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL
 
     let expandedQuestion = question;
     if (/\bcss\b/i.test(expandedQuestion)) {
-        expandedQuestion = expandedQuestion.replace(/\bcss\b/gi, "computational sciences");
+        expandedQuestion = expandedQuestion + " computational sciences";
+    }
+    if (/\bhod\b/i.test(expandedQuestion)) {
+        expandedQuestion = expandedQuestion + " head of department";
+    } else if (/\bhead of department\b/i.test(expandedQuestion)) {
+        expandedQuestion = expandedQuestion + " hod";
     }
 
     const completeCourseQuery = isCompleteCourseQuery(question, queryPlan);
@@ -537,8 +577,8 @@ const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL
     }
 
     const queryMode = detectQueryMode(expandedQuestion);
-    let currentFetchK = Math.max(dynamicK * 3, 12);
-    if (completeCourseQuery) currentFetchK = Math.max(currentFetchK, 16);
+    let currentFetchK = Math.max(dynamicK * 8, 30);
+    if (completeCourseQuery) currentFetchK = Math.max(currentFetchK, 32);
 
     let usedFilter = undefined;
     let filteredCount = 0;
@@ -569,16 +609,17 @@ const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL
                 isRawFilter: true
             });
 
-            // Controlled relaxation: If strict filter with heading/documentType yields 0 results, relax heading/docType while strictly preserving department & category
-            if (semanticCandidates.length === 0 && (queryPlan.heading || queryPlan.documentType)) {
-                console.log(`[RAG DEBUG] Strict filter returned 0 results. Relaxing heading/docType constraints while preserving category & department.`);
+            // Controlled relaxation: If strict filter yields 0 results, relax heading/docType/category while preserving department & program
+            if (semanticCandidates.length === 0 && (queryPlan.heading || queryPlan.documentType || queryPlan.category)) {
+                console.log(`[RAG DIAGNOSTIC: Fallback Retrieval] Strict filter returned 0 results. Relaxing heading/docType/category constraints.`);
                 const relaxedFilter = buildPlannerQdrantFilter({
                     queryPlan,
                     user,
                     ignoreInstitution,
                     filter,
                     relaxHeading: true,
-                    relaxDocType: true
+                    relaxDocType: true,
+                    relaxCategory: true
                 });
                 usedFilter = relaxedFilter;
                 semanticCandidates = await retrieveRelevantChunks({
@@ -589,9 +630,9 @@ const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL
                 });
             }
 
-            // Final semantic fallback: If filtered search still returns 0 results, search Qdrant by embedding
+            // Final semantic fallback: If filtered search still returns 0 results, search Qdrant by pure embedding similarity
             if (semanticCandidates.length === 0) {
-                console.log(`[RAG DEBUG] Filtered search returned 0 results. Falling back to semantic similarity vector search.`);
+                console.log(`[RAG DIAGNOSTIC: Fallback Retrieval] Filtered search returned 0 results. Falling back to pure semantic similarity vector search.`);
                 semanticCandidates = await retrieveRelevantChunks({
                     queryEmbedding,
                     limit: currentFetchK,
@@ -607,10 +648,10 @@ const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL
                 });
             }
         } catch (vectorErr) {
-            console.error("[Retrieval Service] Semantic search failed:", vectorErr.message);
+            console.error(`[RAG DIAGNOSTIC: Qdrant Error] Semantic retrieval failed: ${vectorErr.message}`);
         }
     } else {
-        console.log("[Retrieval Service] Qdrant is offline/unavailable. Falling back instantly to local high-precision knowledge search.");
+        console.warn("[RAG DIAGNOSTIC: Fallback Retrieval] Qdrant is currently offline/unavailable (circuit breaker or probe failed). Falling back to local high-precision knowledge search.");
     }
 
     // 3. Local Chunk Keyword & Semantic Search restricted to same metadata constraints

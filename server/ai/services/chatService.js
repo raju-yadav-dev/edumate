@@ -34,18 +34,20 @@ const LRUCache = require("../utils/lruCache");
 const retrievalCache = new LRUCache(100, 5 * 60 * 1000);
 
 const ALIASES_DICT = {
-    "css": "computational sciences",
-    "hod": "head of department",
-    "ug": "undergraduate",
-    "pg": "postgraduate",
-    "placement cell": "training & placement cell"
+    "css": "computational sciences css",
+    "hod": "head of department hod",
+    "ug": "undergraduate ug",
+    "pg": "postgraduate pg",
+    "placement cell": "training & placement cell placement cell"
 };
 
 const normalizeAliases = (text) => {
     let lower = String(text || "").toLowerCase();
     Object.entries(ALIASES_DICT).forEach(([abbr, full]) => {
-        const regex = new RegExp(`\\b${abbr.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "gi");
-        lower = lower.replace(regex, full);
+        if (!lower.includes(full)) {
+            const regex = new RegExp(`\\b${abbr.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "gi");
+            lower = lower.replace(regex, full);
+        }
     });
     return lower.replace(/\s+/g, " ").trim();
 };
@@ -557,7 +559,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
                 retrievalTimeoutPromise
             ]);
         } catch (retrieveErr) {
-            console.error("[CHAT PIPELINE] Knowledge retrieval error:", retrieveErr.message);
+            console.error("[RAG DIAGNOSTIC: Qdrant Error] Knowledge retrieval error:", retrieveErr.message);
             tracker.recordMetric("failedRetrievals", 1);
             retrievedChunksRaw = [];
         } finally {
@@ -567,6 +569,12 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
         retrievalTime = Date.now() - qdrantStart;
         qdrantDuration += retrievalTime;
         stopQdrantTimer();
+
+        if ((retrievedChunksRaw || []).length === 0) {
+            console.warn(`[RAG DIAGNOSTIC: Zero Matches] Knowledge retrieval returned 0 raw chunks for: "${rewrittenQuery}"`);
+        } else {
+            console.log(`[RAG DIAGNOSTIC: Matches Found] Retrieved ${(retrievedChunksRaw || []).length} candidate chunks for: "${rewrittenQuery}"`);
+        }
 
         const rawChunkIds = (retrievedChunksRaw || []).map(c => String(c.id || c.metadata?.chunkId || c._id || "")).filter(Boolean);
         tracker.recordMetric("retrievedChunkIds", rawChunkIds);
@@ -619,8 +627,41 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
         chunkIds: (combinedDocChunks || []).map(c => c.id || c.metadata?.chunkId || "chunk")
     });
 
-    const hasStrongContext = combinedDocChunks.length > 0;
-    retrievedChunks = combinedDocChunks;
+    // Verify that at least one distinctive topic/subject keyword appears in the retrieved chunks
+    const stopTopicWords = new Set([
+        "what", "is", "the", "for", "tell", "me", "show", "who", "where", "when", "why", "which", 
+        "are", "am", "a", "an", "of", "in", "on", "at", "to", "with", "by", "from", "and", "or", 
+        "about", "how", "much", "many", "does", "do", "can", "university", "college", "institute", 
+        "program", "programme", "course", "details", "information", "fee", "fees", "admission", 
+        "admissions", "at", "this", "please", "give", "provide", "dept", "department", "document"
+    ]);
+    const topicTokens = String(normalizedQuestion || "").toLowerCase()
+        .replace(/[^a-z0-9\s]/g, " ")
+        .split(/\s+/)
+        .filter(w => w.length > 2 && !stopTopicWords.has(w));
+
+    let hasSubjectMatch = true;
+    if (topicTokens.length > 0 && combinedDocChunks.length > 0) {
+        hasSubjectMatch = topicTokens.some(token =>
+            combinedDocChunks.some(chunk => {
+                const cLower = String(chunk.content || "").toLowerCase();
+                const hLower = String(chunk.metadata?.heading || "").toLowerCase();
+                const fLower = String(chunk.metadata?.originalName || "").toLowerCase();
+                const dLower = String(chunk.metadata?.department || "").toLowerCase();
+                const pLower = String(chunk.metadata?.program || "").toLowerCase();
+                return cLower.includes(token) || hLower.includes(token) || fLower.includes(token) || dLower.includes(token) || pLower.includes(token);
+            })
+        );
+    }
+
+    const hasStrongContext = combinedDocChunks.length > 0 && hasSubjectMatch;
+    if (!hasSubjectMatch && combinedDocChunks.length > 0) {
+        console.warn(`[RAG DIAGNOSTIC: Missing Context] Chunks retrieved (${combinedDocChunks.length}) but none matched distinct query topic terms [${topicTokens.join(", ")}]. Treating as ungrounded missing context.`);
+        retrievedChunks = [];
+        combinedDocChunks = [];
+    } else {
+        retrievedChunks = combinedDocChunks;
+    }
 
     // ==========================================
     // STAGE 6, 7, 8, 9, 10: PROMPT & LLM GENERATION
@@ -730,7 +771,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
                 provider: llmConfig.provider
             });
         } catch (llmErr) {
-            console.error("[STAGE 8: LLM Response Status] Error:", llmErr.message || llmErr);
+            console.error("[RAG DIAGNOSTIC: LLM Failure] Error generating completion:", llmErr.message || llmErr);
             if (routeChosen === "CONVERSATIONAL") {
                 const greeting = deterministicGreeting(activeUser, language);
                 textResponse = greeting.answer;
@@ -807,7 +848,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
         }
     } else {
         // Zero chunks found for UNIVERSITY_SPECIFIC: Strict ungrounded fallback
-        console.log("[CHAT PIPELINE] No relevant chunks found in knowledge base for UNIVERSITY_SPECIFIC query. Responding with strict ungrounded fallback.");
+        console.warn("[RAG DIAGNOSTIC: Missing Context] No relevant chunks found in knowledge base for UNIVERSITY_SPECIFIC query. Responding with strict ungrounded fallback.");
         textResponse = "I couldn't find matching information in the university knowledge base for that request. Please verify with the official university department or admissions office.";
         if (onChunk) {
             onChunk(textResponse);
@@ -818,7 +859,14 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
     }
 
     // Format citations (only when knowledge retrieval was executed)
-    const sources = skipRag ? [] : citationService.formatCitations(retrievedChunks, universitySiteResults, webResults);
+    let sources = skipRag ? [] : citationService.formatCitations(retrievedChunks, universitySiteResults, webResults);
+
+    // If the response indicates missing information or ungrounded fallback, do not attach false citations and normalize text
+    const isMissingKnowledgeResponse = /\b(?:couldn'?t find|cannot find|no (?:matching )?information|not (?:found|mentioned|available) in (?:the )?(?:knowledge base|records|official documents))\b/i.test(textResponse);
+    if (isMissingKnowledgeResponse) {
+        sources = [];
+        textResponse = "I couldn't find matching information in the university knowledge base for that request. Please verify with the official university department or admissions office.";
+    }
 
     // Enrich citations with signed download URLs
     const docIds = sources

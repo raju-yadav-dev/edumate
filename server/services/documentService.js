@@ -212,15 +212,13 @@ const listDocuments = async ({ query, user }) => {
         ];
 
         try {
-            const { client: qdrantClient, collectionName: qdrantColl, vectorName: qdrantVecName } = require("../ai/config/qdrant");
+            const { client: qdrantClient, collectionName: qdrantColl, formatSearchVector } = require("../ai/config/qdrant");
             const embeddingService = require("../ai/services/embeddingService");
             const queryEmbedding = await embeddingService.getQueryEmbedding(cleanSearch).catch(() => null);
             if (queryEmbedding) {
+                const vectorParam = await formatSearchVector(queryEmbedding);
                 const results = await qdrantClient.search(qdrantColl, {
-                    vector: {
-                        name: qdrantVecName || "default",
-                        vector: queryEmbedding
-                    },
+                    vector: vectorParam,
                     limit: 50,
                     with_payload: true
                 }).catch(() => []);
