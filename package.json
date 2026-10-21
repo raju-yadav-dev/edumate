@@ -20,6 +20,7 @@
     "restore": "node scripts/backupRestoreCenter.js --restore",
     "clean-cache": "node scripts/clean.js",
     "clean-studio": "node scripts/cleanStudio.js",
+    "reset-kb": "node scripts/resetKnowledgeBase.js",
     "dev": "node scripts/startup.js",
     "start": "node server/server.js",
     "server": "node server/server.js",

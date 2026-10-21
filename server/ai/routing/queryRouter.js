@@ -340,49 +340,94 @@ function classifyIntent(rawQuery, options = {}) {
     const matchedProgramming = matchKeywords(q, PROGRAMMING_KEYWORDS);
     const matchedGeneral = matchKeywords(q, GENERAL_KNOWLEDGE_INDICATORS);
 
-    const hasUniversityMarkers = (
-        matchedPrograms.length > 0 ||
-        matchedDepartments.length > 0 ||
-        matchedOfficials.length > 0 ||
-        matchedEntities.length > 0
+    // Helper: Detect academic degree / program definition questions (e.g. "What is BCA?", "What is MCA?")
+    const isProgramDefinition = (text) => {
+        const isDef = /\b(?:what\s+is|what\s+are|define|definition\s+of|explain|overview\s+of|meaning\s+of|tell\s+me\s+about|describe|full\s+form\s+of|stands?\s+for|what\s+does\s+[a-z0-9.]+\s+mean)\b/i.test(text);
+        if (!isDef) return false;
+        const progPattern = /\b(?:bca|mca|b\.?tech|m\.?tech|bba|mba|b\.?sc|m\.?sc|b\.?pharm|d\.?pharm|llb|bba\s+llb|diploma|bachelor\s+of\s+computer\s+applications|master\s+of\s+computer\s+applications|bachelor\s+of\s+technology|master\s+of\s+technology|bachelor\s+of\s+business\s+administration|master\s+of\s+business\s+administration|computer\s+applications|degree)\b/i;
+        return progPattern.test(text);
+    };
+
+    // Helper: Detect explicit institutional or university triggers (faculty, HOD, fees, campus, rooms, policies)
+    const hasExplicitInstitutionalAsk = (text) => {
+        // 1. Explicit university names or self-referential terms
+        if (/\b(?:brainware|bwu|my\s+(?:university|college|campus|institution)|our\s+(?:university|college|campus|institution)|this\s+(?:university|college|campus|institution)|the\s+(?:university|college|campus|institution)|on\s+campus|in\s+campus|our\s+campus|my\s+campus|at\s+campus)\b/i.test(text)) {
+            return true;
+        }
+        // 2. University hierarchy & officials (HOD, Dean, Registrar, Professor, Faculty, etc.)
+        if (/\b(?:hod|head\s+of\s+(?:the\s+)?department|department\s+head|dean|registrar|vice\s+chancellor|chancellor|warden|proctor|placement\s+officer|faculty|professor|professors|teacher|teachers|who\s+teaches|who\s+is\s+(?:the\s+)?(?:faculty|dr|prof))\b/i.test(text)) {
+            return true;
+        }
+        // 3. Campus locations & room numbers
+        if (/\b(?:where\s+is|room\s+(?:no\.?|number|\d+)|building\s+(?:\d+|[ivx]+|\b[a-z]+\b)|which\s+floor|which\s+building|which\s+room|how\s+to\s+reach|cafeteria|canteen|seminar\s+hall|auditorium|gymnasium|language\s+lab|accounts\s+section|cash\s+counter)\b/i.test(text)) {
+            return true;
+        }
+        // 4. Institutional administrative processes, fees, admissions, rules
+        if (/\b(?:fees?|tuition|payment|refund|admission|admissions|apply|eligibility|enroll|cut[\s-]?off|hostel|mess|curfew|scholarship|scholarships|financial\s+aid|academic\s+calendar|exam\s+(?:routine|date|schedule)|timetable|class\s+routine|attendance\s+rules?|marksheet|grade\s+card|placement\s+records?|highest\s+package|average\s+package|top\s+recruiters)\b/i.test(text)) {
+            return true;
+        }
+        // 5. University documents & circulars
+        if (/\b(?:notice|notices|circular|circulars|official\s+announcement|admission\s+brochure|download\s+syllabus)\b/i.test(text)) {
+            return true;
+        }
+        return false;
+    };
+
+    const hasUniAsk = hasExplicitInstitutionalAsk(q);
+    const isProgDef = isProgramDefinition(q);
+    const isAcronym = isAcronymDefinition(q);
+    const hasGeneralConcept = isProgDef || isAcronym || matchedProgramming.length > 0 || matchedGeneral.length > 0 || /\b(?:what\s+is|what\s+are|define|explain|how\s+does|how\s+do|describe|write\s+a\s+program)\s+(?:java|python|c\+\+|coding|programming|algorithm|binary\s+search|data\s+structure|recursion|ai|machine\s+learning|cyber\s+security|calculus|math|physics)\b/i.test(q);
+
+    // Helper: Detect pure faculty / administrative queries (e.g. "Who is the HOD of Cyber Security?", "Where is room 204?")
+    const isPureAdminOrFaculty = /^(?:who\s+is\s+(?:the\s+)?(?:hod|head\s+of|dean|registrar|vice\s+chancellor|warden|director|principal)|who\s+teaches|who\s+is\s+(?:the\s+)?(?:faculty|dr|prof)|where\s+is|what\s+is\s+the\s+room|what\s+is\s+the\s+fee|what\s+are\s+the\s+fees|what\s+is\s+the\s+admission|when\s+is\s+the\s+exam)\b/i.test(q) ||
+        /^(?:fees?|admissions?|hostel|scholarships?|syllabus|routine|timetable)\s+(?:for|of)\b/i.test(q);
+
+    // 5. MIXED Intent: Query requires BOTH general concept knowledge AND university context
+    // e.g. "What is BCA, and what are its fees at my university?"
+    // Must NOT be a pure admin/faculty query like "Who is the HOD of Cyber Security?"
+    const hasGeneralDefinitionOrConcept = isProgDef || /\b(?:what\s+is|what\s+are|define|explain|how\s+does|how\s+do|overview\s+of|tell\s+me\s+about)\s+(?:[a-z0-9\-+ ]+)\b/i.test(q);
+    const hasDualRequirement = (
+        /[,\s]+(?:and|plus|also|as\s+well\s+as|along\s+with|\&)\s+/i.test(q) ||
+        (hasGeneralDefinitionOrConcept && /\b(?:brainware|bwu|my\s+university|our\s+university|this\s+university|our\s+college|on\s+campus|at\s+our|at\s+my)\b/i.test(q))
     );
 
-    // 5. Acronym / Definition exception
-    // "What is the full form of BCA?" / "Full form of CPU" -> LLM Only unless explicit institutional ask
-    const isFullForm = isAcronymDefinition(q);
-    const hasExplicitInstitutionalAsk = /\b(?:fee|fees|tuition|admission|admissions|apply|eligibility|hod|faculty|hostel|scholarship|syllabus|exam|routine|notice|placement|curfew)\b/i.test(q);
-
-    if (isFullForm && !hasExplicitInstitutionalAsk) {
+    if (!isPureAdminOrFaculty && hasGeneralConcept && hasUniAsk && hasDualRequirement) {
         return {
-            intentCategory: INTENT_CATEGORIES.GENERAL_KNOWLEDGE,
-            confidence: 0.97,
-            mode: ROUTER_MODES.LLM_ONLY,
-            skipRag: true
+            intentCategory: INTENT_CATEGORIES.MIXED_INTENT,
+            confidence: 0.96,
+            mode: ROUTER_MODES.RAG_LLM,
+            isMixed: true,
+            skipRag: false,
+            entities: { programs: matchedPrograms, departments: matchedDepartments, officials: matchedOfficials, entities: matchedEntities }
         };
     }
 
-    // 6. Dual-Clause Mixed Intent Check
-    // e.g., "What is Python and how is Python taught in Brainware BCA?" or "What is AI and AI lab at Brainware?"
-    const hasGeneralConcept = matchedGeneral.length > 0 || matchedProgramming.length > 0 || /\b(?:what\s+is|explain|describe)\s+(?:ai|machine\s+learning|python|java|cloud|data\s+science|iot|blockchain|recursion)\b/i.test(q);
-    const hasExplicitUniEntity = matchedPrograms.length > 0 || matchedDepartments.length > 0 || matchedOfficials.length > 0 || (matchedEntities.length > 0 && /\b(?:brainware|bwu|on\s+campus|our\s+college|this\s+university)\b/i.test(q));
-    const isDualClause = /\b(?:explain|what\s+is|what\s+are|how\s+does|describe)\s+[\w\s\-]+?\s+(?:and|plus|as\s+well\s+as|along\s+with)\s+(?:tell\s+me|what\s+is|what\s+are|who\s+is|where\s+is|how\s+are|how\s+is|how\s+[\w\s]+(?:are|is)|which\s+semester|which\s+faculty|does\s+our|is\s+there|the\s+fee|the\s+curriculum|the\s+lab|the\s+placement|the\s+admission|the\s+syllabus|ai\s+lab|labs?|faculty|placements?|fees?|admission|syllabus)\b/i.test(q);
-
-    if (hasUniversityMarkers && (isDualClause || (hasGeneralConcept && hasExplicitUniEntity))) {
-        // Exclude pure administrative & faculty directory queries
-        const isPureAdmin = /^(?:who\s+is\s+(?:the\s+)?(?:hod|head\s+of|dean|registrar|vice\s+chancellor|warden)|who\s+teaches|who\s+is\s+the\s+faculty|.*faculty\s+list|faculty\s+members|.*admission\s+process|.*fee\s+structure)\b/i.test(q);
-        if (!isPureAdmin) {
-            return {
-                intentCategory: INTENT_CATEGORIES.MIXED_INTENT,
-                confidence: 0.95,
-                mode: ROUTER_MODES.RAG_LLM,
-                isMixed: true,
-                skipRag: false,
-                entities: { programs: matchedPrograms, departments: matchedDepartments, officials: matchedOfficials, entities: matchedEntities }
-            };
-        }
+    // 6. GENERAL Intent: Academic Program / Degree Definitions (e.g. "What is BCA?", "What is MCA?")
+    // Do not classify a question as university-specific merely because it mentions a degree or education topic
+    if ((isProgDef || isAcronym) && !hasUniAsk) {
+        return {
+            intentCategory: INTENT_CATEGORIES.GENERAL_KNOWLEDGE,
+            confidence: 0.98,
+            mode: ROUTER_MODES.LLM_ONLY,
+            isMixed: false,
+            skipRag: true,
+            entities: { programs: matchedPrograms, departments: matchedDepartments, officials: matchedOfficials, entities: matchedEntities }
+        };
     }
 
-    // 7. Context / Memory Inheritance for follow-up questions
+    // 7. GENERAL Intent: Programming, Mathematics, AI, Science Concepts (e.g. "What is Java?", "What is Cyber Security?")
+    if ((matchedProgramming.length > 0 || matchedGeneral.length > 0 || /\b(?:write\s+a\s+program|code|function|debug|algorithm|syntax|recursion|loop|pointer)\b/i.test(q)) && !hasUniAsk) {
+        return {
+            intentCategory: matchedProgramming.length > 0 ? INTENT_CATEGORIES.PROGRAMMING : INTENT_CATEGORIES.GENERAL_KNOWLEDGE,
+            confidence: 0.95,
+            mode: ROUTER_MODES.LLM_ONLY,
+            isMixed: false,
+            skipRag: true,
+            entities: { programs: matchedPrograms, departments: matchedDepartments, officials: matchedOfficials, entities: matchedEntities }
+        };
+    }
+
+    // 8. Context / Memory Inheritance for follow-up questions
     let inheritedUniContext = false;
     const historyText = options.conversationHistory || options.historyText || "";
     const activeTopic = options.activeTopic || "";
@@ -391,9 +436,9 @@ function classifyIntent(rawQuery, options = {}) {
         const hasPriorUni = UNIVERSITY_ENTITIES.some((k) => ctx.includes(k)) ||
             /\b(?:bca|mca|btech|mtech|bba|mba|fees?|admission|hostel|syllabus|faculty|hod|campus|brainware)\b/i.test(ctx);
         
-        const isShortFollowUp = (q.split(/\s+/).length <= 7 && !matchedGeneral.length && !matchedProgramming.length && (
-            /\b(?:fees?\??|eligibility|rules|charges|timings|curfew|cost|how\s+to\s+apply|criteria|syllabus|hod|faculty|where|when|routine|placement|package|admission)\b/i.test(q) ||
-            /^(?:fees?\??|what\s+about\s+fees?\??|eligibility\??|what\s+about\s+eligibility\??|what\s+about\s+second\s+semester\??|what\s+is\s+its\s+eligibility\??)$/i.test(q)
+        const isShortFollowUp = (q.split(/\s+/).length <= 7 && !matchedGeneral.length && !matchedProgramming.length && !isProgDef && (
+            /\b(?:fees?\??|eligibility|rules|charges|timings|curfew|cost|how\s+to\s+apply|criteria|syllabus|hod|faculty|where|when|routine|placement|package|admission|building|floor|room|which\s+building|which\s+floor|which\s+room)\b/i.test(q) ||
+            /^(?:fees?\??|what\s+about\s+fees?\??|eligibility\??|what\s+about\s+eligibility\??|what\s+about\s+second\s+semester\??|what\s+is\s+its\s+eligibility\??|which\s+building\??|which\s+floor\??|which\s+room\??)$/i.test(q)
         ));
 
         if (hasPriorUni && isShortFollowUp) {
@@ -401,8 +446,8 @@ function classifyIntent(rawQuery, options = {}) {
         }
     }
 
-    // 8. University Specific / Administrative Intent
-    if (hasUniversityMarkers || inheritedUniContext) {
+    // 9. UNIVERSITY_SPECIFIC Intent: University faculty, rooms, fees, schedules, policies
+    if (hasUniAsk || matchedOfficials.length > 0 || matchedDepartments.length > 0 || matchedEntities.length > 0 || inheritedUniContext) {
         const isAdmin = /\b(?:fee|fees|admission|admissions|hostel|scholarship|curfew|rules|accounts|refund|hod|head\s+of\s+department|dean|registrar|vice\s+chancellor|chancellor|warden|proctor)\b/i.test(q);
         return {
             intentCategory: isAdmin ? INTENT_CATEGORIES.ADMINISTRATIVE : INTENT_CATEGORIES.UNIVERSITY_KNOWLEDGE,
@@ -414,21 +459,12 @@ function classifyIntent(rawQuery, options = {}) {
         };
     }
 
-    // 9. Programming Intent (Mode A)
-    if (matchedProgramming.length > 0 || /\b(?:write\s+a\s+program|code|function|debug|algorithm|syntax|recursion|loop|pointer)\b/i.test(q)) {
-        return {
-            intentCategory: INTENT_CATEGORIES.PROGRAMMING,
-            confidence: 0.94,
-            mode: ROUTER_MODES.LLM_ONLY,
-            skipRag: true
-        };
-    }
-
-    // 10. Default: General Knowledge (Mode A)
+    // 10. Default: General Knowledge (Mode A - LLM Only)
     return {
         intentCategory: INTENT_CATEGORIES.GENERAL_KNOWLEDGE,
         confidence: 0.92,
         mode: ROUTER_MODES.LLM_ONLY,
+        isMixed: false,
         skipRag: true
     };
 }

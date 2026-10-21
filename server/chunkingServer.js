@@ -354,6 +354,16 @@ app.post(["/queue/cancel/:documentId", "/api/documents/queue/cancel/:documentId"
     return sendJson(res, 200, "Document chunking cancelled.", result);
 });
 
+app.post(["/queue/dismiss/:documentId", "/api/documents/queue/dismiss/:documentId", "/api/v1/documents/queue/dismiss/:documentId"], async (req, res) => {
+    const result = await chunkingQueueService.dismissJob(req.params.documentId);
+    return sendJson(res, 200, "Document dismissed from failure queue.", result);
+});
+
+app.post(["/queue/dismiss-failed", "/queue/dismiss-all", "/api/documents/queue/dismiss-failed", "/api/v1/documents/queue/dismiss-failed"], async (req, res) => {
+    const result = await chunkingQueueService.dismissAllFailed();
+    return sendJson(res, 200, "All failed documents dismissed.", result);
+});
+
 app.post(["/queue/retry/:documentId", "/api/documents/queue/retry/:documentId", "/api/v1/documents/queue/retry/:documentId"], async (req, res) => {
     const result = await chunkingQueueService.retryJob(req.params.documentId);
     return sendJson(res, 200, "Document re-enqueued for chunking.", result);
@@ -903,9 +913,25 @@ const handleDocumentUpload = async (req, res) => {
             ".pdf": "application/pdf",
             ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             ".doc": "application/msword",
+            ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            ".ppt": "application/vnd.ms-powerpoint",
+            ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".xls": "application/vnd.ms-excel",
+            ".ods": "application/vnd.oasis.opendocument.spreadsheet",
+            ".csv": "text/csv",
             ".txt": "text/plain",
             ".md": "text/markdown",
-            ".markdown": "text/markdown"
+            ".markdown": "text/markdown",
+            ".html": "text/html",
+            ".htm": "text/html",
+            ".json": "application/json",
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".webp": "image/webp",
+            ".bmp": "image/bmp",
+            ".tiff": "image/tiff",
+            ".tif": "image/tiff"
         };
 
         const createdDocs = [];
@@ -1481,10 +1507,15 @@ async function startChunkingServer() {
     const { supportedFiles, ignoredFiles } = localStorageManager.scanKnowledgeDocuments(storageRoot);
     console.log(`[Storage] Found ${supportedFiles.length} valid documents (Ignored ${ignoredFiles.length} cache files).`);
 
-    // 6. Recover Queue & Start Worker Pool
+    // 6. Recover Queue & Check Persisted Worker State
     await chunkingQueueService.recoverQueueOnStartup();
-    chunkingQueueService.startWorkerPool();
-    console.log("[Worker] ✓ Queue worker pool initialized and active.");
+    const currentWorkerState = chunkingQueueService.getWorkerStatus();
+    if (currentWorkerState === "RUNNING") {
+        await chunkingQueueService.startWorkerPool();
+        console.log("[Worker] ✓ Queue worker pool initialized and active.");
+    } else {
+        console.log(`[Worker] 🔒 Worker pool is persisted as ${currentWorkerState}. Workers remain idle until explicitly started by user.`);
+    }
 }
 
 // ==========================================

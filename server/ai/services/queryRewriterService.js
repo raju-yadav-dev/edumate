@@ -425,15 +425,20 @@ const analyzeQuery = async ({ question, historyText, conversationContext, user }
 
     const rewrittenQuery = queryOptimizer.expandAliases(heuristicRewritten, { ...context, academicEntities });
     const subqueries = queryOptimizer.buildSubqueries(rewrittenQuery, intents, { ...context, academicEntities });
-    const intent = intents.length === 1 ? intents[0] : intents;
+    const hasOwnEntity = queryOptimizer.hasExplicitEntity(originalQuestion);
+    if (hasOwnEntity && context.mentionedDepartment && !new RegExp(`\\b${context.mentionedDepartment.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}\\b`, "i").test(originalQuestion)) {
+        // Query has shifted to a new entity; reset stale department
+        context.mentionedDepartment = null;
+    }
     const entities = {
         course: /\b(bca|b\.c\.a)\b/i.test(originalQuestion) ? "BCA" : /\b(b\.?\s*tech|btech|b\s+tech)\b/i.test(originalQuestion) ? "B.Tech" : null,
-        department: context.mentionedDepartment || (/\b(cse|computer science)\b/i.test(originalQuestion) ? "CSE" : null),
+        department: hasOwnEntity ? (/\b(cse|computer science)\b/i.test(originalQuestion) ? "CSE" : null) : (context.mentionedDepartment || null),
         location: null,
         institution: null
     };
 
-    context.currentIntent = intent;
+    const intent = intents.length === 1 ? intents[0] : intents;
+    context.currentIntent = Array.isArray(intent) ? intent[0] : intent;
     context.lastRelevantSources = context.lastRelevantSources || [];
 
     return {

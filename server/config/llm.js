@@ -106,32 +106,48 @@ const inspectModelFile = (filePath, rawModel = "") => {
 const stripQwenThinking = (text) => {
     if (!text || typeof text !== "string") return "";
     let clean = text;
+
+    // Handle closed thinking blocks
+    clean = clean.replace(/<think>[\s\S]*?<\/think>/gi, "");
+
+    // If orphaned </think> exists, take the text following it
     if (clean.includes("</think>")) {
         clean = clean.split("</think>").pop();
     }
-    return clean
-        .replace(/<think>[\s\S]*?<\/think>/gi, "")
-        .replace(/<think>[\s\S]*/gi, "")
-        .trim();
+
+    // Strip incomplete <think> block that didn't close
+    clean = clean.replace(/<think>[\s\S]*/gi, "");
+
+    // Strip any remaining or broken thinking tags
+    clean = clean.replace(/<\/?think>/gi, "");
+
+    return clean.trim();
 };
 
 /**
  * Calculates dynamic output token budget based on question complexity
- * Guarantees fast 5-10 second responses:
- * - Small factual: 120-250 tokens
- * - Medium query: 250-500 tokens
- * - Large query: 500-900 tokens
+ * Guarantees fast responses while avoiding token starvation:
+ * - Direct factual: 100-140 tokens (~1-2s)
+ * - Academic definition: 200-240 tokens (~2-3s)
+ * - Mixed query: 250-320 tokens (~3-5s)
+ * - Medium query: 250-350 tokens (~3-5s)
+ * - Large/comparison: 400-600 tokens (~6-8s)
  */
 const calculateDynamicOutputBudget = (question = "", intent = "") => {
     const q = String(question || "").toLowerCase();
     const words = q.trim().split(/\s+/).filter(Boolean);
 
-    // Direct small factual questions (< 2s generation)
+    // Direct small factual questions (room, floor, building, who is, contact)
     const isDirectFact = (
         q.startsWith("who ") ||
         q.startsWith("where ") ||
         q.startsWith("when ") ||
         q.startsWith("which room") ||
+        q.startsWith("which floor") ||
+        q.startsWith("which building") ||
+        q.startsWith("what is the room") ||
+        q.startsWith("what is the floor") ||
+        q.startsWith("what is the building") ||
         q.startsWith("what is the name") ||
         q.startsWith("who's") ||
         q.includes("hod") ||
@@ -145,43 +161,69 @@ const calculateDynamicOutputBudget = (question = "", intent = "") => {
 
     if (isDirectFact && words.length < 14) {
         return {
-            maxTokens: Math.min(160, numberFromEnv("LLM_MAX_TOKENS", 160)),
-            tier: "SMALL",
+            maxTokens: Math.min(130, numberFromEnv("LLM_MAX_TOKENS", 130)),
+            tier: "SMALL_FACTUAL",
             targetLatencySec: "1-2s"
         };
     }
 
-    // Large questions
+    // Mixed questions (combining definition/general knowledge with institutional facts)
+    const isMixed = (
+        (/\band\b/i.test(q) && /\b(?:fees?|tuition|cost|university|campus|department)\b/i.test(q)) ||
+        intent === "MIXED"
+    );
+    if (isMixed) {
+        return {
+            maxTokens: Math.min(280, numberFromEnv("LLM_MAX_TOKENS", 280)),
+            tier: "MIXED",
+            targetLatencySec: "3-5s"
+        };
+    }
+
+    // Academic definition / concept questions (e.g. "What is BCA?", "What is MCA?")
+    const isDefinition = (
+        /^(?:what\s+is|what\s+are|define|explain)\s+(?:a\s+|an\s+|the\s+)?([a-z0-9.]{2,10})\b/i.test(q) &&
+        words.length <= 8
+    );
+    if (isDefinition) {
+        return {
+            maxTokens: Math.min(220, numberFromEnv("LLM_MAX_TOKENS", 220)),
+            tier: "DEFINITION",
+            targetLatencySec: "2-3s"
+        };
+    }
+
+    // Large questions / comparisons
     if (
         words.length >= 14 ||
         /\b(?:compare|difference|complete\s+guide|full\s+overview|everything\s+about|all\s+details|comprehensive|all\s+faculty|entire\s+syllabus)\b/i.test(q) ||
         intent === "COMPARISON"
     ) {
         return {
-            maxTokens: Math.min(650, numberFromEnv("LLM_MAX_TOKENS", 650)),
+            maxTokens: Math.min(500, numberFromEnv("LLM_MAX_TOKENS", 500)),
             tier: "LARGE",
             targetLatencySec: "5-8s"
         };
     }
 
-    // Medium questions
+    // Medium questions (fees, admission, eligibility, etc.)
     if (
         words.length >= 7 ||
         /\b(?:fees?|admission|eligibility|faculty|hostel|placement|scholarship|procedure|requirements?)\b/i.test(q) ||
         intent === "FEE_QUERY" || intent === "ADMISSION_QUERY"
     ) {
         return {
-            maxTokens: Math.min(320, numberFromEnv("LLM_MAX_TOKENS", 320)),
+            maxTokens: Math.min(280, numberFromEnv("LLM_MAX_TOKENS", 280)),
             tier: "MEDIUM",
-            targetLatencySec: "2-4s"
+            targetLatencySec: "3-5s"
         };
     }
 
-    // Default small factual
+    // Default general
     return {
         maxTokens: Math.min(180, numberFromEnv("LLM_MAX_TOKENS", 180)),
-        tier: "SMALL",
-        targetLatencySec: "1-2s"
+        tier: "DEFAULT",
+        targetLatencySec: "2-3s"
     };
 };
 

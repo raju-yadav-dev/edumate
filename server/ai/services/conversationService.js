@@ -5,6 +5,8 @@ const promptBuilder = require("../utils/promptBuilder");
 const llmService = require("./llmService");
 
 const isValidObjectId = (id) => id && mongoose.Types.ObjectId.isValid(id) && String(new mongoose.Types.ObjectId(id)) === String(id);
+const LRUCache = require("../utils/lruCache");
+const guestChatCache = new LRUCache(1000, 24 * 60 * 60 * 1000);
 
 /**
  * Retrieves and trims recent message memory for a conversation thread
@@ -15,23 +17,56 @@ const isValidObjectId = (id) => id && mongoose.Types.ObjectId.isValid(id) && Str
  * @returns {Promise<Object>} - { historyText: string, rawHistory: Array }
  */
 const getRecentMemory = async ({ userId, conversationId, maxTokens = 500, parentId = null }) => {
-    if (!userId || !conversationId || !isValidObjectId(userId) || !isValidObjectId(conversationId)) {
+    if (!conversationId) {
         return {
             historyText: "",
-            rawHistory: []
+            rawHistory: [],
+            activeTopic: "",
+            conversationContext: {
+                currentTopic: null,
+                currentEntity: null,
+                currentIntent: null,
+                mentionedDepartment: null,
+                mentionedCollege: null,
+                lastRelevantDocument: null,
+                lastRetrievedSources: []
+            },
+            summary: ""
         };
     }
 
-    const chat = await Chat.findOne({
-        _id: conversationId,
-        user: userId,
-        status: "active"
-    });
+    let chat = null;
+    if (userId && isValidObjectId(userId) && isValidObjectId(conversationId)) {
+        try {
+            chat = await Chat.findOne({
+                _id: conversationId,
+                user: userId,
+                status: "active"
+            });
+        } catch (dbErr) {
+            chat = null;
+        }
+    }
+
+    if (!chat) {
+        chat = guestChatCache.get(String(conversationId));
+    }
 
     if (!chat || !chat.messages || chat.messages.length === 0) {
         return {
             historyText: "",
-            rawHistory: []
+            rawHistory: [],
+            activeTopic: "",
+            conversationContext: {
+                currentTopic: null,
+                currentEntity: null,
+                currentIntent: null,
+                mentionedDepartment: null,
+                mentionedCollege: null,
+                lastRelevantDocument: null,
+                lastRetrievedSources: []
+            },
+            summary: ""
         };
     }
 
@@ -191,63 +226,82 @@ const getOrCreateChat = async ({ user, conversationId, question }) => {
 };
 
 const saveMessageTurn = async ({ user, conversationId, question, response, intent, confidence, provider, responseTimeMs, userMessageId, assistantMessageId, parentId, topic, entities, retrievalContext }) => {
-    const chat = await getOrCreateChat({
-        user,
-        conversationId,
-        question
+    let chat = null;
+    if (user?._id && isValidObjectId(user._id)) {
+        chat = await getOrCreateChat({
+            user,
+            conversationId,
+            question
+        });
+    }
+
+    const effectiveConvId = conversationId || (chat ? String(chat._id) : `guest_conv_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`);
+
+    let targetChat = chat;
+    if (!targetChat) {
+        let guestChat = guestChatCache.get(effectiveConvId);
+        if (!guestChat) {
+            guestChat = {
+                _id: effectiveConvId,
+                title: question.slice(0, 80),
+                messages: [],
+                summary: ""
+            };
+        }
+        targetChat = guestChat;
+    }
+
+    const uMsgId = userMessageId || `msg-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const aMsgId = assistantMessageId || `msg-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+    let finalParentId = parentId;
+    if (!finalParentId && targetChat.messages.length > 0) {
+        const lastMsg = targetChat.messages[targetChat.messages.length - 1];
+        finalParentId = lastMsg.id || null;
+    }
+
+    // Backfill IDs for any old messages in this chat to prevent breaks
+    targetChat.messages.forEach((msg, idx) => {
+        if (!msg.id) {
+            msg.id = `msg-legacy-${idx}-${effectiveConvId}`;
+            if (idx > 0 && !msg.parentId) {
+                msg.parentId = targetChat.messages[idx - 1].id || `msg-legacy-${idx-1}-${effectiveConvId}`;
+            }
+        }
+    });
+
+    const finalIntent = Array.isArray(intent) ? intent.join(",") : String(intent || "unknown");
+    const sources = (response && Array.isArray(response.sources)) ? response.sources : [];
+
+    targetChat.messages.push({
+        id: uMsgId,
+        parentId: finalParentId,
+        role: "user",
+        content: question,
+        intent: finalIntent,
+        confidence: confidence,
+        provider: "user",
+        topic: topic || "",
+        entities: entities || {}
+    });
+
+    targetChat.messages.push({
+        id: aMsgId,
+        parentId: uMsgId,
+        role: "assistant",
+        content: (response && typeof response.answer === "string") ? response.answer : String(response || ""),
+        intent: finalIntent,
+        confidence: response?.confidence === "high" ? 0.9 : response?.confidence === "medium" ? 0.65 : 0.25,
+        sources,
+        provider,
+        responseTimeMs,
+        mapData: response?.mapData || null,
+        topic: topic || "",
+        entities: entities || {},
+        retrievalContext: retrievalContext || null
     });
 
     if (chat) {
-        const uMsgId = userMessageId || `msg-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-        const aMsgId = assistantMessageId || `msg-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-
-        let finalParentId = parentId;
-        if (!finalParentId && chat.messages.length > 0) {
-            const lastMsg = chat.messages[chat.messages.length - 1];
-            finalParentId = lastMsg.id || null;
-        }
-
-        // Backfill IDs for any old messages in this chat to prevent breaks
-        chat.messages.forEach((msg, idx) => {
-            if (!msg.id) {
-                msg.id = `msg-legacy-${idx}-${chat._id}`;
-                if (idx > 0 && !msg.parentId) {
-                    msg.parentId = chat.messages[idx - 1].id || `msg-legacy-${idx-1}-${chat._id}`;
-                }
-            }
-        });
-
-        const finalIntent = Array.isArray(intent) ? intent.join(",") : String(intent || "unknown");
-        const sources = (response && Array.isArray(response.sources)) ? response.sources : [];
-
-        chat.messages.push({
-            id: uMsgId,
-            parentId: finalParentId,
-            role: "user",
-            content: question,
-            intent: finalIntent,
-            confidence: confidence,
-            provider: "user",
-            topic: topic || "",
-            entities: entities || {}
-        });
-
-        chat.messages.push({
-            id: aMsgId,
-            parentId: uMsgId,
-            role: "assistant",
-            content: (response && typeof response.answer === "string") ? response.answer : String(response || ""),
-            intent: finalIntent,
-            confidence: response?.confidence === "high" ? 0.9 : response?.confidence === "medium" ? 0.65 : 0.25,
-            sources,
-            provider,
-            responseTimeMs,
-            mapData: response?.mapData || null,
-            topic: topic || "",
-            entities: entities || {},
-            retrievalContext: retrievalContext || null
-        });
-
         // Store aggregated retrieved sources on the Chat document
         if (sources.length > 0) {
             chat.retrievedSources = chat.retrievedSources || [];
@@ -285,9 +339,19 @@ const saveMessageTurn = async ({ user, conversationId, question, response, inten
 
         chat.updatedBy = user._id;
         await chat.save();
+    } else {
+        if (targetChat.messages.length > 6) {
+            const olderTurns = targetChat.messages.slice(0, -6);
+            const summarySnippet = olderTurns
+                .map(m => `${m.role === "user" ? "User asked about" : "Discussed"} ${String(m.content || "").slice(0, 40)}`)
+                .slice(-6)
+                .join("; ");
+            targetChat.summary = summarySnippet.slice(0, 300);
+        }
+        guestChatCache.set(effectiveConvId, targetChat);
     }
 
-    return chat;
+    return targetChat;
 };
 
 module.exports = {

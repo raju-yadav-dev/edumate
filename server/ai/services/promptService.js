@@ -25,7 +25,8 @@ const buildPromptMessages = ({
     activeTopic = "",
     language,
     studentProfile,
-    queryPlan
+    queryPlan,
+    route
 }) => {
     const memory = historyText ? [{ role: "user", content: "Conversation History summary: " + historyText }] : [];
 
@@ -42,7 +43,8 @@ const buildPromptMessages = ({
         activeTopic,
         language,
         studentProfile,
-        queryPlan
+        queryPlan,
+        route
     });
 };
 

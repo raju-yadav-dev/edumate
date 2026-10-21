@@ -171,10 +171,12 @@ const makeHttpRequest = ({ url, method = "POST", headers = {}, body = null, time
 
         req.on("response", (res) => {
             res.setEncoding("utf8");
+            req.setTimeout(timeoutMs);
 
             if (typeof onData === "function") {
                 // Streaming mode
                 res.on("data", (chunk) => {
+                    req.setTimeout(timeoutMs);
                     const result = onData(chunk);
                     if (result && result.done) {
                         if (signal) signal.removeEventListener("abort", onAbort);
@@ -207,6 +209,7 @@ const makeHttpRequest = ({ url, method = "POST", headers = {}, body = null, time
                 // Non-streaming buffering mode
                 let responseText = "";
                 res.on("data", (chunk) => {
+                    req.setTimeout(timeoutMs);
                     responseText += chunk;
                 });
 
@@ -289,11 +292,22 @@ const generateCompletion = async (messages, onChunk = null, options = {}) => {
 
     // Format messages
     const formattedMessages = Array.isArray(messages) && messages.length > 0
-        ? messages
+        ? [...messages]
         : [
             { role: "system", content: "You are EduMate AI, a helpful, strict university assistant." },
             { role: "user", content: typeof messages === "string" ? messages : "" }
         ];
+
+    // For reasoning models (e.g. Qwen3 / Qwen-2.5):
+    // If the last message is from user, prefill with closed thinking block (<think>\n</think>\n)
+    // to bypass internal reasoning monologue, yielding instantaneous 1-2s TTFT and preventing token starvation.
+    const lastMsg = formattedMessages[formattedMessages.length - 1];
+    if (lastMsg && lastMsg.role === "user") {
+        formattedMessages.push({
+            role: "assistant",
+            content: "<think>\n</think>\n"
+        });
+    }
 
     // Request Payload
     const requestBody = {
@@ -358,10 +372,16 @@ const generateCompletion = async (messages, onChunk = null, options = {}) => {
                 if (insideThinking) {
                     if (currentDelta.includes("</think>")) {
                         insideThinking = false;
-                        currentDelta = currentDelta.split("</think>")[1] || "";
+                        currentDelta = currentDelta.split("</think>").pop() || "";
                     } else {
                         return { done: false };
                     }
+                }
+
+                // If orphaned </think> arrives when insideThinking is false (e.g. from prefilled assistant)
+                if (currentDelta.includes("</think>")) {
+                    insideThinking = false;
+                    currentDelta = currentDelta.split("</think>").pop() || "";
                 }
 
                 if (currentDelta.includes("<think>")) {
@@ -372,6 +392,9 @@ const generateCompletion = async (messages, onChunk = null, options = {}) => {
                         currentDelta = currentDelta.split("<think>")[0] || "";
                     }
                 }
+
+                // Strip any remaining or broken thinking tags
+                currentDelta = currentDelta.replace(/<\/?think>/gi, "");
 
                 if (!currentDelta) return { done: false };
 
@@ -478,9 +501,8 @@ const generateCompletion = async (messages, onChunk = null, options = {}) => {
                     options.onFirstToken(firstTokenTime - startTime);
                 }
 
-                fullText = parsed.choices?.[0]?.message?.content || 
-                           parsed.choices?.[0]?.message?.reasoning_content || 
-                           parsed.content || "";
+                const rawContent = parsed.choices?.[0]?.message?.content || parsed.content || "";
+                fullText = stripQwenThinking(rawContent);
 
                 if (onChunk && fullText) {
                     onChunk(fullText);

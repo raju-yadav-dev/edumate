@@ -25,11 +25,12 @@ const buildCompactSystemPrompt = ({ activeInstitution, targetLanguage, intent, i
             `Language: ${targetLanguage}.`,
             "Rules:",
             "1. Answer clearly, accurately, and comprehensively using your broad scientific, technical, mathematical, coding, and academic knowledge.",
-            "2. Provide step-by-step explanations, well-formatted code snippets, equations, or lists where helpful.",
-            "3. Be direct, insightful, and helpful without unnecessary meta-disclaimers."
+            "2. For degree/academic program queries (such as BCA, MCA, B.Tech), explain the degree (e.g. Bachelor of Computer Applications, Master of Computer Applications), duration, core subjects, and career path.",
+            "3. For programming/technical concepts (such as Java, Python, SQL), explain what it is, core features, and practical applications.",
+            "4. Be direct, concise, and helpful. Do not output <think> tags or reasoning."
         ];
         if (isRepeat) {
-            lines.push("4. The user is asking a follow-up. Answer directly without repeating prior text.");
+            lines.push("5. The user is asking a follow-up. Answer directly without repeating prior text.");
         }
         return lines.join("\n");
     }
@@ -89,22 +90,23 @@ const buildCompactSystemPrompt = ({ activeInstitution, targetLanguage, intent, i
         `Language: ${targetLanguage}. Preserve official names, numbers, acronyms, currency, and fees exactly.`,
         "Rules:",
         "1. Answer ONLY using the provided Verified Institutional Context. Never fabricate or guess.",
-        "2. If information is not in the context, state: 'I couldn't find matching information in the university knowledge base.'",
-        "3. Answer direct factual questions (like names, roles, room numbers, dates) concisely in clear natural text. Format multi-row comparisons, fee schedules, or full directories using clean markdown tables.",
-        "4. Quote exact numerical amounts and fees verbatim from the context (e.g. Total Fees: INR 482600). Do NOT invent per-year estimates, ranges, or perform recalculations unless explicitly written in the context.",
-        "5. Be concise and direct. Do not repeat the prompt or include meta-commentary."
+        "2. If information is not in the context, state: 'I couldn't find matching information in the university knowledge base.' If a specific requested detail (such as building or room) is missing or unverified, explicitly state that it cannot be verified or is not specified in the official documents.",
+        "3. Strict Entity-Fact Relationship: Keep each room number, building, floor, department, and role strictly bound to its exact entity. Never combine a room number, building, or designation from unrelated chunks or different departments.",
+        "4. Answer direct factual questions (like room numbers, buildings, roles, names, fees) concisely, consistently, and directly in clear natural text.",
+        "5. Quote exact numbers and details verbatim from the context. Do not output <think> tags or reasoning."
     ];
 
     if (isRepeat) {
-        lines.push("5. The user is asking a follow-up. Answer directly without repeating prior text.");
+        lines.push("6. The user is asking a follow-up. Answer directly without repeating prior text.");
     }
     if (activeTopic) {
         lines.push(`Active topic: ${activeTopic}.`);
     }
 
-    const checkIntent = Array.isArray(intent) ? intent[0] : intent;
-    if (checkIntent === "location" || checkIntent === "campus_navigation" || checkIntent === "Campus Navigation") {
-        lines.push("Location format:\nBuilding [Number] ([Name])\n[Floor]\nRoom [Room Number]\n\n[Person/Dept details]");
+    const intentsArray = Array.isArray(intent) ? intent : [intent];
+    const isLocationIntent = intentsArray.some(i => i === "location" || i === "campus_navigation" || i === "Campus Navigation");
+    if (isLocationIntent) {
+        lines.push("7. For location/room inquiries: State the room number, person/department designation, and building concisely. If the building is requested and verified, include it; if not specified in the records, state so explicitly.");
     }
 
     return lines.join("\n");

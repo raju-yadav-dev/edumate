@@ -85,13 +85,14 @@ const buildPlannerQdrantFilter = ({
 
     // 3. Category filter (matches target category, lowercase variant, or 'general' repository files)
     if (queryPlan.category && !relaxCategory) {
-        must.push({
-            should: [
-                { key: "category", match: { value: queryPlan.category } },
-                { key: "category", match: { value: queryPlan.category.toLowerCase() } },
-                { key: "category", match: { value: "general" } }
-            ]
+        const catArray = Array.isArray(queryPlan.category) ? queryPlan.category : [queryPlan.category];
+        const categoryShould = [];
+        catArray.forEach(cat => {
+            categoryShould.push({ key: "category", match: { value: cat } });
+            categoryShould.push({ key: "category", match: { value: String(cat).toLowerCase() } });
         });
+        categoryShould.push({ key: "category", match: { value: "general" } });
+        must.push({ should: categoryShould });
     }
 
     // 4. Department filter (Never retrieve unrelated departments when department is known)
@@ -99,7 +100,10 @@ const buildPlannerQdrantFilter = ({
         must.push({
             should: [
                 { key: "department", match: { value: queryPlan.department } },
-                { key: "departments", match: { value: queryPlan.department } }
+                { key: "departments", match: { value: queryPlan.department } },
+                { key: "department", match: { value: "unknown" } },
+                { key: "department", match: { value: "" } },
+                { key: "department", match: { value: "general" } }
             ]
         });
     }
@@ -422,8 +426,13 @@ const computeMetadataScore = (queryPlan, chunk) => {
     // Category match
     if (queryPlan.category) {
         totalWeights += 0.25;
-        const targetCat = queryPlan.category.toLowerCase();
-        if (chunkCat === targetCat || chunkCat.includes(targetCat) || targetCat.includes(chunkCat) || chunkCat === "general") {
+        const targetCats = Array.isArray(queryPlan.category)
+            ? queryPlan.category.map(c => String(c).toLowerCase())
+            : [String(queryPlan.category).toLowerCase()];
+        const matchesCategory = targetCats.some(tc =>
+            chunkCat === tc || chunkCat.includes(tc) || tc.includes(chunkCat) || chunkCat === "general"
+        );
+        if (matchesCategory) {
             score += 0.25;
         }
     }
@@ -492,17 +501,20 @@ const applySectionPreference = (candidates) => {
     const anchor = candidates[0];
     const anchorDoc = String(anchor.metadata?.documentId || anchor.metadata?.sourceDocumentId || "");
     const anchorSection = String(anchor.metadata?.parentSection || anchor.metadata?.heading || anchor.metadata?.sectionPath || "").trim().toLowerCase();
+    const anchorBaseScore = anchor.baseScore || anchor.score || 0.5;
 
     candidates.forEach((cand, idx) => {
         let sectionBoost = 0;
         const candDoc = String(cand.metadata?.documentId || cand.metadata?.sourceDocumentId || "");
         const candSection = String(cand.metadata?.parentSection || cand.metadata?.heading || cand.metadata?.sectionPath || "").trim().toLowerCase();
 
-        if (idx > 0 && anchorDoc && candDoc === anchorDoc) {
-            if (anchorSection && candSection && (candSection === anchorSection || candSection.includes(anchorSection) || anchorSection.includes(candSection))) {
-                sectionBoost = 0.12; // Same document & same section coherence bonus
-            } else {
-                sectionBoost = 0.05; // Same document bonus
+        if (idx > 0 && anchorDoc && candDoc === anchorDoc && anchorSection && candSection) {
+            const isSameSection = candSection === anchorSection || candSection.includes(anchorSection) || anchorSection.includes(candSection);
+            if (isSameSection) {
+                // Same section coherence bonus, capped to not exceed the primary anchor score
+                const potentialScore = (cand.baseScore || cand.score || 0.5) + 0.08;
+                const cappedScore = Math.min(potentialScore, anchorBaseScore - 0.0001);
+                sectionBoost = Math.max(0, parseFloat((cappedScore - (cand.baseScore || cand.score || 0.5)).toFixed(4)));
             }
         }
 

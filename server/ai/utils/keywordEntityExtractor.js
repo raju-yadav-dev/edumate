@@ -34,7 +34,11 @@ const DEPARTMENTS = [
     ["Chemistry", /\bchemistry\b/gi],
     ["Mathematics", /\bmathematics\b|\bmaths\b/gi],
     ["Statistics", /\bstatistics?\b|\bdata\s+statistics\b/gi],
-    ["English", /\benglish\b/gi]
+    ["English", /\benglish\b/gi],
+    ["Psychology", /\bpsychology\b|\bpsychological\b/gi],
+    ["Cyber Science", /\bcyber(?:\s*sc\.?|\s+science|\s+security)?\b/gi],
+    ["Media", /\bmedia(?:\s+science|\s+and\s+journalism)?\b/gi],
+    ["Nursing", /\bnursing\b/gi]
 ];
 
 const DOCUMENT_TYPES = [

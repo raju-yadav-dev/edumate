@@ -17,7 +17,25 @@ const SUPPORTED_DOCUMENT_EXTENSIONS = new Set([
     ".doc",
     ".txt",
     ".md",
-    ".markdown"
+    ".markdown",
+    ".pptx",
+    ".ppt",
+    ".xlsx",
+    ".xls",
+    ".ods",
+    ".csv",
+    ".html",
+    ".htm",
+    ".json",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".bmp",
+    ".tiff",
+    ".tif",
+    ".xml",
+    ".zip"
 ]);
 
 const IGNORED_DIRECTORIES = new Set([

@@ -1,75 +1,66 @@
+const path = require("path");
+const fs = require("fs");
+
 class ImageExtractor {
     /**
-     * Extracts text from an image buffer using tesseract.js OCR.
-     * Supports English, Hindi, and Bengali detection.
+     * Extracts text from an image buffer using local tesseract.js OCR.
+     * Uses offline traineddata stored in server directory.
+     * @param {Buffer} buffer
+     * @param {string} [fileName="image"]
+     * @returns {Promise<Object>} - Contains { text, metadata, documentType }
      */
-    static async extract(buffer) {
+    static async extract(buffer, fileName = "image") {
+        if (!buffer || buffer.length === 0) {
+            throw new Error("Cannot extract text from empty image buffer.");
+        }
+
         const savedWindow = global.window;
         const savedDocument = global.document;
         delete global.window;
         delete global.document;
 
+        let worker = null;
         try {
-            const Tesseract = require("tesseract.js");
-            console.log("[ImageExtractor] Performing OCR on image buffer...");
-            const { data: { text } } = await Tesseract.recognize(buffer, "eng+hin+ben");
-            if (!text || !text.trim()) {
+            const { createWorker } = require("tesseract.js");
+            const serverDir = path.resolve(__dirname, "../../");
+            const engTrainedData = path.join(serverDir, "eng.traineddata");
+
+            if (!fs.existsSync(engTrainedData)) {
+                throw new Error(`OCR language model not found at '${engTrainedData}'. Local Tesseract OCR is unconfigured.`);
+            }
+
+            worker = await createWorker("eng", 1, {
+                langPath: serverDir,
+                gzip: false
+            });
+
+            const result = await worker.recognize(buffer);
+            const text = (result?.data?.text || "").trim();
+
+            if (!text) {
                 throw new Error("No readable text found in the image.");
             }
+
             return {
-                text: text.trim(),
-                metadata: { isImage: true, ocrEngine: "tesseract.js" },
+                text,
+                metadata: {
+                    isImage: true,
+                    isOcr: true,
+                    ocrEngine: "tesseract.js",
+                    sourceFile: fileName,
+                    confidence: result?.data?.confidence || null
+                },
                 documentType: "image"
             };
         } catch (err) {
-            console.warn("[ImageExtractor] OCR failed. Gemini fallback commented out.");
-            /*
-            try {
-                const apiKey = process.env.GEMINI_API_KEY;
-                if (!apiKey) throw err;
-                const configuredModel = process.env.GEMINI_COMPLETION_MODEL;
-                const model = (!configuredModel || configuredModel === "gemini-2.5-flash") ? "gemini-3.5-flash" : configuredModel;
-                const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-                const fetch = (() => {
-                    try {
-                        return require("node-fetch");
-                    } catch {
-                        return global.fetch;
-                    }
-                })();
-                const requestBody = {
-                    contents: [{
-                        parts: [
-                            { inlineData: { mimeType: "image/png", data: buffer.toString("base64") } },
-                            { text: "Extract and return only the text from this image." }
-                        ]
-                    }]
-                };
-                const res = await fetch(url, {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "x-goog-api-key": apiKey
-                    },
-                    body: JSON.stringify(requestBody)
-                });
-                const payload = await res.json();
-                const text = payload.candidates?.[0]?.content?.parts?.[0]?.text || "";
-                if (!text || !text.trim()) {
-                    throw new Error("Gemini fallback returned empty text.");
-                }
-                return {
-                    text: text.trim(),
-                    metadata: { isImage: true, ocrEngine: "gemini" },
-                    documentType: "image"
-                };
-            } catch (geminiErr) {
-                console.error("Gemini image fallback failed:", geminiErr.message);
-                throw new Error(`Image OCR text extraction failed: Tesseract error: ${err.message}. Gemini fallback error: ${geminiErr.message}`);
-            }
-            */
-            throw err;
+            console.error(`[ImageExtractor] OCR failed for '${fileName}':`, err.message);
+            throw new Error(`Image OCR text extraction failed: ${err.message}`);
         } finally {
+            if (worker) {
+                try {
+                    await worker.terminate();
+                } catch (_) {}
+            }
             if (savedWindow !== undefined) global.window = savedWindow;
             if (savedDocument !== undefined) global.document = savedDocument;
         }

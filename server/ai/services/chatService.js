@@ -26,6 +26,13 @@ const knowledgeManager = require("../../knowledge/KnowledgeManager");
 const SearchManager = require("../../knowledge/SearchManager");
 const RankingEngine = require("../../knowledge/RankingEngine");
 const cacheService = require("../../services/cacheService");
+const {
+    extractQueryTarget,
+    parseChunkRecords,
+    findBestMatchingRecord,
+    groundEntityResponse
+} = require("./entityGroundingService");
+const { hasExplicitEntity } = require("./queryOptimizationService");
 const webCrawlerService = require("./webCrawlerService");
 const { detectTypeAndDepartment } = require("../utils/queryParser");
 const { planQuery } = require("../utils/queryPlanner");
@@ -175,35 +182,88 @@ const buildRecommendationSearchQuery = (profile, institution = "Brainware Univer
     return query;
 };
 
-const selectDiverseChunks = (rankedChunks, maxLimit = 8) => {
-    if (!rankedChunks || rankedChunks.length === 0) return [];
-    
+const selectDiverseChunks = (rankedChunks, maxLimit = 6) => {
+    if (!Array.isArray(rankedChunks) || rankedChunks.length === 0) return [];
+
+    // Ensure chunks are sorted by score descending
+    const sorted = [...rankedChunks].sort((a, b) => (b.score || b.combinedScore || 0) - (a.score || a.combinedScore || 0));
+
     const selected = [];
-    const seenDocIds = new Set();
-    
-    // 1. First pass: select the top-scoring chunk from each unique document
-    for (const chunk of rankedChunks) {
-        const docId = chunk.metadata?.documentId || chunk.metadata?.originalName || chunk.metadata?.filename;
-        if (docId && !seenDocIds.has(docId)) {
-            selected.push(chunk);
-            seenDocIds.add(docId);
-            if (selected.length >= maxLimit) break;
+    const seenContentSignatures = new Set();
+    const docCount = new Map();
+
+    for (const chunk of sorted) {
+        // Content deduplication (prevent near-identical chunks)
+        const text = String(chunk.content || "").slice(0, 150).toLowerCase().replace(/[^a-z0-9]/g, "");
+        if (text.length > 20 && seenContentSignatures.has(text)) {
+            continue;
         }
-    }
-    
-    // 2. Second pass: if we have remaining slots, fill them with other high-scoring chunks
-    if (selected.length < maxLimit) {
-        for (const chunk of rankedChunks) {
-            if (!selected.some(c => c.id === chunk.id)) {
-                selected.push(chunk);
-                if (selected.length >= maxLimit) break;
-            }
+
+        const docId = chunk.metadata?.documentId || chunk.metadata?.originalName || chunk.metadata?.filename || "unknown";
+        const count = docCount.get(docId) || 0;
+
+        // Allow up to 2 chunks from top direct-match document if relevant
+        if (count >= 2 && selected.length >= 3) {
+            continue;
         }
+
+        selected.push(chunk);
+        if (text.length > 20) seenContentSignatures.add(text);
+        docCount.set(docId, count + 1);
+
+        if (selected.length >= maxLimit) break;
     }
-    
-    // Keep original ranked order among selected chunks
-    selected.sort((a, b) => b.score - a.score);
+
     return selected;
+};
+
+const groundEntityLocationResponse = ({ question, textResponse, chunks, conversationContext }) => {
+    if (!Array.isArray(chunks) || chunks.length === 0) return textResponse;
+
+    const queryTarget = extractQueryTarget(question, conversationContext);
+    const targetEntity = queryTarget.targetEntity;
+    const attributes = queryTarget.attributes;
+
+    // Parse all chunks into distinct, bounded records
+    const allRecords = [];
+    for (const chunk of chunks) {
+        const records = parseChunkRecords(chunk);
+        allRecords.push(...records);
+    }
+
+    if (allRecords.length === 0) return textResponse;
+
+    // Find best matching record for the target entity
+    const bestRecord = findBestMatchingRecord(allRecords, targetEntity, queryTarget.entityTokens);
+
+    if (bestRecord) {
+        const groundedAnswer = groundEntityResponse({
+            question,
+            targetEntity,
+            bestRecord,
+            attributes,
+            conversationContext,
+            modelAnswer: textResponse
+        });
+        if (groundedAnswer) {
+            return groundedAnswer;
+        }
+    }
+
+    // If target entity was explicitly requested but no record in knowledge base supports it
+    if (targetEntity && (attributes.asksRoom || attributes.asksFloor || attributes.asksBuilding || attributes.asksPerson)) {
+        if (attributes.asksBuilding) {
+            return `The building for ${targetEntity} is not specified in the official university records.`;
+        }
+        if (attributes.asksFloor) {
+            return `The floor for ${targetEntity} is not specified in the official university records.`;
+        }
+        if (attributes.asksRoom) {
+            return `The room number for ${targetEntity} is not specified in the official university records.`;
+        }
+    }
+
+    return textResponse;
 };
 
 /**
@@ -211,6 +271,7 @@ const selectDiverseChunks = (rankedChunks, maxLimit = 8) => {
  */
 const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, signal, latitude, longitude, userMessageId, assistantMessageId, parentId, language }) => {
     const startedAt = Date.now();
+    const activeConversationId = conversationId || (user?._id ? null : `guest_conv_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`);
     let llmStart = 0;
     let llmDuration = 0;
     let resolvedType = "all";
@@ -258,8 +319,111 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
     const { detectQueryMode } = require("../utils/queryParser");
     const queryMode = detectQueryMode(normalizedQuestion);
 
-    // Check Cache first
-    const cachedResponse = await cacheService.get(normalizedQuestion, detectedType, detectedDept, queryMode);
+    // Check Cache first (Layer 7 Response Cache)
+    const routingMode = queryMode || "targeted";
+    const cacheDocType = detectedType || "all";
+    const cacheDept = detectedDept || "all";
+    const hasOwnEntity = hasExplicitEntity(normalizedQuestion);
+
+    // Only query shared cache if the query is a self-contained standalone question
+    // Follow-ups without explicit entities (e.g. "Which floor?", "Which building?") must bypass shared cache
+    let cachedResponse = null;
+    const contextHash = hasOwnEntity ? "standalone" : `ctx_${String(activeConversationId || conversationId || "conv").slice(-8)}`;
+
+    if (hasOwnEntity) {
+        cachedResponse = await cacheService.get(normalizedQuestion, routingMode, contextHash, cacheDocType, cacheDept);
+        // Fallback check for legacy "nocontext" key
+        if (!cachedResponse) {
+            cachedResponse = await cacheService.get(normalizedQuestion, routingMode, "nocontext", cacheDocType, cacheDept);
+        }
+    }
+
+    // Cache hit validation: Confirm that every cache hit returns an answer and citations valid for the current query
+    if (cachedResponse) {
+        let isCacheValid = true;
+        let invalidationReason = "";
+
+        // 1. Entity consistency check
+        const queryTarget = extractQueryTarget(normalizedQuestion);
+        if (queryTarget.targetEntity && queryTarget.entityTokens.length > 0) {
+            const cachedAnswerLower = String(cachedResponse.answer || "").toLowerCase();
+            const cachedTarget = String(cachedResponse.metadata?.targetEntity || "").toLowerCase();
+
+            // Check if any query token matches the cached answer or metadata
+            const tokenMatch = queryTarget.entityTokens.some(t => 
+                cachedAnswerLower.includes(t) || (cachedTarget && cachedTarget.includes(t))
+            );
+
+            if (!tokenMatch) {
+                isCacheValid = false;
+                invalidationReason = `Cached answer does not match requested entity "${queryTarget.targetEntity}".`;
+            }
+        }
+
+        // 2. Empty answer check
+        if (!cachedResponse.answer || cachedResponse.answer.trim().length === 0) {
+            isCacheValid = false;
+            invalidationReason = "Cached answer is empty.";
+        }
+
+        // 3. General-knowledge citation check
+        const isGeneralDef = /^(?:what\s+is|what\s+are|define|explain|meaning\s+of)\s+(?:a\s+|an\s+|the\s+)?([a-z0-9.]{2,15})\b/i.test(normalizedQuestion) &&
+            !/\b(?:fee|fees|admission|eligibility|faculty|room|building|campus|my\s+university|our\s+university|at\s+university|at\s+my\s+university)\b/i.test(normalizedQuestion);
+        if (isGeneralDef && cachedResponse.sources && cachedResponse.sources.length > 0) {
+            cachedResponse.sources = [];
+        }
+
+        // 4. Citation room/entity alignment and contamination check
+        if (queryTarget.targetEntity && Array.isArray(cachedResponse.sources) && cachedResponse.sources.length > 0) {
+            const cachedAns = String(cachedResponse.answer || "").toLowerCase();
+            const claimedRoomMatch = cachedAns.match(/\b([0-9]{3,4}[a-z]?)\b/);
+            const claimedRoom = claimedRoomMatch ? claimedRoomMatch[1] : null;
+
+            for (const s of cachedResponse.sources) {
+                const sHeading = String(s.sectionHeading || s.section || "").toLowerCase();
+                const sDept = String(s.department || "").toLowerCase();
+                const sPath = String(s.sectionPath || "").toLowerCase();
+                const sSnippet = String(s.snippet || "").toLowerCase();
+                const sTitle = String(s.documentTitle || s.title || "").toLowerCase();
+                const fullSourceText = `${sTitle} ${sHeading} ${sDept} ${sPath} ${sSnippet}`;
+
+                // Generic Entity-Source Alignment Check:
+                if (queryTarget.entityTokens.length > 0) {
+                    const hasEntityMatch = queryTarget.entityTokens.some(t => fullSourceText.includes(t));
+                    if (!hasEntityMatch && claimedRoom && !fullSourceText.includes(claimedRoom)) {
+                        isCacheValid = false;
+                        invalidationReason = `Cached citation does not support queried entity "${queryTarget.targetEntity}".`;
+                        break;
+                    }
+                }
+
+                // If claimed room exists, verify citation contains that room
+                if (claimedRoom && !fullSourceText.includes(claimedRoom)) {
+                    isCacheValid = false;
+                    invalidationReason = `Cached citation does not support claimed room ${claimedRoom}.`;
+                    break;
+                }
+            }
+
+            if (isCacheValid && claimedRoom) {
+                cachedResponse.sources = cachedResponse.sources.filter(s => {
+                    const sText = `${s.sectionHeading || ""} ${s.section || ""} ${s.snippet || ""}`.toLowerCase();
+                    return sText.includes(claimedRoom);
+                });
+            }
+        }
+
+        if (!isCacheValid) {
+            console.warn(`[Cache Invalidation on Hit]: Discarding and removing poisoned cache entry for "${normalizedQuestion}": ${invalidationReason}`);
+            try {
+                await cacheService.del(normalizedQuestion, routingMode, contextHash, cacheDocType, cacheDept);
+                await cacheService.del(normalizedQuestion, routingMode, "nocontext", cacheDocType, cacheDept);
+            } catch (delErr) {
+                console.warn("[Cache Delete Error]:", delErr.message);
+            }
+            cachedResponse = null;
+        }
+    }
     if (cachedResponse) {
         const responseTimeMs = Date.now() - startedAt;
         const latencySaved = Math.max(150, 1200 - responseTimeMs);
@@ -274,9 +438,22 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
         if (onChunk && cachedResponse.answer) {
             onChunk(cachedResponse.answer);
         }
+        const queryTarget = extractQueryTarget(normalizedQuestion);
+        const targetEntName = queryTarget.targetEntity || cachedResponse.metadata?.targetEntity || "";
+        const roomMatch = String(cachedResponse.answer || "").match(/\b(?:room\s*(?:no\.?|number)?\s*|#\s*)?([0-9]{3,4}[a-z]?)\b/i);
+        const resolvedContext = {
+            ...(cachedResponse.metadata?.conversationContext || {}),
+            currentTopic: cachedResponse.topic || cachedResponse.metadata?.conversationContext?.currentTopic || null,
+            lastVerifiedEntity: {
+                entity: targetEntName,
+                name: targetEntName,
+                room: roomMatch ? roomMatch[1] : (cachedResponse.metadata?.conversationContext?.lastVerifiedEntity?.room || null)
+            }
+        };
+
         const chat = await conversationService.saveMessageTurn({
             user: activeUser,
-            conversationId,
+            conversationId: activeConversationId || conversationId,
             question: normalizedQuestion,
             response: cachedResponse,
             intent: cachedResponse.intent || "cached",
@@ -287,7 +464,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
             assistantMessageId,
             parentId,
             topic: cachedResponse.topic || "",
-            entities: { conversationContext }
+            entities: { cached: true, conversationContext: resolvedContext }
         });
 
         const suggestions = await suggestionsService.generateSuggestions({
@@ -298,7 +475,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
 
         return {
             id: chat?._id,
-            conversationId: chat?._id || conversationId,
+            conversationId: (chat?._id ? String(chat._id) : (activeConversationId || conversationId || null)),
             message: cachedResponse.answer,
             intent: cachedResponse.intent || "cached",
             intentConfidence: 1.0,
@@ -343,7 +520,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
     const stopMongoHistoryTimer = tracker.startTimer("mongoLookup");
     const { historyText, activeTopic, conversationContext, rawHistory } = await conversationService.getRecentMemory({
         userId: activeUser._id,
-        conversationId,
+        conversationId: activeConversationId || conversationId,
         maxTokens: 500,
         parentId
     });
@@ -389,7 +566,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
         }
 
         return {
-            conversationId: chat?._id || conversationId || null,
+            conversationId: (chat?._id ? String(chat._id) : (activeConversationId || conversationId || null)),
             mode: activeUser._id ? "authenticated" : "guest",
             message: answer,
             intent: "ambiguous_location",
@@ -437,44 +614,84 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
         console.log(`[RAG Memory] Follow-up query rewritten from "${normalizedQuestion}" to "${followUpQuery}"`);
     }
 
-    const analysisResult = await queryRewriterService.analyzeQuery({
-        question: followUpQuery,
-        historyText,
-        conversationContext,
-        user: activeUser
-    });
-    let { rewrittenQuery, intent, entities, isRepeat, subqueries = [], conversationContext: updatedContext, clarificationPrompt } = analysisResult;
-    let activeSubqueries = (Array.isArray(subqueries) && subqueries.length > 0) ? subqueries : [rewrittenQuery];
-
-    let studentProfile = null;
-    const { INTENTS } = require("../../constants/intents");
-    const recPrimaryIntent = Array.isArray(intent) ? intent[0] : intent;
-    
-    if (recPrimaryIntent === INTENTS.COURSE_RECOMMENDATION) {
-        studentProfile = await entityExtractionService.extractStudentProfile(normalizedQuestion, historyText);
-        const recQuery = buildRecommendationSearchQuery(studentProfile, activeUser.institution || process.env.PRIMARY_UNIVERSITY_NAME || "Brainware University");
-        console.log(`[COURSE_RECOMMENDATION] Formulated query: "${recQuery}"`);
-        rewrittenQuery = recQuery;
-        activeSubqueries = [recQuery];
-    }
-    const resolvedActiveTopic = analysisResult.activeTopic || activeTopic || "";
-
-    const queryComplexityService = require("../../services/queryComplexityService");
-    const queryType = queryComplexityService.analyzeQueryComplexity(rewrittenQuery, intent);
-
     // ==========================================
-    // STAGE 2: QUERY CLASSIFICATION (Query Planner & Router)
+    // STAGE 2: LIGHTWEIGHT INTENT ROUTING & QUERY PLANNING
     // ==========================================
-    const stopPlannerTimer = tracker.startTimer("queryPlanner");
-    const chatQueryPlan = planQuery(rewrittenQuery, {
+    const stopInitialRouterTimer = tracker.startTimer("queryPlanner");
+    const initialRoutePlan = planQuery(expandedQuestion, {
         conversationHistory: historyText,
         historyText,
-        activeTopic: resolvedActiveTopic,
-        intent: recPrimaryIntent || intent,
-        user: activeUser,
-        studentProfile
+        activeTopic,
+        intent: detectedIntent,
+        user: activeUser
     });
-    stopPlannerTimer();
+    stopInitialRouterTimer();
+
+    const isDirectGeneralRoute = Boolean(
+        hasOwnEntity &&
+        initialRoutePlan.skipRag &&
+        (initialRoutePlan.route === "GENERAL_KNOWLEDGE" || initialRoutePlan.mode === "LLM_ONLY" || initialRoutePlan.route === "CONVERSATIONAL")
+    );
+
+    let chatQueryPlan = null;
+    let rewrittenQuery = expandedQuestion;
+    let recPrimaryIntent = "GENERAL_QUERY";
+    let intent = "general_chat";
+    let entities = {};
+    let isRepeat = false;
+    let activeSubqueries = [expandedQuestion];
+    let studentProfile = null;
+    let resolvedActiveTopic = activeTopic || "";
+    let updatedContext = conversationContext;
+
+    if (isDirectGeneralRoute) {
+        // GENERAL KNOWLEDGE FAST-PATH:
+        // Skip DB document lookups, academic entity queries, and course rewriter overhead.
+        chatQueryPlan = initialRoutePlan;
+        recPrimaryIntent = initialRoutePlan.intent || "GENERAL_QUERY";
+        intent = initialRoutePlan.intentCategory || "GENERAL_KNOWLEDGE";
+        console.log(`[Fast-Path] Straightforward general query "${expandedQuestion}" routed directly to LLM without RAG or rewriter overhead.`);
+    } else {
+        // Full query analysis & rewriter pipeline for UNIVERSITY_SPECIFIC or MIXED queries
+        const analysisResult = await queryRewriterService.analyzeQuery({
+            question: followUpQuery,
+            historyText,
+            conversationContext,
+            user: activeUser
+        });
+        rewrittenQuery = analysisResult.rewrittenQuery;
+        intent = analysisResult.intent;
+        entities = analysisResult.entities;
+        isRepeat = analysisResult.isRepeat;
+        activeSubqueries = (Array.isArray(analysisResult.subqueries) && analysisResult.subqueries.length > 0) ? analysisResult.subqueries : [rewrittenQuery];
+        updatedContext = analysisResult.conversationContext;
+        resolvedActiveTopic = analysisResult.activeTopic || activeTopic || "";
+
+        const { INTENTS } = require("../../constants/intents");
+        recPrimaryIntent = Array.isArray(intent) ? intent[0] : intent;
+        
+        if (recPrimaryIntent === INTENTS.COURSE_RECOMMENDATION) {
+            studentProfile = await entityExtractionService.extractStudentProfile(normalizedQuestion, historyText);
+            const recQuery = buildRecommendationSearchQuery(studentProfile, activeUser.institution || process.env.PRIMARY_UNIVERSITY_NAME || "Brainware University");
+            console.log(`[COURSE_RECOMMENDATION] Formulated query: "${recQuery}"`);
+            rewrittenQuery = recQuery;
+            activeSubqueries = [recQuery];
+        }
+
+        const queryComplexityService = require("../../services/queryComplexityService");
+        const queryType = queryComplexityService.analyzeQueryComplexity(rewrittenQuery, intent);
+
+        const stopPlannerTimer = tracker.startTimer("queryPlanner");
+        chatQueryPlan = planQuery(rewrittenQuery, {
+            conversationHistory: historyText,
+            historyText,
+            activeTopic: resolvedActiveTopic,
+            intent: recPrimaryIntent || intent,
+            user: activeUser,
+            studentProfile
+        });
+        stopPlannerTimer();
+    }
 
     const modeChosen = chatQueryPlan.mode || (chatQueryPlan.skipRag ? "LLM_ONLY" : "RAG_LLM");
     const routeChosen = chatQueryPlan.route || (modeChosen === "LLM_ONLY" ? "GENERAL_KNOWLEDGE" : (chatQueryPlan.isMixed ? "MIXED" : "UNIVERSITY_SPECIFIC"));
@@ -514,7 +731,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
     let webResults = [];
     let activeQuestionType = (modeChosen === "LLM_ONLY" || routeChosen === "GENERAL_KNOWLEDGE")
         ? QUESTION_TYPES.GENERAL_KNOWLEDGE 
-        : (routeChosen === "CONVERSATIONAL" ? "conversational" : QUESTION_TYPES.UNIVERSITY_SPECIFIC);
+        : (routeChosen === "CONVERSATIONAL" ? "conversational" : (chatQueryPlan.isMixed ? "mixed" : QUESTION_TYPES.UNIVERSITY_SPECIFIC));
     let sourceLabel = (modeChosen === "LLM_ONLY" || routeChosen === "GENERAL_KNOWLEDGE")
         ? "🤖 EduMate AI (General Knowledge)" 
         : (routeChosen === "CONVERSATIONAL" ? "💬 EduMate Assistant" : (chatQueryPlan.isMixed ? "📚 University Knowledge + General AI" : SOURCE_LABELS.UNIVERSITY));
@@ -586,21 +803,17 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
         const stopContextTimer = tracker.startTimer("contextBuilder");
         const rerankStart = Date.now();
 
-        // Check Context Cache first
-        const cachedContext = await cacheService.getContextCache(rawChunkIds);
-        if (cachedContext && Array.isArray(cachedContext) && cachedContext.length > 0) {
-            combinedDocChunks = cachedContext;
-            console.log(`[Context Cache HIT] Reused merged context for ${rawChunkIds.length} candidate chunks`);
-        } else {
-            const RankingEngine = require("../../knowledge/RankingEngine");
-            const rankedChunks = await RankingEngine.rerankCandidates(rewrittenQuery, retrievedChunksRaw, activeUser);
-            const isCompare = recPrimaryIntent === "comparison" || String(rewrittenQuery).toLowerCase().includes("compare") || String(rewrittenQuery).toLowerCase().includes(" vs ");
-            const chunkLimit = (chatQueryPlan?.complexity === "high" || isCompare) ? 5 : 3;
-            combinedDocChunks = selectDiverseChunks(rankedChunks, chunkLimit);
-            if (rawChunkIds.length > 0 && combinedDocChunks.length > 0) {
-                cacheService.setContextCache(rawChunkIds, combinedDocChunks).catch(() => {});
-            }
-        }
+        const RankingEngine = require("../../knowledge/RankingEngine");
+        const rankedChunks = await RankingEngine.rerankCandidates(rewrittenQuery, retrievedChunksRaw, activeUser);
+        const isCompare = recPrimaryIntent === "comparison" || String(rewrittenQuery).toLowerCase().includes("compare") || String(rewrittenQuery).toLowerCase().includes(" vs ");
+        const chunkLimit = (chatQueryPlan?.complexity === "high" || isCompare) ? 5 : 3;
+
+        // If positive entity matches exist, exclude conflicting chunks with entityScore < 0 (Requirement 2 & 5)
+        const positiveEntityMatches = rankedChunks.filter(c => c.rankingSignals && c.rankingSignals.entityScore > 0);
+        const nonConflictingChunks = rankedChunks.filter(c => !c.rankingSignals || c.rankingSignals.entityScore >= 0);
+        const candidatesForSelection = positiveEntityMatches.length > 0 ? nonConflictingChunks : rankedChunks;
+
+        combinedDocChunks = selectDiverseChunks(candidatesForSelection, chunkLimit);
         rerankTime = Date.now() - rerankStart;
         stopContextTimer();
 
@@ -635,7 +848,8 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
         "program", "programme", "course", "details", "information", "fee", "fees", "admission", 
         "admissions", "at", "this", "please", "give", "provide", "dept", "department", "document"
     ]);
-    const topicTokens = String(normalizedQuestion || "").toLowerCase()
+    const topicSource = `${normalizedQuestion} ${rewrittenQuery || ""}`;
+    const topicTokens = String(topicSource).toLowerCase()
         .replace(/[^a-z0-9\s]/g, " ")
         .split(/\s+/)
         .filter(w => w.length > 2 && !stopTopicWords.has(w));
@@ -722,7 +936,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
         llmStart = Date.now();
 
         const dynamicBudget = calculateDynamicOutputBudget(rewrittenQuery, recPrimaryIntent || intent);
-        const resolvedMaxTokens = maxOutputTokens || dynamicBudget.maxTokens || 250;
+        const resolvedMaxTokens = (routeChosen === "GENERAL_KNOWLEDGE" || routeChosen === "CONVERSATIONAL") ? Math.min(140, dynamicBudget?.maxTokens || 140) : (dynamicBudget?.maxTokens || 320);
 
         // STAGE 7: llama.cpp Request Payload
         console.log(`[STAGE 7: llama.cpp Request Payload]`, {
@@ -829,8 +1043,9 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
             sourceLabel = SOURCE_LABELS.UNIVERSITY;
         }
 
-        // Campus Navigation Map Enrichment if applicable
-        if (recPrimaryIntent === "location" || recPrimaryIntent === "campus_navigation" || intent === "location" || intent === "campus_navigation") {
+        // Campus Navigation Map Enrichment (only for explicit outdoor route / navigation queries)
+        const isOutdoorNavQuery = /\b(?:navigate|directions?|how\s+to\s+reach|route\s+to|way\s+to|distance\s+to|walk\s+to|how\s+do\s+i\s+get\s+to|nearby|near\s+me|gps)\b/i.test(normalizedQuestion) || (latitude && longitude);
+        if (isOutdoorNavQuery && (recPrimaryIntent === "location" || recPrimaryIntent === "campus_navigation" || intent === "location" || intent === "campus_navigation")) {
             try {
                 const mapResult = await mapService.resolveLocationRequest({
                     question: rewrittenQuery,
@@ -858,12 +1073,48 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
         provider = "system";
     }
 
-    // Format citations (only when knowledge retrieval was executed)
-    let sources = skipRag ? [] : citationService.formatCitations(retrievedChunks, universitySiteResults, webResults);
+    if (!textResponse) {
+        if (routeChosen === "CONVERSATIONAL") {
+            const greeting = deterministicGreeting(activeUser, language);
+            textResponse = greeting.answer;
+        } else if (routeChosen === "GENERAL_KNOWLEDGE") {
+            textResponse = `EduMate AI: Academic definitions and concepts for "${normalizedQuestion}" are directly accessible. Feel free to ask specific questions about curriculum, subjects, or practical applications.`;
+        } else if (combinedDocChunks.length > 0) {
+            // Extract grounded factual content directly from retrieved chunks
+            const topChunk = combinedDocChunks[0];
+            const heading = topChunk.metadata?.heading || topChunk.metadata?.section || "";
+            const content = String(topChunk.content || "").trim();
+            textResponse = heading ? `${heading}\n${content}` : content;
+        } else {
+            textResponse = "I couldn't find matching information in the university knowledge base for that request. Please verify with the official university department or admissions office.";
+        }
+    }
 
-    // If the response indicates missing information or ungrounded fallback, do not attach false citations and normalize text
-    const isMissingKnowledgeResponse = /\b(?:couldn'?t find|cannot find|no (?:matching )?information|not (?:found|mentioned|available) in (?:the )?(?:knowledge base|records|official documents))\b/i.test(textResponse);
-    if (isMissingKnowledgeResponse) {
+    // Verify and ground entity-location answers to preserve exact entity-fact relationship and handle follow-ups (Requirements 2, 3, 4, 7, 8)
+    const resolvedGroundedQuery = rewrittenQuery || normalizedQuestion;
+    const isLocationOrHod = isCampusNavigationQuery(normalizedQuestion) ||
+        /\b(?:room|building|floor|office|cabin|where\s+is|location)\b/i.test(normalizedQuestion) ||
+        /\b(?:hod|head\s+of\s+(?:the\s+)?department|department\s+head)\b/i.test(normalizedQuestion);
+
+    if (isLocationOrHod && combinedDocChunks.length > 0) {
+        textResponse = groundEntityLocationResponse({
+            question: resolvedGroundedQuery,
+            textResponse,
+            chunks: combinedDocChunks,
+            conversationContext: updatedContext
+        });
+    }
+
+    // Format citations with claim-support precision filtering (Requirement 6)
+    let sources = (skipRag || routeChosen === "GENERAL_KNOWLEDGE") ? [] : citationService.formatCitations(retrievedChunks, universitySiteResults, webResults, textResponse, resolvedGroundedQuery);
+
+    // If the response is purely an ungrounded fallback message, clear citations and normalize
+    const isPureFallback = (
+        routeChosen !== "MIXED" &&
+        textResponse.length < 160 &&
+        /\b(?:couldn'?t find matching information|no (?:matching )?information in the university knowledge base)\b/i.test(textResponse)
+    );
+    if (isPureFallback) {
         sources = [];
         textResponse = "I couldn't find matching information in the university knowledge base for that request. Please verify with the official university department or admissions office.";
     }
@@ -920,22 +1171,11 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
         }
     });
 
-    if (!textResponse) {
-        if (routeChosen === "CONVERSATIONAL") {
-            const greeting = deterministicGreeting(activeUser, language);
-            textResponse = greeting.answer;
-        } else if (routeChosen === "GENERAL_KNOWLEDGE") {
-            textResponse = `EduMate AI: Here is what you asked regarding "${normalizedQuestion}". Please ask follow-up questions for more specific detail.`;
-        } else {
-            textResponse = "I couldn't find matching information in the university knowledge base for that request. Please verify with the official admissions desk.";
-        }
-    }
-
     // ==========================================
     // STAGE 11: RESPONSE VALIDATOR OUTPUT
     // ==========================================
     const validationResult = responseValidator.validateResponse({
-        question: normalizedQuestion,
+        question: resolvedGroundedQuery,
         intent: recPrimaryIntent || intent,
         retrievedContext: { chunks: retrievedChunks },
         generatedAnswer: textResponse,
@@ -951,9 +1191,14 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
         reason: validationResult.reason
     });
 
+    if (validationResult.groundedAnswer && validationResult.groundedAnswer !== textResponse) {
+        textResponse = validationResult.groundedAnswer;
+        sources = (skipRag || routeChosen === "GENERAL_KNOWLEDGE") ? [] : citationService.formatCitations(retrievedChunks, universitySiteResults, webResults, textResponse, resolvedGroundedQuery);
+    }
+
     formatted = responseFormattingService.formatAnswer({
-        answer: validationResult.groundedAnswer || textResponse,
-        confidence: hasStrongContext ? (validationResult.confidence || "high") : (routeChosen === "GENERAL_KNOWLEDGE" || routeChosen === "CONVERSATIONAL" ? "high" : "low"),
+        answer: textResponse,
+        confidence: hasStrongContext ? (validationResult.confidence || "high") : (routeChosen === "GENERAL_KNOWLEDGE" || routeChosen === "CONVERSATIONAL" || routeChosen === "MIXED" ? (validationResult.confidence || "high") : "low"),
         sources,
         sourceLabel,
         question: normalizedQuestion,
@@ -961,22 +1206,60 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
         queryPlan: chatQueryPlan
     });
 
-    // Save to Cache if appropriate
-    if (hasStrongContext && formatted && formatted.answer) {
+    // Save to Cache if appropriate (Grounded university context or general knowledge)
+    // Cache Guard:
+    // 1. Never cache if evidence validation failed or confidence is LOW
+    // 2. Never cache ungrounded fallback messages
+    // 3. Never cache if the final answer does not match the requested target entity
+    // 4. Do not cache context-dependent follow-ups under a shared key
+    const isGroundedAndValid = validationResult.valid && validationResult.confidence !== "LOW" && !isPureFallback;
+    const isGeneralDirect = (routeChosen === "GENERAL_KNOWLEDGE" || routeChosen === "CONVERSATIONAL") && formatted && formatted.answer;
+    const shouldConsiderCache = (isGroundedAndValid || isGeneralDirect) && formatted && formatted.answer;
+
+    if (shouldConsiderCache) {
         try {
-            const cacheCategories = [];
-            if (retrievedChunks && retrievedChunks.length > 0) {
-                retrievedChunks.forEach(c => {
-                    if (c.metadata?.category && !cacheCategories.includes(c.metadata.category)) {
-                        cacheCategories.push(c.metadata.category);
-                    }
-                });
+            const queryTarget = extractQueryTarget(normalizedQuestion, updatedContext);
+            let entityMatches = true;
+
+            if (queryTarget.targetEntity && queryTarget.entityTokens.length > 0) {
+                const answerLower = String(formatted.answer || "").toLowerCase();
+                const hasMatchingToken = queryTarget.entityTokens.some(t => answerLower.includes(t));
+                if (!hasMatchingToken && !answerLower.includes("not specified in the official university records")) {
+                    entityMatches = false;
+                }
             }
-            const isDynamic = false;
-            const cacheType = resolvedType || detectedType || "all";
-            const cacheDept = resolvedDept || detectedDept || "all";
-            const resolvedQueryMode = queryMode || "targeted";
-            await cacheService.set(normalizedQuestion, formatted, cacheCategories, isDynamic, cacheType, cacheDept, resolvedQueryMode);
+
+            if (entityMatches) {
+                const cacheCategories = [];
+                if (retrievedChunks && retrievedChunks.length > 0) {
+                    retrievedChunks.forEach(c => {
+                        if (c.metadata?.category && !cacheCategories.includes(c.metadata.category)) {
+                            cacheCategories.push(c.metadata.category);
+                        }
+                    });
+                }
+                const routingMode = queryMode || "targeted";
+                const cacheDocType = detectedType || "all";
+                const cacheDept = detectedDept || "all";
+                
+                // For follow-ups, include conversation context or resolved entity to prevent cross-chat poisoning
+                const storeContextHash = hasOwnEntity ? "standalone" : `ctx_${String(activeConversationId || conversationId || "conv").slice(-8)}`;
+
+                // Attach provenance metadata
+                formatted.metadata = {
+                    ...(formatted.metadata || {}),
+                    originalQuestion: normalizedQuestion,
+                    rewrittenQuery,
+                    targetEntity: queryTarget.targetEntity || null,
+                    contextScope: hasOwnEntity ? "standalone" : "dialogue_turn",
+                    userScope: (activeUser.role && activeUser.role !== "guest") ? `role_${activeUser.role}` : "public",
+                    conversationContext: updatedContext
+                };
+
+                await cacheService.set(normalizedQuestion, formatted, cacheCategories, routingMode, storeContextHash, cacheDocType, cacheDept);
+            } else {
+                console.warn(`[Cache Guard] Suppressed caching for "${normalizedQuestion}": Answer entity does not match requested target entity "${queryTarget.targetEntity}".`);
+            }
         } catch (cacheErr) {
             console.warn("[Cache Set Warning]:", cacheErr.message);
         }
@@ -990,7 +1273,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
     try {
         chat = await conversationService.saveMessageTurn({
             user: activeUser,
-            conversationId,
+            conversationId: activeConversationId || conversationId,
             question: normalizedQuestion,
             response: formatted,
             intent: Array.isArray(intent) ? intent.join(",") : String(intent || "unknown"),
@@ -1027,7 +1310,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
     }
 
     const finalResult = {
-        conversationId: chat?._id || conversationId || null,
+        conversationId: (chat?._id ? String(chat._id) : (activeConversationId || conversationId || null)),
         mode: activeUser._id ? "authenticated" : "guest",
         message: formatted.answer,
         intent,
@@ -1304,6 +1587,20 @@ const searchChats = async ({ user, query }) => {
     .sort({ pinned: -1, updatedAt: -1 });
 };
 
+const extractGroundedEntityFacts = (chunk) => {
+    if (!chunk) return null;
+    const records = parseChunkRecords(chunk);
+    if (!records || records.length === 0) return null;
+    const topRec = records.find(r => r.room) || records[0];
+    return {
+        room: topRec.room,
+        building: topRec.building,
+        description: topRec.entity || topRec.text,
+        chunkId: topRec.chunkId,
+        filename: topRec.filename
+    };
+};
+
 module.exports = {
     askQuestion,
     listChats,
@@ -1312,5 +1609,7 @@ module.exports = {
     deleteChat,
     searchChats,
     regenerateResponse,
-    getSuggestedQuestions
+    getSuggestedQuestions,
+    extractGroundedEntityFacts,
+    groundEntityLocationResponse
 };

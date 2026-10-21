@@ -405,6 +405,19 @@ const retryDocumentProcessing = asyncHandler(async (req, res) => {
     return sendSuccess(res, 200, "Document re-enqueued for processing.", result);
 });
 
+const dismissDocumentProcessing = asyncHandler(async (req, res) => {
+    const { documentId } = req.params;
+    const chunkingQueueService = require("../ai/services/chunkingQueueService");
+    const result = await chunkingQueueService.dismissJob(documentId);
+    return sendSuccess(res, 200, "Document dismissed from failed queue.", result);
+});
+
+const dismissFailedQueue = asyncHandler(async (req, res) => {
+    const chunkingQueueService = require("../ai/services/chunkingQueueService");
+    const result = await chunkingQueueService.dismissAllFailed();
+    return sendSuccess(res, 200, "Failed documents dismissed from queue.", result);
+});
+
 // Chunks & Integrity Controller Endpoints
 const getDocumentChunks = asyncHandler(async (req, res) => {
     const { documentId } = req.params;
@@ -1008,6 +1021,8 @@ module.exports = {
     cancelDocumentProcessing,
     resumeDocumentProcessing,
     retryDocumentProcessing,
+    dismissDocumentProcessing,
+    dismissFailedQueue,
     getDocumentChunks,
     getIntegrityReport,
     repairDocument,

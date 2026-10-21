@@ -32,6 +32,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initUploadZone();
     initGlobalEvents();
     initSSEStreams();
+    startPeriodicRefresh(15000);
     fetchInitialData();
 });
 
@@ -54,6 +55,11 @@ function switchTab(tabId) {
         el.classList.toggle('active', el.id === `tab-${tabId}`);
     });
 
+    if (tabId === 'dashboard') {
+        fetchHealth();
+        fetchQueue();
+        fetchAnalytics();
+    }
     if (tabId === 'storage') {
         fetchStorageTree();
     }
@@ -91,6 +97,37 @@ function initGlobalEvents() {
 // ==========================================
 // Initial & Periodic Data Fetching
 // ==========================================
+let periodicRefreshTimer = null;
+
+function startPeriodicRefresh(intervalMs = 15000) {
+    stopPeriodicRefresh();
+    periodicRefreshTimer = setInterval(() => {
+        if (document.visibilityState === 'visible') {
+            fetchHealth();
+            fetchQueue();
+            fetchAnalytics();
+        }
+    }, intervalMs);
+}
+
+function stopPeriodicRefresh() {
+    if (periodicRefreshTimer) {
+        clearInterval(periodicRefreshTimer);
+        periodicRefreshTimer = null;
+    }
+}
+
+// Window lifecycle listeners for clean timer teardown
+window.addEventListener('beforeunload', stopPeriodicRefresh);
+window.addEventListener('pagehide', stopPeriodicRefresh);
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+        fetchHealth();
+        fetchQueue();
+        fetchAnalytics();
+    }
+});
+
 async function fetchInitialData() {
     await Promise.all([
         fetchHealth(),
@@ -288,10 +325,10 @@ function updateHealthUI() {
     if (dashWaiting) dashWaiting.innerText = `${h.queueSummary?.waitingJobs || 0} queued in pipeline`;
 
     const dashStorageDocs = document.getElementById('dashStorageDocs');
-    if (dashStorageDocs) dashStorageDocs.innerText = state.analytics?.storageDocuments !== undefined ? state.analytics.storageDocuments : (state.storageTree ? state.storageTree.length : 1);
+    if (dashStorageDocs) dashStorageDocs.innerText = state.analytics?.storageDocuments !== undefined ? state.analytics.storageDocuments : (state.storageTree ? state.storageTree.length : 0);
 
     const dashHistoricalDocs = document.getElementById('dashHistoricalDocs');
-    if (dashHistoricalDocs) dashHistoricalDocs.innerText = `${state.analytics?.mongoTotalDocuments || h.queueSummary?.totalDocuments || 297} historical in DB`;
+    if (dashHistoricalDocs) dashHistoricalDocs.innerText = `${state.analytics?.mongoTotalDocuments ?? h.queueSummary?.totalDocuments ?? 0} historical in DB`;
 
     const dashStorageSize = document.getElementById('dashStorageSize');
     if (dashStorageSize) dashStorageSize.innerText = state.analytics?.storageSizeFormatted || formatBytes(state.analytics?.totalStorageSizeBytes || 0);
@@ -353,10 +390,10 @@ function updateQueueBadges() {
 
     if (state.analytics) {
         const dashStorageDocs = document.getElementById('dashStorageDocs');
-        if (dashStorageDocs) dashStorageDocs.innerText = state.analytics.storageDocuments || 1;
+        if (dashStorageDocs) dashStorageDocs.innerText = state.analytics.storageDocuments ?? 0;
 
         const dashHistoricalDocs = document.getElementById('dashHistoricalDocs');
-        if (dashHistoricalDocs) dashHistoricalDocs.innerText = `${state.analytics.mongoTotalDocuments || 297} historical in DB`;
+        if (dashHistoricalDocs) dashHistoricalDocs.innerText = `${state.analytics.mongoTotalDocuments ?? 0} historical in DB`;
 
         const dashStorageSize = document.getElementById('dashStorageSize');
         if (dashStorageSize) dashStorageSize.innerText = state.analytics.storageSizeFormatted || formatBytes(state.analytics.totalStorageSizeBytes || 0);
@@ -382,11 +419,13 @@ function initSSEStreams() {
         queueSource.addEventListener('queue_update', () => {
             fetchQueue();
             fetchAnalytics();
+            fetchHealth();
             if (state.activeTab === 'storage') fetchStorageTree();
         });
         queueSource.addEventListener('worker_status', () => {
             fetchHealth();
             fetchQueue();
+            fetchAnalytics();
         });
     } catch (err) {
         console.warn('Queue SSE connection error:', err);
@@ -417,6 +456,12 @@ function handleJobProgress(payload) {
     if (existing) {
         existing.progress = payload.progress;
         existing.stage = payload.stage;
+    }
+    // Refresh queue & analytics immediately upon job completion or failure
+    if (payload.status === 'completed' || payload.status === 'failed') {
+        fetchQueue();
+        fetchAnalytics();
+        fetchHealth();
     }
     if (state.activeTab === 'queue') {
         renderQueueView();
@@ -1196,7 +1241,7 @@ function renderQueueView() {
                         </div>
                         <div style="display: flex; gap: 8px; align-items: center;">
                             <button class="btn btn-sm btn-accent" onclick="retrySingleDoc('${doc._id}')">🔁 Retry</button>
-                            <button class="btn btn-sm btn-danger" onclick="cancelJob('${doc._id}')">🗑️ Dismiss</button>
+                            <button class="btn btn-sm btn-danger" onclick="dismissJob('${doc._id}')">🗑️ Dismiss</button>
                         </div>
                     </div>
                 `;
@@ -1381,7 +1426,7 @@ function updateAnalyticsUI() {
     };
 
     const storageDocs = a.storageDocuments !== undefined ? a.storageDocuments : (a.totalDocuments || 0);
-    const mongoDocs = a.mongoTotalDocuments || 297;
+    const mongoDocs = a.mongoTotalDocuments !== undefined ? a.mongoTotalDocuments : 0;
     const indexedDocs = a.indexedDocuments !== undefined ? a.indexedDocuments : 0;
     const mongoIndexed = a.mongoIndexedDocuments || 0;
     const totalChunks = a.totalChunks || 0;
@@ -1546,6 +1591,12 @@ async function pauseJob(docId) {
 
 async function cancelJob(docId) {
     await fetch(`/queue/cancel/${docId}`, { method: 'POST' });
+    fetchQueue();
+    fetchStorageTree();
+}
+
+async function dismissJob(docId) {
+    await fetch(`/queue/dismiss/${docId}`, { method: 'POST' });
     fetchQueue();
     fetchStorageTree();
 }

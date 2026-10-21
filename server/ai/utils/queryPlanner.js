@@ -77,8 +77,10 @@ const planQuery = (query, options = {}) => {
     let primaryProgram = metadata.programs && metadata.programs.length > 0 ? metadata.programs[0] : undefined;
     let primaryDept = metadata.departments && metadata.departments.length > 0 ? metadata.departments[0] : undefined;
 
-    // Context Inheritance from conversation history / active topic if missing
-    if (!primaryProgram && (options.activeTopic || options.conversationHistory || options.historyText)) {
+    // Context Inheritance from conversation history / active topic if missing and query is an elliptical follow-up
+    const { hasExplicitEntity } = require("../services/queryOptimizationService");
+    const hasOwnEntity = hasExplicitEntity(source);
+    if (!hasOwnEntity && !primaryProgram && (options.activeTopic || options.conversationHistory || options.historyText)) {
         const ctx = `${options.activeTopic || ""} ${options.conversationHistory || ""} ${options.historyText || ""}`;
         const ctxMeta = extractSearchMetadata(ctx);
         if (ctxMeta.programs && ctxMeta.programs.length > 0) {
@@ -94,9 +96,16 @@ const planQuery = (query, options = {}) => {
     let documentType = undefined;
     let heading = undefined;
 
-    if (hasHod) {
+    const hasLocation = /\b(?:where\s+is|where\s+can\s+i\s+find|location\s+of|which\s+building|which\s+floor|room\s+number|room\s+no|room|office|cabin|floor|building)\b/i.test(source);
+
+    if (hasHod && hasLocation) {
+        category = ["Campus", "Faculty"];
+        // Do not set strict heading to exact "HOD" because campus navigation documents use section headings like "101 HOD-psychology..."
+    } else if (hasHod) {
         category = "Faculty";
         heading = "HOD";
+    } else if (hasLocation) {
+        category = ["Campus", "Faculty"];
     } else if (primaryIntent === "FACULTY_QUERY" || (metadata.facultyNames && metadata.facultyNames.length > 0)) {
         category = "Faculty";
         if (hasHod) heading = "HOD";

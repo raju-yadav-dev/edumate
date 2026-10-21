@@ -139,137 +139,27 @@ function parseBuildingContent(text, filename) {
 /**
  * Uses Gemini API to transcribe scanned PDF page-by-page.
  */
+/**
+ * Transcribes scanned PDF page-by-page using local PDF extractor and OCR.
+ */
 const extractTextFromScannedPdf = async (buffer) => {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-        throw new Error("GEMINI_API_KEY is not set. Cannot run OCR fallback.");
-    }
-    const configuredModel = process.env.GEMINI_COMPLETION_MODEL;
-    const model = (!configuredModel || configuredModel === "gemini-2.5-flash") ? "gemini-3.5-flash" : configuredModel;
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-    
-    const requestBody = {
-        contents: [
-            {
-                parts: [
-                    {
-                        inlineData: {
-                            mimeType: "application/pdf",
-                            data: buffer.toString("base64")
-                        }
-                    },
-                    {
-                        text: "Extract all the text from this scanned PDF document page-by-page. For each page, please start with [PAGE_START_X] and end with [PAGE_END_X], where X is the page number. Ensure no pages are omitted and formatting/layout is preserved where possible."
-                    }
-                ]
-            }
-        ]
-    };
-    const response = await fetchWithTimeoutAndRetry(url, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "x-goog-api-key": apiKey
-        },
-        body: JSON.stringify(requestBody)
-    }, 45000, 3, 2000);
-    
-    const payload = await response.json();
-    if (!response.ok) {
-        throw new Error(payload.error?.message || `Gemini scanned-PDF OCR failed with status ${response.status}`);
-    }
-    
-    const extractedText = payload.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    
-    const pages = [];
-    const pageRegex = /\[PAGE_START_(\d+)\]([\s\S]*?)\[PAGE_END_\1\]/g;
-    let match;
-    while ((match = pageRegex.exec(extractedText)) !== null) {
-        pages.push({
-            pageNumber: parseInt(match[1]),
-            text: match[2].trim()
-        });
-    }
-    
-    if (pages.length === 0) {
-        pages.push({
-            pageNumber: 1,
-            text: extractedText.trim()
-        });
-    }
-    
-    return pages;
+    const parsed = await pdfExtractor.extractText(buffer);
+    return (parsed.pages || []).map((p) => ({
+        pageNumber: p.pageNumber,
+        text: p.text || ""
+    }));
 };
 
 /**
- * Uses Gemini API to transcribe specific scanned PDF pages.
+ * Transcribes specific scanned PDF pages using local PDF extractor and OCR.
  */
-const extractTextFromScannedPages = async (buffer, pageNumbers) => {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-        throw new Error("GEMINI_API_KEY is not set. Cannot run OCR fallback.");
-    }
-    const configuredModel = process.env.GEMINI_COMPLETION_MODEL;
-    const model = (!configuredModel || configuredModel === "gemini-2.5-flash") ? "gemini-3.5-flash" : configuredModel;
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-    
-    const requestBody = {
-        contents: [
-            {
-                parts: [
-                    {
-                        inlineData: {
-                            mimeType: "application/pdf",
-                            data: buffer.toString("base64")
-                        }
-                    },
-                    {
-                        text: `This is a PDF file. Please perform high-quality OCR and text/table extraction ONLY on the following page numbers: ${pageNumbers.join(", ")}.
-For each page, start your output with [PAGE_START_X] and end with [PAGE_END_X], where X is the page number. 
-Ensure you preserve any tables, layouts, and all textual content on those pages. Do not write any explanations or preambles.`
-                    }
-                ]
-            }
-        ]
-    };
-    const response = await fetchWithTimeoutAndRetry(url, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "x-goog-api-key": apiKey
-        },
-        body: JSON.stringify(requestBody)
-    }, 45000, 3, 2000);
-    
-    const payload = await response.json();
-    if (!response.ok) {
-        throw new Error(payload.error?.message || `Gemini page-level OCR failed with status ${response.status}`);
-    }
-    
-    const extractedText = payload.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    
-    const pages = [];
-    const pageRegex = /\[PAGE_START_(\d+)\]([\s\S]*?)\[PAGE_END_\1\]/g;
-    let match;
-    while ((match = pageRegex.exec(extractedText)) !== null) {
-        pages.push({
-            pageNumber: parseInt(match[1]),
-            text: match[2].trim()
-        });
-    }
-    
-    if (pages.length === 0 && extractedText.trim().length > 0) {
-        if (pageNumbers.length === 1) {
-            pages.push({
-                pageNumber: pageNumbers[0],
-                text: extractedText.trim()
-            });
-        } else {
-            console.warn("[OCR] Gemini returned text without page tags for multiple pages.");
-        }
-    }
-    
-    return pages;
+const extractTextFromScannedPages = async (buffer, pageNumbers = []) => {
+    const parsed = await pdfExtractor.extractText(buffer);
+    const pages = (parsed.pages || []).filter((p) => pageNumbers.length === 0 || pageNumbers.includes(p.pageNumber));
+    return pages.map((p) => ({
+        pageNumber: p.pageNumber,
+        text: p.text || ""
+    }));
 };
 
 const bufferCache = new Map();
@@ -398,23 +288,49 @@ const buildChunks = async (buffer, originalName, mimeType, splitter) => {
     const isPdf = mimeType === "application/pdf" || ext === ".pdf";
 
     if (isPdf) {
-        const parsed = await withTimeout(pdfExtractor.extractText(buffer), 45000, "PDF text extraction timed out (45s)");
-        if (parsed.requiresOcr) {
-            return { chunks: [], pageCount: parsed.numPages || 1, requiresOcr: true };
-        }
+        const parsed = await withTimeout(pdfExtractor.extractText(buffer), 60000, "PDF text extraction timed out (60s)");
         const chunks = [];
         for (const page of parsed.pages || []) {
+            if (!page.text || !page.text.trim()) continue;
             const pageChunks = splitter.splitText(page.text || "");
-            pageChunks.forEach((chunk) => chunks.push({ content: chunk, pageNumber: page.pageNumber }));
+            pageChunks.forEach((chunk) => chunks.push({
+                content: chunk,
+                pageNumber: page.pageNumber,
+                isOcr: page.isOcr || false,
+                contentType: page.isOcr ? "ocr_text" : "text"
+            }));
         }
         return { chunks, pageCount: parsed.numPages || 1, requiresOcr: false };
     }
 
-    const extracted = await withTimeout(UniversalExtractor.extract(buffer, originalName), 45000, "Document extraction timed out (45s)");
+    const extracted = await withTimeout(UniversalExtractor.extract(buffer, originalName), 60000, "Document extraction timed out (60s)");
     const chunks = [];
-    const splits = splitter.splitText(extracted.text || "");
-    splits.forEach((chunk) => chunks.push({ content: chunk, pageNumber: 1 }));
-    return { chunks, pageCount: 1, requiresOcr: false };
+    if (extracted.metadata?.slides && Array.isArray(extracted.metadata.slides)) {
+        for (const slide of extracted.metadata.slides) {
+            if (!slide.text || !slide.text.trim()) continue;
+            const splits = splitter.splitText(slide.text);
+            splits.forEach((chunk) => chunks.push({
+                content: chunk,
+                pageNumber: slide.slideNumber || 1,
+                isOcr: false,
+                contentType: "slide_text"
+            }));
+        }
+    } else {
+        const splits = splitter.splitText(extracted.text || "");
+        const isImage = (mimeType && mimeType.startsWith("image/")) || extracted.documentType === "image";
+        splits.forEach((chunk) => chunks.push({
+            content: chunk,
+            pageNumber: 1,
+            isOcr: isImage,
+            contentType: isImage ? "ocr_text" : "text"
+        }));
+    }
+    return {
+        chunks,
+        pageCount: extracted.metadata?.slideCount || extracted.metadata?.pageCount || 1,
+        requiresOcr: false
+    };
 };
 
 const runIndexingPipeline = async (documentId, initialBuffer = null, options = {}) => {
@@ -513,7 +429,7 @@ const runIndexingPipeline = async (documentId, initialBuffer = null, options = {
         if (isPdf) {
             let parsed;
             try {
-                parsed = await withTimeout(pdfExtractor.extractText(buffer), 45000, "PDF text extraction timed out (45s)");
+                parsed = await withTimeout(pdfExtractor.extractText(buffer), 60000, "PDF text extraction timed out (60s)");
             } catch (pdfErr) {
                 const err = new Error(pdfErr.message || "Failed to extract text from PDF");
                 err.errorCode = "PDF_EXTRACTION_FAILED";
@@ -523,46 +439,22 @@ const runIndexingPipeline = async (documentId, initialBuffer = null, options = {
             pages = parsed.pages || [];
             pageCount = parsed.numPages || pages.length;
 
-            const ocrPages = pages.filter(p => p.needsOcr).map(p => p.pageNumber);
-            const requiresOcr = ocrPages.length > 0;
-
-            if (requiresOcr) {
-                try {
-                    const ocrResults = await withTimeout(
-                        extractTextFromScannedPages(buffer, ocrPages),
-                        90000,
-                        "Gemini OCR timed out (90s)"
-                    );
-                    for (const ocrPage of ocrResults) {
-                        const page = pages.find(p => p.pageNumber === ocrPage.pageNumber);
-                        if (page) {
-                            if (page.text.trim().length > 0) {
-                                page.text = page.text.trim() + "\n\n=== OCR Content ===\n" + ocrPage.text.trim();
-                            } else {
-                                page.text = ocrPage.text.trim();
-                            }
-                        }
-                    }
-                } catch (ocrErr) {
-                    console.error("[INDEX] OCR fallback warning:", ocrErr.message);
-                }
-            }
-
             // STAGE 2: Cleaning text (25%)
             await updateStage("processing", "Cleaning document text", 25);
             pages = DocumentTextCleaner.cleanPages(pages);
-            text = pages.map(p => p.text || "").join("\n");
+            text = pages.map((p) => p.text || "").join("\n");
 
             // STAGE 3: Building semantic chunks (40%)
             await updateStage("chunked", "Generating chunks", 40);
             for (const page of pages) {
+                if (!page.text || !page.text.trim()) continue;
                 const pageChunks = splitter.splitText(page.text || "");
                 pageChunks.forEach((chunk) => {
                     rawChunks.push({
                         content: chunk,
                         pageNumber: page.pageNumber,
-                        isOcr: page.needsOcr || false,
-                        contentType: page.needsOcr ? "ocr" : "text"
+                        isOcr: page.isOcr || false,
+                        contentType: page.isOcr ? "ocr_text" : "text"
                     });
                 });
                 page.text = "";
@@ -574,7 +466,7 @@ const runIndexingPipeline = async (documentId, initialBuffer = null, options = {
             await updateStage("processing", "Cleaning document text", 25);
             await updateStage("chunked", "Generating chunks", 40);
 
-            rawChunks = parsedRooms.map(item => {
+            rawChunks = parsedRooms.map((item) => {
                 const chunkContent = `📍 Campus Location\nBuilding: Building ${item.buildingNumber} (${item.buildingName})\nFloor: ${item.floor}\nRoom: ${item.roomNumber || "N/A"}\nDetails: ${item.description}`;
                 return {
                     content: chunkContent,
@@ -588,10 +480,10 @@ const runIndexingPipeline = async (documentId, initialBuffer = null, options = {
         } else {
             let extracted;
             try {
-                extracted = await withTimeout(UniversalExtractor.extract(buffer, document.originalName), 45000, "Document extraction timed out (45s)");
+                extracted = await withTimeout(UniversalExtractor.extract(buffer, document.originalName), 60000, "Document extraction timed out (60s)");
             } catch (extErr) {
                 const err = new Error(extErr.message || "Failed to extract text from document");
-                err.errorCode = "EXTRACTION_FAILED";
+                err.errorCode = extErr.errorCode || "EXTRACTION_FAILED";
                 throw err;
             }
 
@@ -608,15 +500,32 @@ const runIndexingPipeline = async (documentId, initialBuffer = null, options = {
 
             // STAGE 3: Building semantic chunks (40%)
             await updateStage("chunked", "Generating chunks", 40);
-            const splits = splitter.splitText(text);
-            splits.forEach((chunk) => {
-                rawChunks.push({
-                    content: chunk,
-                    pageNumber: 1,
-                    isOcr: isImage ? true : false,
-                    contentType: isImage ? "ocr_text" : "text"
+
+            if (extracted.metadata?.slides && Array.isArray(extracted.metadata.slides)) {
+                pageCount = extracted.metadata.slideCount || extracted.metadata.slides.length;
+                for (const slide of extracted.metadata.slides) {
+                    if (!slide.text || !slide.text.trim()) continue;
+                    const splits = splitter.splitText(slide.text);
+                    splits.forEach((chunk) => {
+                        rawChunks.push({
+                            content: chunk,
+                            pageNumber: slide.slideNumber || 1,
+                            isOcr: false,
+                            contentType: "slide_text"
+                        });
+                    });
+                }
+            } else {
+                const splits = splitter.splitText(text);
+                splits.forEach((chunk) => {
+                    rawChunks.push({
+                        content: chunk,
+                        pageNumber: 1,
+                        isOcr: isImage ? true : false,
+                        contentType: isImage ? "ocr_text" : "text"
+                    });
                 });
-            });
+            }
         }
 
         if (isCancelled()) {
@@ -625,30 +534,42 @@ const runIndexingPipeline = async (documentId, initialBuffer = null, options = {
             return;
         }
 
-        // STAGE 4: Generating metadata & keywords (55%)
-        await updateStage("chunked", "Extracting metadata and keywords", 55, {
-            chunkStats: { totalChunks: rawChunks.length, pageCount }
-        });
-
-        // Graceful llama.cpp metadata extraction fallback
-        try {
-            const entityExtractionService = require("./entityExtractionService");
-            academicEntities = await entityExtractionService.extractAcademicMetadata(text);
-        } catch (entityErr) {
-            console.warn("[INDEX] llama.cpp entity extraction skipped (fallback to local keyword extraction):", entityErr.message);
-        }
-
-        rawChunks.forEach((chunk) => {
-            chunk.searchMetadata = extractSearchMetadata(chunk.content, { originalName: document.originalName });
-        });
-
+        // Validate chunks at end of Stage 3 (Generating chunks)
         const chunkValidation = validateChunks(rawChunks);
         rawChunks = chunkValidation.validChunks;
 
         if (rawChunks.length === 0) {
             const err = new Error("Chunking returned 0 valid chunks.");
             err.errorCode = "CHUNKING_FAILED";
+            err.reasons = chunkValidation.reasons;
             throw err;
+        }
+
+        // STAGE 4: Generating metadata & keywords (55%)
+        await updateStage("chunked", "Extracting metadata and keywords", 55, {
+            chunkStats: { totalChunks: rawChunks.length, pageCount }
+        });
+
+        // Deterministic metadata and keyword extraction (never blocks indexing)
+        rawChunks.forEach((chunk) => {
+            try {
+                chunk.searchMetadata = extractSearchMetadata(chunk.content, { originalName: document.originalName });
+            } catch (metaErr) {
+                chunk.searchMetadata = { keywords: [], programs: [], departments: [] };
+            }
+        });
+
+        // Optional llama.cpp entity extraction fallback (never blocks if failed or offline)
+        try {
+            const entityExtractionService = require("./entityExtractionService");
+            academicEntities = await withTimeout(
+                entityExtractionService.extractAcademicMetadata(text),
+                30000,
+                "llama.cpp entity extraction timed out"
+            );
+        } catch (entityErr) {
+            console.warn("[INDEX] llama.cpp entity extraction skipped (fallback to deterministic keywords):", entityErr.message);
+            academicEntities = [];
         }
 
         const chunkIds = rawChunks.map((_, index) => deterministicChunkId(documentId, index));

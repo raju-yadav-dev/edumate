@@ -140,12 +140,38 @@ function detectIntents(question) {
     return filtered.length ? filtered : ["general_chat"];
 }
 
+function hasExplicitEntity(query) {
+    if (!query) return false;
+    const q = String(query).toLowerCase().trim();
+    const clean = q.replace(/[?.!,:;()'"\-_[\]{}]/g, " ");
+
+    const nonEntityWords = new Set([
+        "what", "which", "where", "who", "when", "why", "how", "whose",
+        "is", "are", "am", "was", "were", "be", "been", "being",
+        "do", "does", "did", "have", "has", "had",
+        "can", "could", "will", "would", "should", "may", "might",
+        "tell", "give", "show", "find", "locate", "located", "get", "know",
+        "me", "us", "you", "about", "please", "exact", "actually",
+        "the", "a", "an", "of", "for", "in", "on", "at", "to", "with", "by", "from",
+        "room", "number", "num", "no", "floor", "level", "building", "block", "bhavan",
+        "office", "cabin", "fee", "fees", "cost", "tuition", "charge", "charges",
+        "head", "hod", "person", "name", "details", "detail", "info", "information",
+        "it", "its", "they", "their", "them", "this", "that", "these", "those",
+        "there", "here", "same"
+    ]);
+
+    const tokens = clean.split(/\s+/).filter(Boolean);
+    const entityTokens = tokens.filter(t => !nonEntityWords.has(t));
+    return entityTokens.length > 0;
+}
+
 function resolveReferences(question, context = {}) {
     let q = String(question || "").trim();
     const topic = canonicalTopic(q, context) || context.currentTopic || "";
     const department = context.mentionedDepartment || context.currentDepartment || "";
+    const hasOwnEntity = hasExplicitEntity(q);
 
-    if (topic) {
+    if (topic && !hasOwnEntity) {
         q = q.replace(/\b(this course|the course|that course|its course)\b/gi, topic);
 
         // Follow-up: "What about semester X?"
@@ -172,10 +198,54 @@ function resolveReferences(question, context = {}) {
         }
     }
 
-    if (department) {
+    if (department && !hasOwnEntity) {
         q = q.replace(/\b(this department|that department|the department)\b/gi, department);
         if (/\b(hod|head of department)\b/i.test(q) && !new RegExp(`\\b${department.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}\\b`, "i").test(q)) {
-            q += ` of ${department}`;
+            if (!/\b(?:of|for|in)\s+[a-z]/i.test(q)) {
+                q += ` of ${department}`;
+            }
+        }
+    }
+
+    // Follow-up: "What about MCA?" when previous query was about BCA fees/admission/etc.
+    const whatAboutDegreeMatch = q.match(/^(?:what about|how about)\s+([a-zA-Z.]{2,8})\??$/i);
+    if (whatAboutDegreeMatch) {
+        const nextDegree = whatAboutDegreeMatch[1].toUpperCase();
+        const prevIntent = context.currentIntent || "";
+        if (prevIntent === "fees" || /\b(fee|fees|cost|tuition)\b/i.test(context.previousQuery || "")) {
+            q = `${nextDegree} fees and fee structure`;
+        } else if (prevIntent === "eligibility" || /\b(eligibility|criteria)\b/i.test(context.previousQuery || "")) {
+            q = `${nextDegree} eligibility and admission criteria`;
+        } else {
+            q = `${nextDegree} course details`;
+        }
+    }
+
+    if (context.lastVerifiedEntity) {
+        const ent = context.lastVerifiedEntity;
+        const entName = ent.entity || (ent.department ? `HOD of ${ent.department}` : "");
+        const entLower = entName.toLowerCase();
+
+        if (entName) {
+            // Pronoun resolution only for genuine follow-ups where current question does not have its own explicit entity
+            if (!hasOwnEntity && /\b(it|its|that|this|their|they)\b/i.test(q)) {
+                q = q.replace(/\b(it|its|that|this|their|they)\b/gi, entName);
+            }
+
+            // ONLY apply elliptical follow-up resolution if the question DOES NOT HAVE its own explicit entity
+            if (!hasOwnEntity && !q.toLowerCase().includes(entLower)) {
+                if (/\b(?:which\s+building|what\s+building|what\s+is\s+the\s+building)\b/i.test(q)) {
+                    q = `Which building is ${entName} in`;
+                } else if (/\b(?:which\s+floor|what\s+floor|what\s+is\s+the\s+floor)\b/i.test(q)) {
+                    q = `Which floor is ${entName} on`;
+                } else if (/\b(?:which\s+room|what\s+room|what\s+is\s+the\s+room(?:\s+number)?)\b/i.test(q)) {
+                    q = `What is the room number of ${entName}`;
+                } else if (/\b(?:where\s+is\s+(?:their|the)?\s*(?:office|cabin|room|lab))\b/i.test(q)) {
+                    q = `Where is the office of ${entName}`;
+                } else if (/\b(?:who\s+is\s+(?:the\s+)?hod)\b/i.test(q)) {
+                    q = `Who is the HOD of ${entName}`;
+                }
+            }
         }
     }
 
@@ -219,6 +289,7 @@ module.exports = {
     detectIntents,
     expandAliases,
     resolveReferences,
+    hasExplicitEntity,
     buildSubqueries,
     canonicalTopic,
     shouldUseLLMForReferenceResolution

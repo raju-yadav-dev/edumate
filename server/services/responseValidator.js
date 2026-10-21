@@ -34,6 +34,16 @@ const validateResponse = ({
         };
     }
 
+    if (qTypeLower === "mixed" || qTypeLower === "hybrid") {
+        return {
+            valid: true,
+            confidence: hasTrustedSources ? "HIGH" : "MEDIUM",
+            score: hasTrustedSources ? 0.9 : 0.7,
+            groundedAnswer: generatedAnswer,
+            reason: "Mixed query combining general knowledge and institutional context."
+        };
+    }
+
     // 1. Un-grounded Institutional Query Check
     if (qTypeLower === "university_specific" && !hasTrustedSources) {
         return {
@@ -85,6 +95,84 @@ const validateResponse = ({
                 };
             }
         }
+    }
+
+    // Strip any thinking tags from model output
+    try {
+        const { stripQwenThinking } = require("../config/llm");
+        generatedAnswer = stripQwenThinking(generatedAnswer);
+    } catch (_) {}
+
+    // 2b. Entity-Fact Consistency Check via EvidenceContract
+    if (chunks.length > 0 && generatedAnswer) {
+        try {
+            const { buildEvidenceContract } = require("../ai/services/entityGroundingService");
+            const contract = buildEvidenceContract({ question, chunks });
+            const bestRecord = contract.matchedRecord;
+            const requestedAttrs = contract.requestedAttributes || {};
+
+            if (bestRecord) {
+                let hasContradiction = false;
+                let contradictionReason = "";
+
+                // Check 1: Room Number Consistency
+                if (bestRecord.room) {
+                    const genRoomMatch = generatedAnswer.match(/\b(?:room\s*(?:no\.?|number)?\s*|#\s*)?([0-9]{3,4}[a-z]?)\b/i);
+                    if (genRoomMatch) {
+                        const claimedRoom = genRoomMatch[1];
+                        if (claimedRoom !== bestRecord.room) {
+                            const otherRec = contract.records.find(r => r.room === claimedRoom && r.entity !== bestRecord.entity);
+                            hasContradiction = true;
+                            contradictionReason = `Claimed Room ${claimedRoom} ${otherRec ? `belongs to ${otherRec.entity}` : "is unsupported"}, expected Room ${bestRecord.room} for ${bestRecord.entity}.`;
+                        }
+                    }
+                }
+
+                // Check 2: Building Consistency (Detect invented or conflicting buildings)
+                if (requestedAttrs.asksBuilding) {
+                    const bldPattern = /\b(Building\s+[IVX0-9]+|[A-Za-z]+(?:\s+[A-Za-z]+)?\s+bhavan)\b/i;
+                    const claimedBldMatch = generatedAnswer.match(bldPattern);
+                    const verifiedBuilding = bestRecord.building || bestRecord.documentBuilding;
+                    if (claimedBldMatch) {
+                        const claimedBld = claimedBldMatch[1].trim();
+                        if (!verifiedBuilding) {
+                            hasContradiction = true;
+                            contradictionReason = `Claimed building "${claimedBld}" is not established in official documents for ${bestRecord.entity}.`;
+                        } else if (claimedBld.toLowerCase() !== verifiedBuilding.toLowerCase()) {
+                            hasContradiction = true;
+                            contradictionReason = `Claimed building "${claimedBld}" conflicts with established building "${verifiedBuilding}" for ${bestRecord.entity}.`;
+                        }
+                    }
+                }
+
+                // Check 3: Floor Consistency (Detect invented or borrowed floors)
+                if (requestedAttrs.asksFloor) {
+                    const floorPattern = /\b([0-9]+(?:st|nd|rd|th)\s+floor|ground\s+floor)\b/i;
+                    const claimedFloorMatch = generatedAnswer.match(floorPattern);
+                    if (claimedFloorMatch) {
+                        const claimedFlr = claimedFloorMatch[1].trim();
+                        if (!bestRecord.floor) {
+                            hasContradiction = true;
+                            contradictionReason = `Claimed floor "${claimedFlr}" is not established in official documents for ${bestRecord.entity}.`;
+                        } else if (claimedFlr.toLowerCase() !== bestRecord.floor.toLowerCase()) {
+                            hasContradiction = true;
+                            contradictionReason = `Claimed floor "${claimedFlr}" conflicts with established floor "${bestRecord.floor}" for ${bestRecord.entity}.`;
+                        }
+                    }
+                }
+
+                if (hasContradiction) {
+                    const correctedAnswer = contract.formatGroundedAnswer();
+                    return {
+                        valid: false,
+                        confidence: "MEDIUM",
+                        score: 0.5,
+                        groundedAnswer: correctedAnswer || generatedAnswer,
+                        reason: `Evidence contradiction: ${contradictionReason} Grounded correction applied.`
+                    };
+                }
+            }
+        } catch (_) {}
     }
 
     // 3. Multi-Factor Confidence Scoring

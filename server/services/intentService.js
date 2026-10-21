@@ -71,7 +71,8 @@ const classifyQuestionType = (question, intent) => {
         "faculty", "department", "departments", "syllabus", "notice", "notices", "announcement", 
         "hostel", "mess", "library", "scholarship", "scholarships", "placement", "placements", 
         "course", "courses", "rules", "regulation", "attendance", "assignment", "assignments", 
-        "project", "lab", "labs"
+        "project", "lab", "labs", "hod", "head of department", "dean", "registrar", "principal",
+        "room", "building", "campus", "my university", "our university", "brainware"
     ];
 
     const generalKeywords = [
@@ -81,6 +82,21 @@ const classifyQuestionType = (question, intent) => {
         "physics", "current affairs", "latest news", "tutorial", "explain", "what is", 
         "how does", "binary search", "database management", "dbms"
     ];
+
+    const isPureFacultyOrAdmin = /^(?:who\s+is\s+(?:the\s+)?(?:hod|head\s+of|dean|registrar|vice\s+chancellor|warden|director|principal)|who\s+teaches|who\s+is\s+(?:the\s+)?(?:faculty|dr|prof)|where\s+is|what\s+is\s+the\s+room|what\s+is\s+the\s+fee|what\s+are\s+the\s+fees|what\s+is\s+the\s+admission|when\s+is\s+the\s+exam)\b/i.test(normalized) ||
+        /^(?:fees?|admissions?|hostel|scholarships?|syllabus|routine|timetable)\s+(?:for|of)\b/i.test(normalized);
+
+    const isProgramDefinition = /\b(?:what\s+is|what\s+are|define|definition\s+of|explain|overview\s+of|meaning\s+of|tell\s+me\s+about|full\s+form\s+of|stands?\s+for)\s+(?:a\s+|an\s+|the\s+)?(?:bca|mca|b\.?tech|m\.?tech|bba|mba|b\.?sc|m\.?sc|b\.?pharm|d\.?pharm|llb|diploma|degree)\b/i.test(normalized);
+
+    const hasExplicitUniAsk = /\b(?:fee|fees|tuition|admission|admissions|apply|eligibility|enroll|hod|dean|registrar|faculty|professor|room|building|hostel|scholarship|syllabus|exam|routine|notice|placement|curfew|my\s+university|our\s+university|brainware)\b/i.test(normalized);
+
+    if (isPureFacultyOrAdmin) {
+        return QUESTION_TYPES.UNIVERSITY_SPECIFIC;
+    }
+
+    if (isProgramDefinition && !hasExplicitUniAsk) {
+        return QUESTION_TYPES.GENERAL_KNOWLEDGE;
+    }
 
     const hasUniversity = universityKeywords.some(keyword => {
         const regex = new RegExp(`\\b${keyword}\\b`, "i");
@@ -92,7 +108,7 @@ const classifyQuestionType = (question, intent) => {
         return regex.test(normalized);
     });
 
-    if (hasUniversity && hasGeneral) {
+    if (hasUniversity && hasGeneral && /[,\s]+(?:and|plus|also|as\s+well\s+as|along\s+with|\&)\s+/i.test(normalized)) {
         return QUESTION_TYPES.HYBRID;
     }
     

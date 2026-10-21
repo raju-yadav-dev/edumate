@@ -674,10 +674,14 @@ const formatAnswer = ({
     structuredAnswer = sanitizeMarkdown(structuredAnswer);
 
     // 6. Handle retrieval confidence notice
-    structuredAnswer = applyConfidenceNotice(structuredAnswer, confidence);
+    // Never display document warnings when query is general or no document was needed
+    const isGeneral = queryPlan?.route === "GENERAL_KNOWLEDGE" || queryPlan?.mode === "LLM_ONLY" || queryPlan?.skipRag === true || queryPlan?.isMixed === true;
+    if (!isGeneral) {
+        structuredAnswer = applyConfidenceNotice(structuredAnswer, confidence);
+    }
 
-    // 7. Attach source label prefix if supplied
-    if (sourceLabel && !structuredAnswer.startsWith(sourceLabel) && !structuredAnswer.startsWith("> ")) {
+    // 7. Attach source label prefix if supplied and not a general question
+    if (!isGeneral && sourceLabel && !structuredAnswer.startsWith(sourceLabel) && !structuredAnswer.startsWith("> ")) {
         structuredAnswer = `${sourceLabel}\n\n${structuredAnswer}`;
     }
 

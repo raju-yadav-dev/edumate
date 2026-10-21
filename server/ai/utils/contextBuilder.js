@@ -1,5 +1,6 @@
 const AI_CONSTANTS = require("../constants/aiConstants");
 const { countTokens } = require("./tokenizer");
+const { parseChunkRecords } = require("../services/entityGroundingService");
 
 /**
  * EduMate Task 9 — Smart Context Builder
@@ -265,8 +266,32 @@ const mergeConsecutiveSectionChunks = (chunks) => {
         const mergedSections = [];
 
         for (const chunk of sortedChunks) {
-            const rawCleaned = cleanChunkText(chunk.content);
+            let rawCleaned = cleanChunkText(chunk.content);
             if (!rawCleaned) continue;
+
+            // Preserve and demarcate individual records within multi-record chunks generically (Requirement 2 & 3)
+            try {
+                const records = parseChunkRecords(chunk);
+                if (records.length >= 2) {
+                    const formattedRecords = records.map(rec => {
+                        const parts = [];
+                        if (rec.room) parts.push(`Room: ${rec.room}`);
+                        parts.push(`Entity: ${rec.entity || rec.subject || rec.text}`);
+                        if (rec.floor) parts.push(`Floor: ${rec.floor}`);
+                        if (rec.department) parts.push(`Department: ${rec.department}`);
+                        if (rec.building) parts.push(`Building: ${rec.building}`);
+                        if (rec.attributes) {
+                            for (const [k, v] of Object.entries(rec.attributes)) {
+                                if (!["room", "floor", "building", "department", "entity", "subject"].includes(k) && v) {
+                                    parts.push(`${k}: ${v}`);
+                                }
+                            }
+                        }
+                        return `• ${parts.join(" | ")}`;
+                    });
+                    rawCleaned = formattedRecords.join("\n");
+                }
+            } catch (_) {}
 
             const meta = chunk.metadata || {};
             const sectionKey = String(meta.parentSection || meta.heading || meta.sectionPath || "General Section").trim();

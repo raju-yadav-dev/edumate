@@ -49,6 +49,17 @@ const resolveCourseInQuestion = (question) => {
         const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const regex = new RegExp(`\\b${escaped}\\b`, 'i');
         if (regex.test(q)) {
+            // Guard: Do not resolve alias into a degree program when it qualifies an HOD, department, office, or location query
+            // e.g. "HOD-psychology", "HOD of psychology", "psychology HOD", "room number of HOD-psychology"
+            const isEntityOrLocationContext = 
+                new RegExp(`(?:\\b(?:hod|head\\s+of\\s+(?:the\\s+)?department|department\\s+head|office|dean|principal|director|professor|teacher|counselor|faculty)\\s*[-:/]?\\s*(?:of\\s+)?${escaped}\\b)`, 'i').test(q) ||
+                new RegExp(`(?:\\b${escaped}\\s*[-:/]?\\s*(?:hod|head\\s+of\\s+(?:the\\s+)?department|department\\s+head|office|dept|department)\\b)`, 'i').test(q) ||
+                (new RegExp(`\\b(?:room|building|floor|where\\s+is|location|cabin)\\b`, 'i').test(q) && new RegExp(`\\b(?:hod|head|office|department|dept|staff)\\b`, 'i').test(q));
+            
+            if (isEntityOrLocationContext) {
+                continue;
+            }
+
             matchedAlias = alias;
             matchedCourses = aliasMap[alias];
             break;

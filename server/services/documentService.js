@@ -632,21 +632,13 @@ const retryFailed = async ({ user }) => {
     const failedDocs = await Document.find({ status: "active", embeddingStatus: "failed" });
     let count = 0;
     for (const doc of failedDocs) {
-        const errorMsg = doc.metadata?.error || "";
-        const isImg = doc.mimeType && doc.mimeType.startsWith("image/");
-        if (!isImg && (errorMsg.includes("empty text") || errorMsg.includes("Image-only") || errorMsg.includes("scanned PDF"))) {
-            doc.embeddingStatus = "not_required";
-            doc.metadata = {
-                ...(doc.metadata || {}),
-                notes: (doc.metadata?.notes || "") + " [Skipped auto-retry: Image-only/Scanned PDF with no text layer]"
-            };
-            await doc.save();
-        } else {
-            doc.embeddingStatus = "pending";
-            await doc.save();
-            indexingService.indexDocumentBackground(doc._id).catch(() => {});
-            count++;
-        }
+        doc.retryCount = (doc.retryCount || 0) + 1;
+        doc.embeddingStatus = "pending";
+        doc.progress = 0;
+        doc.currentStage = `Queued for retry (attempt ${doc.retryCount})`;
+        await doc.save();
+        indexingService.indexDocumentBackground(doc._id).catch(() => {});
+        count++;
     }
     return { count };
 };

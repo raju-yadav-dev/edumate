@@ -1,4 +1,4 @@
-const pdfParse = require("pdf-parse");
+const pdfExtractor = require("../../ai/utils/pdfExtractor");
 
 class PDFExtractor {
     /**
@@ -8,12 +8,15 @@ class PDFExtractor {
      */
     static async extract(buffer) {
         try {
-            const data = await pdfParse(buffer);
+            const result = await pdfExtractor.extractText(buffer);
+            const fullText = (result.pages || []).map((p) => p.text).filter(Boolean).join("\n\n");
             return {
-                text: data.text || "",
+                text: fullText,
                 metadata: {
-                    pageCount: data.numpages || 1,
-                    info: data.info || {}
+                    pageCount: result.numPages || 1,
+                    pages: result.pages || [],
+                    requiresOcr: result.requiresOcr,
+                    info: result.info || {}
                 },
                 documentType: "pdf"
             };

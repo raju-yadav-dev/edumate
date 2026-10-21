@@ -37,6 +37,8 @@ const {
     cancelDocumentProcessing,
     resumeDocumentProcessing,
     retryDocumentProcessing,
+    dismissDocumentProcessing,
+    dismissFailedQueue,
     getDocumentChunks,
     getIntegrityReport,
     repairDocument,
@@ -213,6 +215,16 @@ router.post(
     "/:documentId/retry",
     authorizeRoles("admin", "super_admin"),
     retryDocumentProcessing
+);
+router.post(
+    "/:documentId/dismiss",
+    authorizeRoles("admin", "super_admin"),
+    dismissDocumentProcessing
+);
+router.post(
+    "/queue/dismiss-failed",
+    authorizeRoles("admin", "super_admin"),
+    dismissFailedQueue
 );
 
 // Integrity & Auto-Repair

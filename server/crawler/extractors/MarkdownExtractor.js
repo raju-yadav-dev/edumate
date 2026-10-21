@@ -1,29 +1,38 @@
 class MarkdownExtractor {
     /**
-     * Extracts text content from a Markdown Buffer
+     * Extracts readable text content from a Markdown Buffer while preserving headings and lists
      * @param {Buffer} buffer
      * @returns {Promise<Object>} - Contains { text, metadata, documentType }
      */
     static async extract(buffer) {
+        if (!buffer || buffer.length === 0) {
+            throw new Error("Cannot extract text from empty Markdown buffer.");
+        }
+
         try {
             const rawText = buffer.toString("utf-8");
 
-            // Strip Markdown formatting syntax to keep plain text sentences clean
+            // Clean Markdown syntax while explicitly preserving headings (# Heading) and lists (- item)
             const cleanedText = rawText
-                .replace(/#+\s+/g, "")                // Remove headers syntax (# Header)
-                .replace(/`{3,}[\s\S]*?`{3,}/g, "")   // Remove multi-line code blocks
-                .replace(/`([^`]+)`/g, "$1")          // Remove inline backticks
-                .replace(/\[(.*?)\]\((.*?)\)/g, "$1") // Remove markdown link syntax keeping link name
-                .replace(/(\*\*|__)(.*?)\1/g, "$2")   // Remove bold formatting
-                .replace(/(\*|_)(.*?)\1/g, "$2")     // Remove italic formatting
-                .replace(/>\s+/g, "")                 // Remove blockquotes
-                .replace(/^[-\*+]\s+/gm, "")          // Remove bullet points
-                .replace(/^\d+\.\s+/gm, "")           // Remove ordered numbers
+                .replace(/\r\n/g, "\n")
+                .replace(/```[\s\S]*?```/g, "")       // Remove code blocks
+                .replace(/`([^`]+)`/g, "$1")          // Inline code to text
+                .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1") // Images to alt text
+                .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")  // Links to text
+                .replace(/<[^>]+>/g, "")              // Raw HTML tags
+                .replace(/(\*\*|__)(.*?)\1/g, "$2")   // Bold to text
+                .replace(/(\*|_)(.*?)\1/g, "$2")     // Italics to text
+                .replace(/\n{3,}/g, "\n\n")
                 .trim();
+
+            const headings = (cleanedText.match(/^#{1,6}\s+.+$/gm) || []).map((h) => h.replace(/^#{1,6}\s+/, "").trim());
 
             return {
                 text: cleanedText,
-                metadata: {},
+                metadata: {
+                    headings,
+                    headingCount: headings.length
+                },
                 documentType: "markdown"
             };
         } catch (err) {

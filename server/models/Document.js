@@ -125,6 +125,7 @@ const documentSchema = new mongoose.Schema(
                 "failed",
                 "cancelled",
                 "paused",
+                "dismissed",
                 "not_required"
             ],
             default: "pending",
