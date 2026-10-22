@@ -124,7 +124,8 @@ const buildPlannerQdrantFilter = ({
         must.push({
             should: [
                 { key: "documentType", match: { value: queryPlan.documentType } },
-                { key: "documentType", match: { value: queryPlan.documentType.toLowerCase() } }
+                { key: "documentType", match: { value: queryPlan.documentType.toLowerCase() } },
+                { key: "documentType", match: { value: "image" } }
             ]
         });
     }
@@ -243,7 +244,8 @@ const retrieveRelevantChunks = async ({
             });
 
             // Cache in Layer 4
-            smartCacheHub.l4.setVectorSearch(queryEmbedding, qdrantFilter, limit, mappedResults, collectionName);
+            const resultCategories = [...new Set(mappedResults.map(r => r.metadata?.category).filter(Boolean))];
+            smartCacheHub.l4.setVectorSearch(queryEmbedding, qdrantFilter, limit, mappedResults, collectionName, resultCategories);
 
             return mappedResults;
         } catch (e) {

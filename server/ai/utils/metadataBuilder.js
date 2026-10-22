@@ -108,7 +108,7 @@ const buildChunkMetadata = ({
     const detectedProg = (searchMeta.programs && searchMeta.programs.length > 0 ? searchMeta.programs[0] : "") || "";
 
     const cleanCategory = detectedCategory || "Academics";
-    const docType = searchMeta.documentType || (isImage ? "image" : mapCategoryToDocumentType(cleanCategory));
+    const docType = searchMeta.documentType || mapCategoryToDocumentType(cleanCategory) || (isImage ? "image" : "Document");
 
     // Hierarchical section path (Document -> Category -> Section -> Subsection -> Chunk)
     const sectionPath = buildSectionPath({

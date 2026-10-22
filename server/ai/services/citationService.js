@@ -118,7 +118,7 @@ const formatCitations = (retrievedChunks = [], universitySiteResults = [], webRe
             let deptName = metadata.department || "";
             let snippetText = chunk.content ? String(chunk.content).replace(/^[#\s|+-]+/gm, "").slice(0, 200).trim() : "";
 
-            if (matchedRecord) {
+            if (matchedRecord && (matchedRecord.room || matchedRecord.floor || matchedRecord.building)) {
                 sectionName = matchedRecord.entity ? `${matchedRecord.room ? `${matchedRecord.room} ` : ""}${matchedRecord.entity}` : sectionName;
                 deptName = matchedRecord.department || "";
                 snippetText = matchedRecord.text || snippetText;
@@ -142,6 +142,7 @@ const formatCitations = (retrievedChunks = [], universitySiteResults = [], webRe
                     sectionPath,
                     maxScore: 0,
                     snippets: [],
+                    rawContent: chunk.content || "",
                     firstSeenRank: chunkIndex,
                     downloadUrl: chunk.downloadUrl || metadata.downloadUrl || "",
                     metadata: {
@@ -174,6 +175,9 @@ const formatCitations = (retrievedChunks = [], universitySiteResults = [], webRe
                 if (!docGroups[docKey].snippets.includes(snippetText)) {
                     docGroups[docKey].snippets.push(snippetText);
                 }
+            }
+            if (chunk.content && !docGroups[docKey].rawContent.includes(chunk.content)) {
+                docGroups[docKey].rawContent += "\n" + chunk.content;
             }
         });
         
@@ -218,6 +222,7 @@ const formatCitations = (retrievedChunks = [], universitySiteResults = [], webRe
                 similarity: group.maxScore,
                 reference: `${pageRef} · ${group.sectionHeading}`,
                 snippet: group.snippets.join(" ... "),
+                rawContent: group.rawContent || "",
                 metadata: {
                     ...group.metadata,
                     previewUrl,
@@ -352,8 +357,8 @@ const filterSupportingCitations = (citations, answerText, query = "") => {
     }
 
     // General-knowledge definition queries without institutional requirements return empty citations
-    const isGeneralDef = /^(?:what\s+is|what\s+are|define|explain|meaning\s+of)\s+(?:a\s+|an\s+|the\s+)?([a-z0-9.]{2,10})\b/i.test(query || "") &&
-        !/\b(?:fee|fees|admission|eligibility|faculty|room|building|campus|my\s+university|our\s+university|at\s+university|at\s+my\s+university)\b/i.test(query || "");
+    const isGeneralDef = /^(?:what\s+is|what\s+are|define|explain|meaning\s+of)\s+(?:a\s+|an\s+|the\s+)?([a-z0-9.]{2,10})\s*(\?|$)/i.test((query || "").trim()) &&
+        !/\b(?:fee|fees|admission|eligibility|faculty|room|building|campus|notice|notices|library|schedule|hours|policy|rules|my\s+university|our\s+university|at\s+university|at\s+my\s+university)\b/i.test(query || "");
     if (isGeneralDef) {
         return [];
     }
@@ -378,7 +383,8 @@ const filterSupportingCitations = (citations, answerText, query = "") => {
         const title = String(cite.documentTitle || cite.title || "").toLowerCase();
         const heading = String(cite.sectionHeading || cite.section || "").toLowerCase();
         const snippet = String(cite.snippet || "").toLowerCase();
-        const fullSourceText = `${title} ${heading} ${snippet}`;
+        const rawContent = String(cite.rawContent || cite.content || "").toLowerCase();
+        const fullSourceText = `${title} ${heading} ${snippet} ${rawContent}`.trim();
 
         // 1. If the answer claims specific room numbers (e.g. Room 206), verify that this citation actually contains that room
         if (extractedNumbers.size > 0) {

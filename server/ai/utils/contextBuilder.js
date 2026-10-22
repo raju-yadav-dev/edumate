@@ -271,9 +271,12 @@ const mergeConsecutiveSectionChunks = (chunks) => {
 
             // Preserve and demarcate individual records within multi-record chunks generically (Requirement 2 & 3)
             try {
-                const records = parseChunkRecords(chunk);
-                if (records.length >= 2) {
-                    const formattedRecords = records.map(rec => {
+                const parsed = parseChunkRecords(chunk);
+                const roomRecords = parsed.filter(r => r.room);
+                const isTable = String(chunk.content || "").includes("|");
+                // Only format as discrete record bullets if the chunk is specifically a multi-room directory listing or table
+                if (roomRecords.length >= 2 || (isTable && parsed.length >= 2)) {
+                    const formattedRecords = parsed.map(rec => {
                         const parts = [];
                         if (rec.room) parts.push(`Room: ${rec.room}`);
                         parts.push(`Entity: ${rec.entity || rec.subject || rec.text}`);

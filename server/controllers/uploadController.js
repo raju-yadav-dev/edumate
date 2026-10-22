@@ -28,19 +28,29 @@ const uploadDocument = asyncHandler(async (req, res) => {
         });
     }
 
-    const task = taskRegistry.createTask(`Upload document: ${req.file.originalname} (via upload route)`, "upload_document");
+    if (!req.file || !req.file.buffer) {
+        return res.status(400).json({
+            success: false,
+            message: "File buffer is required."
+        });
+    }
+
+    const file = {
+        fieldname: req.file.fieldname,
+        originalname: req.file.originalname,
+        encoding: req.file.encoding,
+        mimetype: req.file.mimetype,
+        size: req.file.size,
+        buffer: Buffer.from(req.file.buffer)
+    };
+    const body = { ...req.body };
+
+    const task = taskRegistry.createTask(`Upload document: ${file.originalname} (via upload route)`, "upload_document");
 
     taskRegistry.addTask(task.id, async () => {
-        const file = req.file;
-
-        let extension = path.extname(file.originalname);
-        const isImage = file.mimetype && file.mimetype.startsWith("image/");
-        if (isImage) {
-            extension = ".png";
-        }
-
+        let extension = path.extname(file.originalname) || "";
         const uniqueName = `${Date.now()}-${crypto.randomUUID()}${extension}`;
-        const targetFolder = req.body.folder || req.body.folderPath || (category ? `file_explorer/${category}` : "file_explorer");
+        const targetFolder = body.folder || body.folderPath || (category ? `file_explorer/${category}` : "file_explorer");
         const cleanBase = targetFolder.replace(/^[/\\]+/, "").replace(/\\/g, "/");
         const baseDir = (!cleanBase.startsWith("file_explorer") && !cleanBase.startsWith("storage/file_explorer")) 
             ? `file_explorer/${cleanBase}` 

@@ -578,7 +578,7 @@ export default function StorageExplorer({
                 ref={fileInputRef}
                 type="file"
                 multiple
-                accept=".pdf,.docx,.doc,.txt,.md,.markdown"
+                accept=".pdf,.docx,.doc,.txt,.md,.markdown,.png,.jpg,.jpeg,.webp"
                 style={{ display: "none" }}
                 onChange={(e) => {
                     if (e.target.files?.length > 0) {

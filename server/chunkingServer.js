@@ -106,7 +106,7 @@ const uploadMiddleware = multer({
         if (localStorageManager.isSupportedDocument(file.originalname)) {
             cb(null, true);
         } else {
-            cb(new Error(`Unsupported file format: ${path.extname(file.originalname)}. Only PDF, DOCX, TXT, and Markdown are allowed.`));
+            cb(new Error(`Unsupported file format: ${path.extname(file.originalname)}. Supported formats: PDF, DOCX, TXT, Markdown, and Images (PNG, JPG, JPEG, WEBP).`));
         }
     }
 });
@@ -641,7 +641,14 @@ const handleScanSync = async (req, res) => {
         ".doc": "application/msword",
         ".txt": "text/plain",
         ".md": "text/markdown",
-        ".markdown": "text/markdown"
+        ".markdown": "text/markdown",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".webp": "image/webp",
+        ".bmp": "image/bmp",
+        ".tiff": "image/tiff",
+        ".tif": "image/tiff"
     };
 
     let registeredCount = 0;
@@ -1183,6 +1190,13 @@ app.get(["/storage/file/preview", "/api/documents/storage/file/preview"], async 
                 const buffer = fs.readFileSync(safePath);
                 const pdfData = await pdfParse(buffer, { max: 5 });
                 textPreview = pdfData.text ? pdfData.text.slice(0, 10000) : "";
+            } catch (_) {}
+        } else if (isImage && docRecord) {
+            try {
+                const chunkData = await integrityService.getDocumentChunks(docRecord._id);
+                if (chunkData && Array.isArray(chunkData.chunks) && chunkData.chunks.length > 0) {
+                    textPreview = chunkData.chunks.map(c => c.content).filter(Boolean).join("\n\n");
+                }
             } catch (_) {}
         }
 

@@ -38,7 +38,9 @@ class ImageExtractor {
             const text = (result?.data?.text || "").trim();
 
             if (!text) {
-                throw new Error("No readable text found in the image.");
+                const noTextErr = new Error("No readable text found in the image. Please upload an image containing clear, legible text.");
+                noTextErr.errorCode = "NO_READABLE_TEXT";
+                throw noTextErr;
             }
 
             return {
@@ -54,7 +56,9 @@ class ImageExtractor {
             };
         } catch (err) {
             console.error(`[ImageExtractor] OCR failed for '${fileName}':`, err.message);
-            throw new Error(`Image OCR text extraction failed: ${err.message}`);
+            const wrappedErr = new Error(`Image OCR text extraction failed: ${err.message}`);
+            wrappedErr.errorCode = err.errorCode || "OCR_EXTRACTION_FAILED";
+            throw wrappedErr;
         } finally {
             if (worker) {
                 try {

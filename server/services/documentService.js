@@ -67,11 +67,7 @@ const getSignedUrlForDoc = async (storagePath, docId = null) => {
 };
 
 const saveToLocalStorage = async (file, category) => {
-    let extension = getSafeExtension(file.originalname);
-    const isImage = file.mimetype && file.mimetype.startsWith("image/");
-    if (isImage) {
-        extension = ".png";
-    }
+    const extension = getSafeExtension(file.originalname);
     const uniqueName = `${Date.now()}-${crypto.randomUUID()}${extension}`;
     const baseDir = category ? `file_explorer/${category}` : "file_explorer";
     const storagePath = `${baseDir}/${uniqueName}`;
@@ -112,11 +108,8 @@ const uploadDocument = async ({ file, body, user }) => {
     }
 
     const category = sanitizeCategory(body.category);
-    let extension = getSafeExtension(file.originalname);
-    const isImage = file.mimetype && file.mimetype.startsWith("image/");
-    if (isImage) {
-        extension = ".png";
-    }
+    const extension = getSafeExtension(file.originalname);
+    const uniqueName = `${Date.now()}-${crypto.randomUUID()}${extension}`;
     const targetFolder = body?.targetFolder || body?.folderPath || body?.folder;
     let baseDir = "file_explorer";
     if (targetFolder) {

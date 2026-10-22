@@ -13,20 +13,32 @@ const uploadDocument = asyncHandler(async (req, res) => {
         });
     }
 
-    if (!req.file) {
+    if (!req.file || !req.file.buffer) {
         return res.status(400).json({
             success: false,
             message: "Document file is required."
         });
     }
 
-    const task = taskRegistry.createTask(`Upload document: ${req.file.originalname}`, "upload_document");
+    // Preserve file buffer and metadata before response cleanup zeroes req.file.buffer
+    const file = {
+        fieldname: req.file.fieldname,
+        originalname: req.file.originalname,
+        encoding: req.file.encoding,
+        mimetype: req.file.mimetype,
+        size: req.file.size,
+        buffer: Buffer.from(req.file.buffer)
+    };
+    const body = { ...req.body };
+    const user = req.user;
+
+    const task = taskRegistry.createTask(`Upload document: ${file.originalname}`, "upload_document");
 
     taskRegistry.addTask(task.id, async () => {
         return await getDocumentService().uploadDocument({
-            file: req.file,
-            body: req.body,
-            user: req.user
+            file,
+            body,
+            user
         });
     });
 
@@ -72,14 +84,33 @@ const replaceDocument = asyncHandler(async (req, res) => {
         });
     }
 
-    const task = taskRegistry.createTask(`Replace document: ${req.params.documentId}`, "replace_document");
+    if (!req.file || !req.file.buffer) {
+        return res.status(400).json({
+            success: false,
+            message: "Replacement document file is required."
+        });
+    }
+
+    const file = {
+        fieldname: req.file.fieldname,
+        originalname: req.file.originalname,
+        encoding: req.file.encoding,
+        mimetype: req.file.mimetype,
+        size: req.file.size,
+        buffer: Buffer.from(req.file.buffer)
+    };
+    const body = { ...req.body };
+    const user = req.user;
+    const documentId = req.params.documentId;
+
+    const task = taskRegistry.createTask(`Replace document: ${documentId}`, "replace_document");
 
     taskRegistry.addTask(task.id, async () => {
         return await getDocumentService().replaceDocument({
-            documentId: req.params.documentId,
-            file: req.file,
-            body: req.body,
-            user: req.user
+            documentId,
+            file,
+            body,
+            user
         });
     });
 

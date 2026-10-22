@@ -82,6 +82,8 @@ import {
     getChunkingHealth,
     getChunkingSSEUrl
 } from "../../../services/adminService";
+import { getAdminAccessToken } from "../../../services/adminSession";
+import { getApiRootUrl } from "../../../services/apiConfig";
 
 import ChunkPreviewDrawer from "./ChunkPreviewDrawer";
 import IntegrityAuditModal from "./IntegrityAuditModal";
@@ -597,7 +599,7 @@ export default function ChunkingStudio({
     // 5. File Upload Handling
     const handleFilesSelected = (files) => {
         if (!files || files.length === 0) return;
-        const validExtensions = [".pdf", ".docx", ".doc", ".txt", ".md"];
+        const validExtensions = [".pdf", ".docx", ".doc", ".txt", ".md", ".png", ".jpg", ".jpeg", ".webp"];
         const newQueue = Array.from(files).filter((file) => {
             const ext = "." + file.name.split(".").pop().toLowerCase();
             return validExtensions.includes(ext);
@@ -614,7 +616,7 @@ export default function ChunkingStudio({
         }));
 
         if (newQueue.length === 0) {
-            setError("Only PDF, DOCX, TXT, and Markdown files are supported.");
+            setError("Only PDF, DOCX, TXT, Markdown, and Image (PNG, JPG, WebP) files are supported.");
             return;
         }
 
@@ -623,8 +625,6 @@ export default function ChunkingStudio({
     };
 
     const processUploadQueue = async (items) => {
-        const { getAdminAccessToken } = require("../../../services/adminSession");
-        const { getApiRootUrl } = require("../../../services/apiConfig");
         const token = getAdminAccessToken();
         const uploadUrl = `${getApiRootUrl()}/documents`;
 

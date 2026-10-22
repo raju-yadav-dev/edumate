@@ -78,7 +78,8 @@ const UNIVERSITY_OFFICIALS = [
     "dean", "chancellor", "vice chancellor", "registrar", "warden", "chief warden",
     "proctor", "placement officer", "faculty", "professor", "professors", "teacher",
     "teachers", "staff", "dr.", "prof.", "who teaches", "who is the faculty",
-    "faculty advisor", "faculty members", "exam cell officer"
+    "faculty advisor", "faculty members", "exam cell officer",
+    "supervisor", "coordinator", "convener", "incharge", "in-charge"
 ];
 
 // University Core Entities & Services
@@ -104,7 +105,8 @@ const UNIVERSITY_ENTITIES = [
     "book return", "scholarship", "scholarships", "swami vivekananda", "freeship", "financial aid",
     "placement", "placements", "highest package", "average package", "salary package", "top recruiters",
     "recruitment drive", "internship", "campus placement", "training & placement", "curfew", "curfew timings",
-    "student portal", "lab", "labs",
+    "student portal", "lab", "labs", "laboratory", "laboratories", "workshop", "workshops", "seminar", "seminars",
+    "symposium", "trial", "trials", "session", "sessions",
     
     // Campus Buildings & Locations
     "building 1", "building 2", "building 3", "building 4", "building 5", "building 6", "building 7",
@@ -355,11 +357,11 @@ function classifyIntent(rawQuery, options = {}) {
             return true;
         }
         // 2. University hierarchy & officials (HOD, Dean, Registrar, Professor, Faculty, etc.)
-        if (/\b(?:hod|head\s+of\s+(?:the\s+)?department|department\s+head|dean|registrar|vice\s+chancellor|chancellor|warden|proctor|placement\s+officer|faculty|professor|professors|teacher|teachers|who\s+teaches|who\s+is\s+(?:the\s+)?(?:faculty|dr|prof))\b/i.test(text)) {
+        if (/\b(?:hod|head\s+of\s+(?:the\s+)?department|department\s+head|dean|registrar|vice\s+chancellor|chancellor|warden|proctor|placement\s+officer|faculty|professor|professors|teacher|teachers|supervisor|coordinator|convener|who\s+teaches|who\s+is\s+(?:the\s+)?(?:faculty|dr|prof))\b/i.test(text)) {
             return true;
         }
         // 3. Campus locations & room numbers
-        if (/\b(?:where\s+is|room\s+(?:no\.?|number|\d+)|building\s+(?:\d+|[ivx]+|\b[a-z]+\b)|which\s+floor|which\s+building|which\s+room|how\s+to\s+reach|cafeteria|canteen|seminar\s+hall|auditorium|gymnasium|language\s+lab|accounts\s+section|cash\s+counter)\b/i.test(text)) {
+        if (/\b(?:where\s+is|room\s+(?:no\.?|number|\d+)|building\s+(?:\d+|[ivx]+|\b[a-z]+\b)|which\s+floor|which\s+building|which\s+room|how\s+to\s+reach|cafeteria|canteen|seminar\s+hall|auditorium|gymnasium|language\s+lab|accounts\s+section|cash\s+counter|laboratory|laboratories|lab\b|workshop|seminar)\b/i.test(text)) {
             return true;
         }
         // 4. Institutional administrative processes, fees, admissions, rules
@@ -379,7 +381,7 @@ function classifyIntent(rawQuery, options = {}) {
     const hasGeneralConcept = isProgDef || isAcronym || matchedProgramming.length > 0 || matchedGeneral.length > 0 || /\b(?:what\s+is|what\s+are|define|explain|how\s+does|how\s+do|describe|write\s+a\s+program)\s+(?:java|python|c\+\+|coding|programming|algorithm|binary\s+search|data\s+structure|recursion|ai|machine\s+learning|cyber\s+security|calculus|math|physics)\b/i.test(q);
 
     // Helper: Detect pure faculty / administrative queries (e.g. "Who is the HOD of Cyber Security?", "Where is room 204?")
-    const isPureAdminOrFaculty = /^(?:who\s+is\s+(?:the\s+)?(?:hod|head\s+of|dean|registrar|vice\s+chancellor|warden|director|principal)|who\s+teaches|who\s+is\s+(?:the\s+)?(?:faculty|dr|prof)|where\s+is|what\s+is\s+the\s+room|what\s+is\s+the\s+fee|what\s+are\s+the\s+fees|what\s+is\s+the\s+admission|when\s+is\s+the\s+exam)\b/i.test(q) ||
+    const isPureAdminOrFaculty = /^(?:who\s+is\s+(?:the\s+)?(?:hod|head\s+of|dean|registrar|vice\s+chancellor|warden|director|principal|coordinator|supervisor)|who\s+teaches|who\s+is\s+(?:the\s+)?(?:faculty|dr|prof)|where\s+is|what\s+is\s+the\s+room|what\s+is\s+the\s+fee|what\s+are\s+the\s+fees|what\s+is\s+the\s+admission|when\s+is\s+the\s+exam)\b/i.test(q) ||
         /^(?:fees?|admissions?|hostel|scholarships?|syllabus|routine|timetable)\s+(?:for|of)\b/i.test(q);
 
     // 5. MIXED Intent: Query requires BOTH general concept knowledge AND university context

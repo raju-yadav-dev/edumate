@@ -37,7 +37,7 @@ const CONTENT_RULES = [
     ["Hostel", /\b(?:hostel|accommodation|residence|mess|dorm)\b/i],
     ["Admissions", /\b(?:admission|application|enroll|eligib(?:ility|le)|entrance)\b/i],
     ["Brochure", /\b(?:brochure|prospectus|catalogue|catalog)\b/i],
-    ["Notices", /\b(?:notice|notification|circular|announcement)\b/i],
+    ["Notices", /\b(?:notices?|notification|circular|announcement)\b/i],
     ["Campus", /\b(?:campus|building|facility|navigation|location|map)\b/i],
     ["Academics", /\b(?:academic|course|curriculum|syllabus|subject|semester|program|department)\b/i]
 ];
@@ -57,6 +57,11 @@ const resolveKnowledgeCategory = ({
     originalName = "",
     metadata = {}
 } = {}) => {
+    if (documentCategory) {
+        const exactCat = CATEGORY_ALIASES.get(toText(documentCategory).trim().toLowerCase());
+        if (exactCat) return exactCat;
+    }
+
     const storagePathParts = pathSegments(storagePath);
     const lastPathPart = storagePathParts[storagePathParts.length - 1] || "";
     const storageFolders = storagePathParts.length > 1 && /\.[a-z0-9]{1,8}$/i.test(lastPathPart)
@@ -74,7 +79,7 @@ const resolveKnowledgeCategory = ({
         return "Crawled";
     }
 
-    const sourceText = [documentCategory, originalName, ...storageSegments].map(toText).join(" ");
+    const sourceText = [documentCategory, originalName, ...storageSegments].map(toText).join(" ").replace(/[_\-.]+/g, " ");
     for (const [category, rule] of CONTENT_RULES) {
         if (rule.test(sourceText)) return category;
     }

@@ -423,8 +423,12 @@ const runIndexingPipeline = async (documentId, initialBuffer = null, options = {
 
         const ext = path.extname(document.originalName || "").toLowerCase();
         const isPdf = document.mimeType === "application/pdf" || ext === ".pdf";
-        const isImage = document.mimeType && document.mimeType.startsWith("image/");
+        const imageExts = [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff", ".tif", ".gif"];
+        const isImage = (document.mimeType && document.mimeType.startsWith("image/")) || imageExts.includes(ext);
         const splitter = new RecursiveCharacterTextSplitter();
+
+        // STAGE: Extraction (15%)
+        await updateStage("processing", isImage ? "OCR-processing: Extracting text from image" : "Extraction", 15);
 
         if (isPdf) {
             let parsed;
@@ -489,8 +493,8 @@ const runIndexingPipeline = async (documentId, initialBuffer = null, options = {
 
             text = extracted.text || "";
             if (text.trim().length === 0) {
-                const err = new Error("Extraction returned empty text (Empty or unreadable file).");
-                err.errorCode = "EMPTY_DOCUMENT";
+                const err = new Error(isImage ? "Image OCR extracted no readable text. Please upload an image with clear legible text." : "Extraction returned empty text (Empty or unreadable file).");
+                err.errorCode = isImage ? "NO_READABLE_TEXT" : "EMPTY_DOCUMENT";
                 throw err;
             }
 
@@ -550,27 +554,34 @@ const runIndexingPipeline = async (documentId, initialBuffer = null, options = {
             chunkStats: { totalChunks: rawChunks.length, pageCount }
         });
 
-        // Deterministic metadata and keyword extraction (never blocks indexing)
+        // Deterministic metadata and keyword extraction (never calls LLM to avoid CPU stalls and queue blocking)
+        academicEntities = [];
+        const seenProgs = new Set();
         rawChunks.forEach((chunk) => {
             try {
                 chunk.searchMetadata = extractSearchMetadata(chunk.content, { originalName: document.originalName });
+                if (chunk.searchMetadata?.programs) {
+                    chunk.searchMetadata.programs.forEach(prog => {
+                        const lower = String(prog || "").toLowerCase();
+                        if (lower && !seenProgs.has(lower)) {
+                            seenProgs.add(lower);
+                            academicEntities.push({
+                                degree: prog.includes("B.Tech") ? "B.Tech" : (prog.includes("BCA") ? "BCA" : null),
+                                programme: prog,
+                                department: document.department || null,
+                                aliases: [prog],
+                                institution: document.institution || null,
+                                specialisation: null,
+                                academic_level: null,
+                                category: document.category || null
+                            });
+                        }
+                    });
+                }
             } catch (metaErr) {
                 chunk.searchMetadata = { keywords: [], programs: [], departments: [] };
             }
         });
-
-        // Optional llama.cpp entity extraction fallback (never blocks if failed or offline)
-        try {
-            const entityExtractionService = require("./entityExtractionService");
-            academicEntities = await withTimeout(
-                entityExtractionService.extractAcademicMetadata(text),
-                30000,
-                "llama.cpp entity extraction timed out"
-            );
-        } catch (entityErr) {
-            console.warn("[INDEX] llama.cpp entity extraction skipped (fallback to deterministic keywords):", entityErr.message);
-            academicEntities = [];
-        }
 
         const chunkIds = rawChunks.map((_, index) => deterministicChunkId(documentId, index));
         const relationships = buildChunkRelationships(rawChunks, chunkIds, { documentId });

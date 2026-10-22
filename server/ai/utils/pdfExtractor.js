@@ -113,6 +113,7 @@ const extractText = async (pdfBuffer) => {
 
     const pure = toPureUint8(pdfBuffer);
     const pageTexts = [];
+    let sharedOcrWorker = null;
 
     // PDFJS Operator list codes corresponding to image rendering
     const IMAGE_OPS = new Set([
@@ -128,6 +129,18 @@ const extractText = async (pdfBuffer) => {
         90  // paintSolidColorImageMask
     ]);
 
+    const getOcrWorker = async () => {
+        if (!sharedOcrWorker) {
+            const { createWorker } = require("tesseract.js");
+            const serverDir = path.resolve(__dirname, "../../");
+            sharedOcrWorker = await createWorker("eng", 1, {
+                langPath: serverDir,
+                gzip: false
+            });
+        }
+        return sharedOcrWorker;
+    };
+
     const renderPage = async (pageData) => {
         const textContent = await pageData.getTextContent();
         let lastY;
@@ -142,67 +155,62 @@ const extractText = async (pdfBuffer) => {
             lastY = item.transform[5];
         }
 
-        let hasImage = false;
-        const imageObjs = [];
-        try {
-            const operatorList = await pageData.getOperatorList();
-            if (operatorList && operatorList.fnArray) {
-                for (let i = 0; i < operatorList.fnArray.length; i++) {
-                    const fnId = operatorList.fnArray[i];
-                    if (IMAGE_OPS.has(fnId)) {
-                        hasImage = true;
-                        const arg = operatorList.argsArray[i]?.[0];
-                        if (arg && typeof arg === "string") {
-                            imageObjs.push(arg);
-                        }
-                    }
-                }
-            }
-        } catch (opError) {
-            console.warn(`[PDF Extractor] Page ${pageData.pageNumber} operator list fetch failed: ${opError.message}`);
-        }
-
         let trimmedText = text.trim();
+        let hasImage = false;
         let isOcr = false;
 
-        // If page has insufficient embedded text but contains image objects, run local Tesseract OCR
-        if (trimmedText.length < 50 && hasImage && imageObjs.length > 0) {
-            const savedDoc = global.document;
-            const savedWin = global.window;
-            delete global.document;
-            delete global.window;
-
+        // Only inspect operator lists and scan image objects IF the page lacks sufficient text.
+        // Ordinary digital PDFs skip this entirely, avoiding expensive operator parsing and unnecessary OCR.
+        if (trimmedText.length < 50) {
+            const imageObjs = [];
             try {
-                const { createWorker } = require("tesseract.js");
-                const serverDir = path.resolve(__dirname, "../../");
-
-                for (const imgName of imageObjs) {
-                    try {
-                        const img = await new Promise((resolve) => pageData.objs.get(imgName, resolve));
-                        if (img && img.data && img.width > 50 && img.height > 50) {
-                            const bmp = rgbaToBmp(img.data, img.width, img.height);
-                            const worker = await createWorker("eng", 1, {
-                                langPath: serverDir,
-                                gzip: false
-                            });
-                            const ocrResult = await worker.recognize(bmp);
-                            await worker.terminate();
-
-                            const ocrText = ocrResult?.data?.text?.trim() || "";
-                            if (ocrText.length > 0) {
-                                trimmedText = trimmedText ? `${trimmedText}\n\n${ocrText}` : ocrText;
-                                isOcr = true;
+                const operatorList = await pageData.getOperatorList();
+                if (operatorList && operatorList.fnArray) {
+                    for (let i = 0; i < operatorList.fnArray.length; i++) {
+                        const fnId = operatorList.fnArray[i];
+                        if (IMAGE_OPS.has(fnId)) {
+                            hasImage = true;
+                            const arg = operatorList.argsArray[i]?.[0];
+                            if (arg && typeof arg === "string") {
+                                imageObjs.push(arg);
                             }
                         }
-                    } catch (singleImgErr) {
-                        console.warn(`[PDF Extractor] Local OCR on image ${imgName} failed: ${singleImgErr.message}`);
                     }
                 }
-            } catch (tessInitErr) {
-                console.warn(`[PDF Extractor] Failed to initialize local Tesseract worker: ${tessInitErr.message}`);
-            } finally {
-                if (savedDoc !== undefined) global.document = savedDoc;
-                if (savedWin !== undefined) global.window = savedWin;
+            } catch (opError) {
+                console.warn(`[PDF Extractor] Page ${pageData.pageNumber} operator list fetch failed: ${opError.message}`);
+            }
+
+            if (hasImage && imageObjs.length > 0) {
+                const savedDoc = global.document;
+                const savedWin = global.window;
+                delete global.document;
+                delete global.window;
+
+                try {
+                    const worker = await getOcrWorker();
+                    for (const imgName of imageObjs) {
+                        try {
+                            const img = await new Promise((resolve) => pageData.objs.get(imgName, resolve));
+                            if (img && img.data && img.width > 50 && img.height > 50) {
+                                const bmp = rgbaToBmp(img.data, img.width, img.height);
+                                const ocrResult = await worker.recognize(bmp);
+                                const ocrText = ocrResult?.data?.text?.trim() || "";
+                                if (ocrText.length > 0) {
+                                    trimmedText = trimmedText ? `${trimmedText}\n\n${ocrText}` : ocrText;
+                                    isOcr = true;
+                                }
+                            }
+                        } catch (singleImgErr) {
+                            console.warn(`[PDF Extractor] Local OCR on image ${imgName} failed: ${singleImgErr.message}`);
+                        }
+                    }
+                } catch (tessInitErr) {
+                    console.warn(`[PDF Extractor] Failed to initialize local Tesseract worker: ${tessInitErr.message}`);
+                } finally {
+                    if (savedDoc !== undefined) global.document = savedDoc;
+                    if (savedWin !== undefined) global.window = savedWin;
+                }
             }
         }
 
@@ -225,6 +233,13 @@ const extractText = async (pdfBuffer) => {
     } catch (parseError) {
         console.error(`[PDF Extractor] pdf-parse failed: ${parseError.message}`);
         throw new Error(`PDF parsing failed: ${parseError.message}`);
+    } finally {
+        if (sharedOcrWorker) {
+            try {
+                await sharedOcrWorker.terminate();
+            } catch (_) {}
+            sharedOcrWorker = null;
+        }
     }
 
     // Handle edge case where pagerender did not capture any pages

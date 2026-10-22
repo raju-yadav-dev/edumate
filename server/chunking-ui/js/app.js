@@ -14,6 +14,7 @@ const state = {
     selectedStoragePaths: new Set(),
     categories: [],
     stagedFiles: [], // Array of { file, relPath, name, size, type }
+    trackedUploads: [], // Array of { id, name, size, category, status, stage, progress, isImage, error }
     logs: [],
     logFilter: 'ALL',
     logSearch: '',
@@ -23,6 +24,19 @@ const state = {
     sseConnected: false,
     inputModalCallback: null
 };
+
+function isImageExtension(name) {
+    const ext = String(name || '').toLowerCase();
+    return ext.endsWith('.png') || ext.endsWith('.jpg') || ext.endsWith('.jpeg') || ext.endsWith('.webp');
+}
+
+function getFileIcon(name) {
+    if (isImageExtension(name)) return '🖼️';
+    const ext = String(name || '').toLowerCase();
+    if (ext.endsWith('.pdf')) return '📑';
+    if (ext.endsWith('.docx') || ext.endsWith('.doc')) return '📝';
+    return '📄';
+}
 
 // ==========================================
 // Initialization & Navigation
@@ -450,18 +464,47 @@ function initSSEStreams() {
 }
 
 function handleJobProgress(payload) {
-    if (!state.queue) return;
-    const docId = String(payload.documentId);
-    const existing = (state.queue.activeJobs || []).find(j => String(j.documentId) === docId);
-    if (existing) {
-        existing.progress = payload.progress;
-        existing.stage = payload.stage;
+    const docId = String(payload.documentId || '');
+    if (state.queue) {
+        const existing = (state.queue.activeJobs || []).find(j => String(j.documentId) === docId);
+        if (existing) {
+            existing.progress = payload.progress;
+            existing.stage = payload.stage;
+        }
     }
+
+    // Update tracked uploads in Upload Studio
+    if (state.trackedUploads && state.trackedUploads.length > 0) {
+        const tracked = state.trackedUploads.find(u => String(u.id) === docId || u.name === payload.fileName);
+        if (tracked) {
+            tracked.progress = payload.progress !== undefined ? payload.progress : tracked.progress;
+            tracked.stage = payload.stage || tracked.stage;
+            const stageLower = String(payload.stage || '').toLowerCase();
+            if (payload.status === 'completed' || payload.progress === 100) {
+                tracked.status = 'completed';
+                tracked.progress = 100;
+            } else if (payload.status === 'failed') {
+                tracked.status = 'failed';
+                tracked.error = payload.error || payload.stage || 'Processing failed';
+            } else if (stageLower.includes('ocr') || (tracked.isImage && stageLower.includes('extract'))) {
+                tracked.status = 'ocr_processing';
+            } else if (stageLower.includes('chunk') || stageLower.includes('clean')) {
+                tracked.status = 'chunking';
+            } else if (stageLower.includes('embed') || stageLower.includes('index') || stageLower.includes('saving')) {
+                tracked.status = 'indexing';
+            } else {
+                tracked.status = 'processing';
+            }
+            renderUploadPipelineTracker();
+        }
+    }
+
     // Refresh queue & analytics immediately upon job completion or failure
     if (payload.status === 'completed' || payload.status === 'failed') {
         fetchQueue();
         fetchAnalytics();
         fetchHealth();
+        if (state.activeTab === 'storage') fetchStorageTree();
     }
     if (state.activeTab === 'queue') {
         renderQueueView();
@@ -536,7 +579,7 @@ function renderStorageTree() {
                      oncontextmenu="handleFileContextMenu(event, '${escapeQuotes(nodePath)}', ${docId}, '${escapeQuotes(node.name)}')">
                     <span class="tree-indent" style="width: ${indent}px;"></span>
                     <input type="checkbox" ${isSelected ? 'checked' : ''} onclick="event.stopPropagation(); toggleNodeSelection('${escapeQuotes(nodePath)}')" style="margin-right: 6px; cursor: pointer;">
-                    <span>📄</span>
+                    <span>${getFileIcon(node.name)}</span>
                     <span style="font-weight: 500;">${escapeHtml(node.name)}</span>
                     <span class="node-meta">
                         <span class="tag-status ${statusClass}">${node.embeddingStatus || 'unindexed'}</span>
@@ -988,10 +1031,10 @@ async function handleDataTransferItems(items) {
     }
 }
 
-const SUPPORTED_EXTS = ['.pdf', '.docx', '.doc', '.txt', '.md', '.markdown'];
+const SUPPORTED_EXTS = ['.pdf', '.docx', '.doc', '.txt', '.md', '.markdown', '.png', '.jpg', '.jpeg', '.webp'];
 
 function isFileSupported(name) {
-    const lower = name.toLowerCase();
+    const lower = (name || '').toLowerCase();
     return SUPPORTED_EXTS.some(ext => lower.endsWith(ext));
 }
 
@@ -1010,7 +1053,7 @@ function stageFilesWithPaths(fileObjects) {
     const valid = fileObjects.filter(item => isFileSupported(item.name || item.file.name));
     
     if (valid.length === 0) {
-        alert('None of the selected files match supported formats (PDF, DOCX, TXT, MD).');
+        alert('None of the selected files match supported formats (PDF, DOCX, TXT, MD, PNG, JPG, JPEG, WEBP).');
         return;
     }
 
@@ -1056,7 +1099,7 @@ function renderStagedFiles() {
     list.innerHTML = state.stagedFiles.map((item, idx) => `
         <div class="staged-item">
             <div class="staged-item-info">
-                <span>📄</span>
+                <span>${getFileIcon(item.name || item.file.name)}</span>
                 <div>
                     <div style="font-weight: 600;">${escapeHtml(item.name || item.file.name)}</div>
                     ${item.relPath && item.relPath !== item.name ? `<div class="staged-item-path">${escapeHtml(item.relPath)}</div>` : ''}
@@ -1068,6 +1111,80 @@ function renderStagedFiles() {
             </div>
         </div>
     `).join('');
+}
+
+function renderUploadPipelineTracker() {
+    const tracker = document.getElementById('uploadPipelineTracker');
+    const list = document.getElementById('uploadPipelineList');
+    if (!tracker || !list) return;
+
+    if (!state.trackedUploads || state.trackedUploads.length === 0) {
+        tracker.style.display = 'none';
+        return;
+    }
+
+    tracker.style.display = 'block';
+
+    const getStatusBadge = (status, stage) => {
+        switch (status) {
+            case 'uploaded':
+                return '<span class="tag-status tag-queued">Uploaded</span>';
+            case 'queued':
+                return '<span class="tag-status tag-queued">Queued</span>';
+            case 'ocr_processing':
+                return '<span class="tag-status tag-processing">⚡ OCR-processing</span>';
+            case 'chunking':
+                return '<span class="tag-status tag-processing">⚡ Chunking</span>';
+            case 'indexing':
+                return '<span class="tag-status tag-processing">⚡ Indexing</span>';
+            case 'completed':
+                return '<span class="tag-status tag-completed">✓ Completed</span>';
+            case 'failed':
+                return '<span class="tag-status tag-failed">✖ Failed</span>';
+            default:
+                return `<span class="tag-status tag-processing">${escapeHtml(stage || 'Processing')}</span>`;
+        }
+    };
+
+    list.innerHTML = state.trackedUploads.map(doc => {
+        const isCompleted = doc.status === 'completed';
+        const isFailed = doc.status === 'failed';
+        const progressPct = doc.progress || (isCompleted ? 100 : (doc.status === 'uploaded' ? 5 : 20));
+
+        return `
+            <div style="display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; background: var(--bg-main); border: 1px solid var(--border); border-radius: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span>${getFileIcon(doc.name)}</span>
+                        <strong style="font-size: 0.88rem;">${escapeHtml(doc.name)}</strong>
+                        <span style="font-size: 0.75rem; color: var(--text-dim);">(${formatBytes(doc.size)})</span>
+                        <span style="font-size: 0.75rem; color: var(--text-muted); background: var(--bg-card); padding: 2px 6px; border-radius: 4px;">📂 ${escapeHtml(doc.category || 'general')}</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        ${getStatusBadge(doc.status, doc.stage)}
+                        ${isCompleted && doc.id ? `
+                            <button class="btn btn-sm btn-primary" onclick="openChunkDrawer('${doc.id}', '${escapeQuotes(doc.name)}')">🔍 View Chunks</button>
+                        ` : ''}
+                        ${isFailed && doc.id ? `
+                            <button class="btn btn-sm btn-accent" onclick="retrySingleDoc('${doc.id}')">🔁 Retry</button>
+                        ` : ''}
+                    </div>
+                </div>
+                <div style="font-size: 0.78rem; color: ${isFailed ? 'var(--danger)' : 'var(--text-muted)'}; display: flex; justify-content: space-between;">
+                    <span>${escapeHtml(doc.error || doc.stage || 'Processing in pipeline...')}</span>
+                    <span>${progressPct}%</span>
+                </div>
+                <div class="progress-bar-container" style="height: 4px; margin-top: 2px;">
+                    <div class="progress-bar ${isFailed ? 'bg-danger' : ''}" style="width: ${progressPct}%;"></div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function clearUploadPipelineTracker() {
+    state.trackedUploads = [];
+    renderUploadPipelineTracker();
 }
 
 async function startStagedUpload() {
@@ -1094,7 +1211,8 @@ async function startStagedUpload() {
 
     // Build relative path map
     const relPathsMap = {};
-    state.stagedFiles.forEach(item => {
+    const stagedSnapshot = state.stagedFiles.slice();
+    stagedSnapshot.forEach(item => {
         const f = item.file;
         formData.append('files', f);
         relPathsMap[f.name] = item.relPath || f.name;
@@ -1103,7 +1221,7 @@ async function startStagedUpload() {
     formData.append('relPaths', JSON.stringify(relPathsMap));
 
     try {
-        if (progressText) progressText.innerText = `Uploading ${state.stagedFiles.length} file(s)...`;
+        if (progressText) progressText.innerText = `Uploading ${stagedSnapshot.length} file(s)...`;
         if (progressBar) progressBar.style.width = '40%';
         if (progressPercent) progressPercent.innerText = '40%';
 
@@ -1120,9 +1238,44 @@ async function startStagedUpload() {
         if (json.success) {
             if (statusBox) {
                 statusBox.style.display = 'block';
-                statusBox.innerHTML = `✅ Successfully uploaded and queued <strong>${json.data.filesCount || state.stagedFiles.length}</strong> document(s) to <code>[${category}]</code>!`;
+                statusBox.innerHTML = `✅ Successfully uploaded and queued <strong>${json.data.filesCount || stagedSnapshot.length}</strong> document(s) to <code>[${category}]</code>!`;
                 statusBox.style.color = 'var(--accent)';
             }
+
+            // Track newly uploaded documents in pipeline tracker
+            if (json.data && Array.isArray(json.data.documents)) {
+                json.data.documents.forEach(doc => {
+                    const isImg = isImageExtension(doc.originalName);
+                    state.trackedUploads.unshift({
+                        id: doc._id,
+                        name: doc.originalName,
+                        size: doc.fileSize,
+                        category: doc.category || category,
+                        status: 'queued',
+                        stage: 'Queued in processing pipeline',
+                        progress: 5,
+                        isImage: isImg,
+                        error: null
+                    });
+                });
+            } else {
+                stagedSnapshot.forEach(item => {
+                    const isImg = isImageExtension(item.name || item.file?.name);
+                    state.trackedUploads.unshift({
+                        id: null,
+                        name: item.name || item.file?.name,
+                        size: item.size || item.file?.size || 0,
+                        category: category,
+                        status: 'queued',
+                        stage: 'Queued in processing pipeline',
+                        progress: 5,
+                        isImage: isImg,
+                        error: null
+                    });
+                });
+            }
+
+            renderUploadPipelineTracker();
             clearStagedFiles();
             fetchStorageTree();
             fetchQueue();

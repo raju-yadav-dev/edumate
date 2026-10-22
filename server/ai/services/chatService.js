@@ -1111,7 +1111,6 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
     // If the response is purely an ungrounded fallback message, clear citations and normalize
     const isPureFallback = (
         routeChosen !== "MIXED" &&
-        textResponse.length < 160 &&
         /\b(?:couldn'?t find matching information|no (?:matching )?information in the university knowledge base)\b/i.test(textResponse)
     );
     if (isPureFallback) {

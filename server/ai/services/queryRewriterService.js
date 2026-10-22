@@ -268,30 +268,40 @@ const analyzeQuery = async ({ question, historyText, conversationContext, user }
     if (departmentMatch) context.mentionedDepartment = departmentMatch[1].trim();
     if (/\bcse\b/i.test(originalQuestion)) context.mentionedDepartment = "CSE";
 
-    // 1. Fetch dynamic academic metadata from institutional documents database
+    // 1. Fetch dynamic academic metadata from institutional documents database (with in-memory cache)
+    const currentInst = user?.institution || "";
     let academicEntities = [];
-    try {
-        const mongoose = require("mongoose");
-        if (mongoose.connection && mongoose.connection.readyState === 1) {
-            const Document = require("../../models/Document");
-            const queryFilter = {
-                status: "active",
-                embeddingStatus: "indexed"
-            };
-            if (user && user.institution) {
-                queryFilter.institution = user.institution;
-            }
-            const docs = await Document.find(queryFilter).lean();
-            docs.forEach(doc => {
-                if (doc.metadata && Array.isArray(doc.metadata.academicEntities)) {
-                    doc.metadata.academicEntities.forEach(ent => {
-                        academicEntities.push(ent);
-                    });
+    if (global.academicEntitiesCache && global.academicEntitiesCache.expiresAt > Date.now() && global.academicEntitiesCache.institution === currentInst) {
+        academicEntities = global.academicEntitiesCache.data;
+    } else {
+        try {
+            const mongoose = require("mongoose");
+            if (mongoose.connection && mongoose.connection.readyState === 1) {
+                const Document = require("../../models/Document");
+                const queryFilter = {
+                    status: "active",
+                    embeddingStatus: "indexed"
+                };
+                if (user && user.institution) {
+                    queryFilter.institution = user.institution;
                 }
-            });
+                const docs = await Document.find(queryFilter).select("metadata.academicEntities").lean();
+                docs.forEach(doc => {
+                    if (doc.metadata && Array.isArray(doc.metadata.academicEntities)) {
+                        doc.metadata.academicEntities.forEach(ent => {
+                            academicEntities.push(ent);
+                        });
+                    }
+                });
+                global.academicEntitiesCache = {
+                    data: academicEntities,
+                    expiresAt: Date.now() + 60000,
+                    institution: currentInst
+                };
+            }
+        } catch (dbErr) {
+            console.error("[QueryRewriter] Failed to load academic entities:", dbErr.message);
         }
-    } catch (dbErr) {
-        console.error("[QueryRewriter] Failed to load academic entities:", dbErr.message);
     }
 
     // 2. Check for degree query ambiguity (e.g. asking "What is the B.Tech fee?" when multiple programmes exist)

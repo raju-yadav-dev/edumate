@@ -274,12 +274,14 @@ class SmartCacheHub {
         const cleanCat = String(category).trim().toLowerCase();
         console.log(`[SmartCacheHub:Invalidation] Cascading category invalidation: "${cleanCat}" across all layers`);
 
+        this.incrementKbVersion();
         this.l2.invalidateCategory(cleanCat);
         this.l3.invalidateCategory(cleanCat);
-        this.l4.invalidateCategory(cleanCat);
+        this.l4.clear();
         this.l5.invalidateCategory(cleanCat);
-        this.l6.invalidateCategory(cleanCat);
+        this.l6.clear();
         this.l7.invalidateCategory(cleanCat);
+        this.l7.clear();
         this.l10.invalidateCategory(cleanCat);
     }
 
