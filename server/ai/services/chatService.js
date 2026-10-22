@@ -202,8 +202,11 @@ const selectDiverseChunks = (rankedChunks, maxLimit = 6) => {
         const docId = chunk.metadata?.documentId || chunk.metadata?.originalName || chunk.metadata?.filename || "unknown";
         const count = docCount.get(docId) || 0;
 
-        // Allow up to 2 chunks from top direct-match document if relevant
-        if (count >= 2 && selected.length >= 3) {
+        // Allow up to half the maxLimit from any single document (minimum 3).
+        // This lets multi-section documents (fees, syllabus, eligibility) contribute
+        // multiple chunks without monopolising the full slot budget.
+        const perDocCap = Math.max(3, Math.floor(maxLimit / 2));
+        if (count >= perDocCap && selected.length >= Math.ceil(maxLimit / 2)) {
             continue;
         }
 
@@ -806,7 +809,10 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
         const RankingEngine = require("../../knowledge/RankingEngine");
         const rankedChunks = await RankingEngine.rerankCandidates(rewrittenQuery, retrievedChunksRaw, activeUser);
         const isCompare = recPrimaryIntent === "comparison" || String(rewrittenQuery).toLowerCase().includes("compare") || String(rewrittenQuery).toLowerCase().includes(" vs ");
-        const chunkLimit = (chatQueryPlan?.complexity === "high" || isCompare) ? 5 : 3;
+        // Use a wider chunk limit that reflects dynamic topK: comparisons need up to 8,
+        // multi-attribute queries (fee, syllabus, eligibility, etc.) need up to 6, others 4.
+        const isCourseDetail = /\b(?:fee|fees|eligibility|curriculum|subjects|duration|syllabus|career|semester|placement|scholarship)\b/i.test(rewrittenQuery);
+        const chunkLimit = isCompare ? 8 : (isCourseDetail ? 6 : 4);
 
         // If positive entity matches exist, exclude conflicting chunks with entityScore < 0 (Requirement 2 & 5)
         const positiveEntityMatches = rankedChunks.filter(c => c.rankingSignals && c.rankingSignals.entityScore > 0);
@@ -840,13 +846,13 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
         chunkIds: (combinedDocChunks || []).map(c => c.id || c.metadata?.chunkId || "chunk")
     });
 
-    // Verify that at least one distinctive topic/subject keyword appears in the retrieved chunks
+    // Verify that at least one distinctive topic/subject keyword appears in the retrieved chunks.
+    // Stop-words must NOT include domain-specific terms like "fee", "course", "program" — those ARE
+    // the meaningful tokens in university queries and must be allowed through the filter.
     const stopTopicWords = new Set([
-        "what", "is", "the", "for", "tell", "me", "show", "who", "where", "when", "why", "which", 
-        "are", "am", "a", "an", "of", "in", "on", "at", "to", "with", "by", "from", "and", "or", 
-        "about", "how", "much", "many", "does", "do", "can", "university", "college", "institute", 
-        "program", "programme", "course", "details", "information", "fee", "fees", "admission", 
-        "admissions", "at", "this", "please", "give", "provide", "dept", "department", "document"
+        "what", "is", "the", "for", "tell", "me", "show", "who", "where", "when", "why", "which",
+        "are", "am", "a", "an", "of", "in", "on", "at", "to", "with", "by", "from", "and", "or",
+        "about", "how", "much", "many", "does", "do", "can", "please", "give", "provide"
     ]);
     const topicSource = `${normalizedQuestion} ${rewrittenQuery || ""}`;
     const topicTokens = String(topicSource).toLowerCase()
@@ -863,7 +869,9 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
                 const fLower = String(chunk.metadata?.originalName || "").toLowerCase();
                 const dLower = String(chunk.metadata?.department || "").toLowerCase();
                 const pLower = String(chunk.metadata?.program || "").toLowerCase();
-                return cLower.includes(token) || hLower.includes(token) || fLower.includes(token) || dLower.includes(token) || pLower.includes(token);
+                const catLower = String(chunk.metadata?.category || "").toLowerCase();
+                return cLower.includes(token) || hLower.includes(token) || fLower.includes(token) ||
+                       dLower.includes(token) || pLower.includes(token) || catLower.includes(token);
             })
         );
     }

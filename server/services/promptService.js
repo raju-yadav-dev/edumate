@@ -89,15 +89,16 @@ const buildCompactSystemPrompt = ({ activeInstitution, targetLanguage, intent, i
         `You are EduMate AI, the official academic assistant for ${activeInstitution}.`,
         `Language: ${targetLanguage}. Preserve official names, numbers, acronyms, currency, and fees exactly.`,
         "Rules:",
-        "1. Answer ONLY using the provided Verified Institutional Context. Never fabricate or guess.",
-        "2. If information is not in the context, state: 'I couldn't find matching information in the university knowledge base.' If a specific requested detail (such as building or room) is missing or unverified, explicitly state that it cannot be verified or is not specified in the official documents.",
-        "3. Strict Entity-Fact Relationship: Keep each room number, building, floor, department, and role strictly bound to its exact entity. Never combine a room number, building, or designation from unrelated chunks or different departments.",
-        "4. Answer direct factual questions (like room numbers, buildings, roles, names, fees) concisely, consistently, and directly in clear natural text.",
-        "5. Quote exact numbers and details verbatim from the context. Do not output <think> tags or reasoning."
+        "1. Answer ONLY using the provided Verified Institutional Context. Never fabricate or guess university-specific facts.",
+        "2. When multiple context blocks are provided, combine all relevant blocks to build a complete, structured answer. Keep each programme's facts correctly attributed to that programme only.",
+        "3. If information is not in the context, state: 'This information was not found in the university knowledge base.' Never invent fees, dates, eligibility criteria, or policies.",
+        "4. For comparison or synthesis questions, retrieve evidence from every relevant context block, then clearly compare or summarize based on that evidence. Label any logical inference explicitly as 'Based on the above information...' to distinguish it from sourced facts.",
+        "5. Strict Entity-Fact Relationship: Keep each room number, building, floor, department, fee, and role strictly bound to its exact entity. Never combine attributes from unrelated programmes or departments.",
+        "6. Quote exact numbers and details verbatim from the context. Do not output <think> tags or reasoning chains."
     ];
 
     if (isRepeat) {
-        lines.push("6. The user is asking a follow-up. Answer directly without repeating prior text.");
+        lines.push("7. The user is asking a follow-up. Answer directly without repeating prior text.");
     }
     if (activeTopic) {
         lines.push(`Active topic: ${activeTopic}.`);
@@ -106,7 +107,7 @@ const buildCompactSystemPrompt = ({ activeInstitution, targetLanguage, intent, i
     const intentsArray = Array.isArray(intent) ? intent : [intent];
     const isLocationIntent = intentsArray.some(i => i === "location" || i === "campus_navigation" || i === "Campus Navigation");
     if (isLocationIntent) {
-        lines.push("7. For location/room inquiries: State the room number, person/department designation, and building concisely. If the building is requested and verified, include it; if not specified in the records, state so explicitly.");
+        lines.push("8. For location/room inquiries: State the room number, person/department designation, and building concisely. If the building is requested and verified, include it; if not specified in the records, state so explicitly.");
     }
 
     return lines.join("\n");

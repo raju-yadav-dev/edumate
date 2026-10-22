@@ -413,15 +413,17 @@ const buildSmartContext = (retrievedChunks, { question = "", queryPlan = null, m
     for (const block of structuredBlocks) {
         const blockTokens = block.tokens || countTokens(block.text);
 
-        if (selectedBlocks.length > 0 && (accumulatedTokens + blockTokens > tokenCeiling)) {
-            // Reached budget limit
+        if (accumulatedTokens + blockTokens > tokenCeiling) {
+            // Hard budget ceiling — stop collecting
             break;
         }
 
         selectedBlocks.push(block.text);
         accumulatedTokens += blockTokens;
 
-        if (accumulatedTokens >= adaptiveRule.targetTokens && selectedBlocks.length >= 2) {
+        // Soft stop: after reaching targetTokens, allow at least 3 blocks for
+        // multi-attribute queries; then break only if we have genuinely enough content.
+        if (accumulatedTokens >= adaptiveRule.targetTokens && selectedBlocks.length >= 3) {
             break;
         }
     }

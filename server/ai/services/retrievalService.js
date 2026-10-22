@@ -455,7 +455,11 @@ const computeMetadataScore = (queryPlan, chunk) => {
     if (queryPlan.program) {
         totalWeights += 0.25;
         const targetProg = queryPlan.program.toLowerCase();
-        if (chunkProg === targetProg || (metadata.programs && metadata.programs.includes(queryPlan.program))) {
+        const progMatch = chunkProg === targetProg ||
+            chunkProg.includes(targetProg) ||
+            targetProg.includes(chunkProg) ||
+            (metadata.programs && metadata.programs.map(p => String(p).toLowerCase()).includes(targetProg));
+        if (progMatch) {
             score += 0.25;
         }
     }

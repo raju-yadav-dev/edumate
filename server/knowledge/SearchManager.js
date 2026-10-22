@@ -37,7 +37,12 @@ const retrieveAndEnrichChunks = async (query, user, limit, ignoreInstitution = f
 
     const enriched = candidates.map(chunk => {
         const doc = docMap[chunk.metadata?.documentId?.toString()];
-        if (!doc && docs.length > 0) return null; // Discard chunks belonging to missing/deleted documents when DB returned results
+
+        // Only discard the chunk if the DB returned results AND the document is explicitly
+        // marked inactive (status !== 'active'). Never discard image/OCR chunks that are
+        // simply missing from the docMap because their documentId is not a valid ObjectId
+        // or the DB lookup returned 0 results (Qdrant-only index with no matching DB record).
+        if (doc && doc.status && doc.status !== "active") return null;
 
         // Map and preserve all required metadata fields
         const chunkId = chunk.id || "";
@@ -47,7 +52,11 @@ const retrieveAndEnrichChunks = async (query, user, limit, ignoreInstitution = f
         const university = doc?.institution || chunk.metadata?.institution || chunk.metadata?.university || "";
         const department = doc?.department || chunk.metadata?.department || "";
         const course = chunk.metadata?.course || doc?.metadata?.course || "";
-        const sourceType = chunk.metadata?.sourceType || (doc?.metadata?.uploadedFrom === "crawler" ? "url" : "document");
+        const rawSourceType = chunk.metadata?.sourceType || (doc?.metadata?.uploadedFrom === "crawler" ? "url" : "document");
+        // Image/OCR chunks are always treated as local documents, not crawler URLs
+        const isImageChunk = /^image\//i.test(chunk.metadata?.mimeType || "") ||
+            /\.(png|jpe?g|webp|gif|bmp|tiff?)$/i.test(originalName);
+        const sourceType = isImageChunk ? "document" : rawSourceType;
 
         return {
             ...chunk,
