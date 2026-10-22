@@ -125,13 +125,19 @@ const buildPlannerQdrantFilter = ({
 
     // 6. DocumentType filter
     if (queryPlan.documentType && !relaxDocType) {
-        must.push({
-            should: [
-                { key: "documentType", match: { value: queryPlan.documentType } },
-                { key: "documentType", match: { value: queryPlan.documentType.toLowerCase() } },
-                { key: "documentType", match: { value: "image" } }
-            ]
+        const dtShould = [
+            { key: "documentType", match: { value: queryPlan.documentType } },
+            { key: "documentType", match: { value: queryPlan.documentType.toLowerCase() } },
+            { key: "documentType", match: { value: "image" } }
+        ];
+        // Add common production aliases so strict filter doesn't zero-out on the first attempt.
+        // Many uploaded documents are indexed with generic values (academics, admission) rather
+        // than the canonical labels (Fee Structure, Admission Brochure, Syllabus).
+        const productionAliases = ["academics", "admission", "general", "document", "pdf"];
+        productionAliases.forEach(alias => {
+            dtShould.push({ key: "documentType", match: { value: alias } });
         });
+        must.push({ should: dtShould });
     }
 
     // 7. Heading filter

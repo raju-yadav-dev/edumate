@@ -120,8 +120,11 @@ const planQuery = (query, options = {}) => {
             documentType = "Admission Brochure";
         }
     } else if (hasFee) {
+        // Production fee documents are stored under both "Academics" and "Admissions" categories
+        // depending on how they were uploaded. Use a multi-value array so the should-clause
+        // in buildPlannerQdrantFilter matches either, avoiding the zero-result strict filter.
+        category = ["Academics", "Admissions"];
         documentType = "Fee Structure";
-        category = "Admissions";
     } else if (hasHostel) {
         category = "Hostel";
         documentType = "Hostel Rules";
