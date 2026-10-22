@@ -83,7 +83,7 @@ const buildPlannerQdrantFilter = ({
         return must.length > 0 ? { must } : undefined;
     }
 
-    // 3. Category filter (matches target category, lowercase variant, or 'general' repository files)
+    // 3. Category filter (matches target category, lowercase variant, 'general', or image/OCR chunks)
     if (queryPlan.category && !relaxCategory) {
         const catArray = Array.isArray(queryPlan.category) ? queryPlan.category : [queryPlan.category];
         const categoryShould = [];
@@ -91,7 +91,11 @@ const buildPlannerQdrantFilter = ({
             categoryShould.push({ key: "category", match: { value: cat } });
             categoryShould.push({ key: "category", match: { value: String(cat).toLowerCase() } });
         });
+        // Always include general, image, and empty-category chunks so OCR-derived content is never
+        // pre-filtered at the Qdrant level — reranking will down-score non-matching ones later.
         categoryShould.push({ key: "category", match: { value: "general" } });
+        categoryShould.push({ key: "category", match: { value: "image" } });
+        categoryShould.push({ key: "category", match: { value: "" } });
         must.push({ should: categoryShould });
     }
 

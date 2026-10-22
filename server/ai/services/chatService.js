@@ -1335,6 +1335,11 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
     // ==========================================
     // STAGE 12: FINAL RESPONSE SENT TO FRONTEND
     // ==========================================
+
+    // Structured per-stage latency breakdown (aids bottleneck diagnosis)
+    const totalMs = finalResult.responseTimeMs || 0;
+    console.log(`[LATENCY BREAKDOWN] Total: ${totalMs}ms | Qdrant: ${qdrantDuration}ms | Rerank: ${rerankTime}ms | LLM: ${llmDuration}ms | Remaining (plan+prompt+save): ${Math.max(0, totalMs - qdrantDuration - rerankTime - llmDuration)}ms`);
+
     console.log(`[STAGE 12: Final Response Sent to Frontend]`, {
         messageLength: finalResult.message.length,
         confidence: finalResult.confidence,

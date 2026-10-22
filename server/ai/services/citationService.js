@@ -436,12 +436,19 @@ const filterSupportingCitations = (citations, answerText, query = "") => {
         }
 
         // 4. Content overlap check for academic/informational questions (e.g. syllabus, criteria)
-        const stopWords = new Set(["the", "and", "is", "in", "at", "of", "for", "to", "a", "an", "this", "that", "it", "room", "number", "building", "university", "official"]);
+        const stopWords = new Set(["the", "and", "is", "in", "at", "of", "for", "to", "a", "an", "this", "that", "it", "room", "number", "building", "university", "official", "department", "college", "admission", "students", "student"]);
         const ansWords = lowerAns.replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(w => w.length > 3 && !stopWords.has(w));
         if (ansWords.length >= 4) {
             const matchedWords = ansWords.filter(w => fullSourceText.includes(w));
-            if ((matchedWords.length / ansWords.length) >= 0.45) {
-                return true;
+            // Require 55% word overlap AND at least 3 matched words to guard against
+            // false positives from vocabulary shared across all university documents.
+            if ((matchedWords.length / ansWords.length) >= 0.55 && matchedWords.length >= 3) {
+                // Additional numeric grounding: if the answer contains specific numbers
+                // (fees, counts, room numbers), verify at least one appears in the source.
+                const ansNums = lowerAns.match(/\b\d[\d,]{2,}\b/g) || [];
+                if (ansNums.length === 0) return true; // no numerics to verify
+                const hasMatchingNum = ansNums.some(n => fullSourceText.includes(n.replace(/,/g, "")));
+                return hasMatchingNum;
             }
         }
 

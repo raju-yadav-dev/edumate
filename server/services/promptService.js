@@ -189,7 +189,14 @@ const buildMessages = ({
     const memoryContext = formatOptimizedMemory(memory, historyText);
 
     // 3. Dynamic Prompt Budgeting
-    const maxAvailableContextTokens = Math.max(400, 1800 - systemTokens - countTokens(memoryContext) - countTokens(question) - 100);
+    // Max prompt cap is 2200 tokens: enough to hold system prompt (~150), history (~200),
+    // question (~50), and at least 700 tokens of multi-chunk evidence without truncation.
+    const MAX_PROMPT_TOKENS = 2200;
+    const MIN_CONTEXT_TOKENS = 700; // ensures fee tables and multi-section evidence fit
+    const maxAvailableContextTokens = Math.max(
+        MIN_CONTEXT_TOKENS,
+        MAX_PROMPT_TOKENS - systemTokens - countTokens(memoryContext) - countTokens(question) - 100
+    );
 
     // Insert retrieved context if chunks are provided
     let sourceContext = "";

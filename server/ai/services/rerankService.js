@@ -146,9 +146,11 @@ const rerank = async (query, chunks, queryPlan = null) => {
                 }
             } else if (tokenMatchRatio >= 0.7) {
                 entityScore += 0.25;
-            } else if (tokenMatchRatio === 0 && entityTokens.length > 0) {
-                // Completely unrelated entity in chunk when a specific entity was queried
-                entityScore -= 0.25;
+            } else if (tokenMatchRatio === 0 && entityTokens.length >= 2) {
+                // Only penalize if we have solid evidence (>=2 tokens) that this chunk is
+                // about a completely different entity. OCR/image chunks often have sparse
+                // metadata tokens — do not penalize them based on zero-token extraction.
+                entityScore -= 0.20;
             }
         }
 

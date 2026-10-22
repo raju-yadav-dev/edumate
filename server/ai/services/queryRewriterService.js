@@ -8,8 +8,44 @@ const queryOptimizer = require("./queryOptimizationService");
  * @param {string} params.historyText - Recent conversational history text
  * @returns {Promise<string>} - The rewritten standalone query
  */
+/**
+ * Returns true if the question likely needs LLM-based reference resolution
+ * (contains pronouns, vague references, or is too short to be standalone).
+ */
+const needsLlmRewrite = (question, historyText) => {
+    if (!historyText || !historyText.trim()) return false;
+
+    const q = String(question || "").toLowerCase().trim();
+    const wordCount = q.split(/\s+/).filter(Boolean).length;
+
+    // Very short queries (1-3 words) with no clear entity probably need context
+    if (wordCount <= 3) return true;
+
+    // Queries with clear pronoun/reference that needs resolution
+    const pronounPatterns = /\b(it|its|they|them|their|this|that|these|those|he|she|his|her|the same|the above|the course|the programme|the program|the degree|same as above)\b/i;
+    if (pronounPatterns.test(q)) return true;
+
+    // Vague follow-up openers without a concrete entity
+    const vagueFollowUps = /^(what about|how about|and the|what is its|and what|tell me more|more about|also|and|but|so what|any other|anything else)\b/i;
+    if (vagueFollowUps.test(q)) return true;
+
+    // Already self-contained: contains a recognised programme/department name or
+    // a clear institutional keyword — no LLM rewrite needed.
+    const selfContainedMarkers = /\b(bca|mca|b\.?tech|m\.?tech|bba|mba|b\.?sc|llb|diploma|fee|fees|admission|eligibility|hod|faculty|hostel|placement|scholarship|syllabus|notice|circular|building|room|floor|campus|brainware)\b/i;
+    if (selfContainedMarkers.test(q) && wordCount >= 5) return false;
+
+    // Default: skip LLM rewrite for longer explicit questions
+    return wordCount < 7;
+};
+
 const rewriteQuery = async ({ question, historyText }) => {
     if (!historyText || historyText.trim() === "") {
+        return question;
+    }
+
+    // Skip the LLM call when the question is already self-contained —
+    // this eliminates 15–30s of latency on every standalone turn.
+    if (!needsLlmRewrite(question, historyText)) {
         return question;
     }
 
@@ -436,8 +472,14 @@ const analyzeQuery = async ({ question, historyText, conversationContext, user }
     const rewrittenQuery = queryOptimizer.expandAliases(heuristicRewritten, { ...context, academicEntities });
     const subqueries = queryOptimizer.buildSubqueries(rewrittenQuery, intents, { ...context, academicEntities });
     const hasOwnEntity = queryOptimizer.hasExplicitEntity(originalQuestion);
-    if (hasOwnEntity && context.mentionedDepartment && !new RegExp(`\\b${context.mentionedDepartment.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}\\b`, "i").test(originalQuestion)) {
-        // Query has shifted to a new entity; reset stale department
+    // Only reset stale department context when the question explicitly names a DIFFERENT
+    // department/programme entity. Generic topical keywords like "fee" or "course" must not
+    // clear the inherited department, as hasExplicitEntity can fire on those too.
+    const namedEntityPattern = /\b(cse|css|bca|mca|b\.?tech|m\.?tech|bba|mba|b\.?sc|llb|ece|mechanical|civil|electrical|nursing|pharmacy|management|commerce|psychology|analytics|computational)\b/i;
+    const questionNamesNewDept = namedEntityPattern.test(originalQuestion);
+    if (hasOwnEntity && questionNamesNewDept && context.mentionedDepartment &&
+        !new RegExp(`\\b${context.mentionedDepartment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(originalQuestion)) {
+        // Query has shifted to a named new entity; reset stale department
         context.mentionedDepartment = null;
     }
     const entities = {
