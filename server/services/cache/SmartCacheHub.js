@@ -70,12 +70,29 @@ class UnifiedCacheHub {
         this._retrieverCache = new SimpleLRU(300, 15 * 60 * 1000);
         this._chunkCache = new SimpleLRU(500, 60 * 60 * 1000);
         this._contextCache = new SimpleLRU(200, 60 * 60 * 1000);
+        this._queryPlanCache = new SimpleLRU(200, 30 * 60 * 1000);
+        this._embeddingCache = new SimpleLRU(500, 60 * 60 * 1000);
 
         // Layer adapters preserving compatibility
         this.l1 = { get: () => null, set: () => {}, clear: () => {} };
-        this.l2 = { get: () => null, set: () => {}, clear: () => {} };
-        this.l3 = { get: () => null, set: () => {}, clear: () => {} };
-        this.l4 = { get: () => null, set: () => {}, clear: () => {} };
+        this.l2 = {
+            getQueryPlan: (q) => this._queryPlanCache.get(`qp_${q}`),
+            setQueryPlan: (q, plan) => this._queryPlanCache.set(`qp_${q}`, plan),
+            clear: () => this._queryPlanCache.clear()
+        };
+        this.l3 = {
+            get: (key) => this._embeddingCache.get(key),
+            set: (key, val, ttl) => this._embeddingCache.set(key, val, ttl),
+            getEmbedding: (text) => this._embeddingCache.get(`emb_${text}`),
+            setEmbedding: (text, emb) => this._embeddingCache.set(`emb_${text}`, emb),
+            _buildKey: (text) => `emb_${text}`,
+            clear: () => this._embeddingCache.clear()
+        };
+        this.l4 = {
+            getVectorSearch: () => null,
+            setVectorSearch: () => {},
+            clear: () => {}
+        };
 
         // L5: Chunks
         this.l5 = {
@@ -115,7 +132,7 @@ class UnifiedCacheHub {
         };
 
         this.l9 = { recordHit: () => {}, recordMiss: () => {}, clear: () => {} };
-        this.l10 = { pruneExpired: () => {}, clear: () => {} };
+        this.l10 = { get: () => null, set: () => {}, pruneExpired: () => {}, clear: () => {} };
     }
 
     getKbVersion() {
