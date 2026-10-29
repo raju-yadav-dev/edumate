@@ -378,6 +378,30 @@ const filterSupportingCitations = (citations, answerText, query = "") => {
     const buildingMatches = lowerAns.match(/\b(?:building\s+[ivx0-9]+|satyajit\s+bhavan)\b/gi) || [];
     const answerBuildings = new Set(buildingMatches.map(b => b.toLowerCase().trim()));
 
+    // Specialization & Programme definitions for precision grounding
+    const SPECIALIZATIONS = [
+        { id: "mwt", pattern: /\b(?:mwt|mobile\s+application(?:\s+and\s+web\s+technologies)?|web\s+technologies)\b/i },
+        { id: "ai_ml", pattern: /\b(?:ai\s*(&|\+|and)?\s*ml|aiml|artificial\s+intelligence\s+(?:&|and)?\s*machine\s+learning)\b/i },
+        { id: "robotics", pattern: /\b(?:robotics|ai\s*(&|\+|and)?\s*robotics)\b/i },
+        { id: "cyber_security", pattern: /\b(?:cyber\s*security|cyber\s+science)\b/i },
+        { id: "data_science", pattern: /\b(?:data\s+science|data\s+analytics)\b/i }
+    ];
+
+    const PROGRAM_PATTERNS = [
+        { id: "bca", pattern: /\b(?:bca|bachelor\s+of\s+computer\s+applications)\b/i },
+        { id: "b.tech", pattern: /\b(?:b\.?tech|bachelor\s+of\s+technology)\b/i },
+        { id: "m.tech", pattern: /\b(?:m\.?tech|master\s+of\s+technology)\b/i },
+        { id: "mca", pattern: /\b(?:mca|master\s+of\s+computer\s+applications)\b/i },
+        { id: "bba", pattern: /\b(?:bba|bachelor\s+of\s+business\s+administration)\b/i },
+        { id: "mba", pattern: /\b(?:mba|master\s+of\s+business\s+administration)\b/i },
+        { id: "b.sc", pattern: /\b(?:b\.?sc|bachelor\s+of\s+science)\b/i },
+        { id: "bpt", pattern: /\b(?:bpt|bachelor\s+of\s+physiotherapy)\b/i }
+    ];
+
+    const lowerQuery = (query || "").toLowerCase();
+    const querySpecs = SPECIALIZATIONS.filter(s => s.pattern.test(lowerQuery)).map(s => s.id);
+    const queryPrograms = PROGRAM_PATTERNS.filter(p => p.pattern.test(lowerQuery)).map(p => p.id);
+
     // Filter citations
     const supportedCitations = citations.filter(cite => {
         const title = String(cite.documentTitle || cite.title || "").toLowerCase();
@@ -385,9 +409,34 @@ const filterSupportingCitations = (citations, answerText, query = "") => {
         const snippet = String(cite.snippet || "").toLowerCase();
         const rawContent = String(cite.rawContent || cite.content || "").toLowerCase();
         const fullSourceText = `${title} ${heading} ${snippet} ${rawContent}`.trim();
+        const citeProg = String(cite.metadata?.program || cite.metadata?.course || "").toLowerCase();
 
-        // 1. If the answer claims specific room numbers (e.g. Room 206), verify that this citation actually contains that room
-        if (extractedNumbers.size > 0) {
+        // 0. Programme & Specialization Precision: Citations must match requested programme and specialization
+        if (queryPrograms.length > 0) {
+            const chunkPrograms = PROGRAM_PATTERNS.filter(p => p.pattern.test(fullSourceText) || citeProg.includes(p.id)).map(p => p.id);
+            if (chunkPrograms.length > 0 && !chunkPrograms.some(p => queryPrograms.includes(p))) {
+                return false;
+            }
+
+            const chunkSpecs = SPECIALIZATIONS.filter(s => s.pattern.test(fullSourceText)).map(s => s.id);
+            if (chunkSpecs.length > 0) {
+                if (querySpecs.length === 0) {
+                    return false;
+                }
+                if (!chunkSpecs.some(s => querySpecs.includes(s))) {
+                    return false;
+                }
+            }
+        } else if (querySpecs.length > 0) {
+            const chunkSpecs = SPECIALIZATIONS.filter(s => s.pattern.test(fullSourceText)).map(s => s.id);
+            if (chunkSpecs.length > 0 && !chunkSpecs.some(s => querySpecs.includes(s))) {
+                return false;
+            }
+        }
+
+        // 1. If the query asks for campus locations/rooms and the answer claims specific room numbers, verify that this citation actually contains that room
+        const isLocationQuery = /\b(?:room|building|floor|office|cabin|where\s+is|which\s+building|which\s+floor|how\s+to\s+find)\b/i.test(query);
+        if (isLocationQuery && extractedNumbers.size > 0) {
             let matchesCitedNumber = false;
             for (const num of extractedNumbers) {
                 const numRegex = new RegExp(`\\b${num}\\b`, "i");
@@ -421,7 +470,9 @@ const filterSupportingCitations = (citations, answerText, query = "") => {
         // 2. Check dynamic entity match
         if (targetEntity) {
             const matchesEntity = fullSourceText.includes(targetEntity) || 
-                (targetTokens.length >= 2 && targetTokens.every(t => fullSourceText.includes(t)));
+                (targetTokens.length >= 2 && targetTokens.every(t => fullSourceText.includes(t))) ||
+                (/bca|bachelor\s+of\s+computer\s+applications/i.test(targetEntity) && /bca|bachelor\s+of\s+computer\s+applications/i.test(fullSourceText)) ||
+                (/b\.?tech|bachelor\s+of\s+technology/i.test(targetEntity) && /b\.?tech|bachelor\s+of\s+technology/i.test(fullSourceText));
             if (matchesEntity) {
                 return true;
             }
@@ -447,7 +498,7 @@ const filterSupportingCitations = (citations, answerText, query = "") => {
                 // (fees, counts, room numbers), verify at least one appears in the source.
                 const ansNums = lowerAns.match(/\b\d[\d,]{2,}\b/g) || [];
                 if (ansNums.length === 0) return true; // no numerics to verify
-                const hasMatchingNum = ansNums.some(n => fullSourceText.includes(n.replace(/,/g, "")));
+                const hasMatchingNum = ansNums.some(n => { const raw = n.replace(/,/g, ""); return fullSourceText.includes(n) || fullSourceText.includes(raw) || fullSourceText.replace(/[,.]/g, "").includes(raw); });
                 return hasMatchingNum;
             }
         }

@@ -7,8 +7,11 @@ const mapCategoryToDocumentType = (category) => {
     const mapping = {
         "admissions": "admission",
         "admission": "admission",
-        "fees": "fees",
-        "fee": "fees",
+        "fees": "Fee Structure",
+        "fee": "Fee Structure",
+        "fee structure": "Fee Structure",
+        "fees structure": "Fee Structure",
+
         "scholarships": "scholarship",
         "scholarship": "scholarship",
         "faculty": "faculty",

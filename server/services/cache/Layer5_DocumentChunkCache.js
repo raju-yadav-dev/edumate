@@ -14,6 +14,7 @@ const path = require("path");
 const BaseLRUCache = require("./BaseLRUCache");
 const layer10PersistentDiskCache = require("./Layer10_PersistentDiskCache");
 const localStorageManager = require("../../storage/localStorageManager");
+const paths = require("../../config/paths");
 
 class Layer5_DocumentChunkCache {
     constructor() {
@@ -34,7 +35,7 @@ class Layer5_DocumentChunkCache {
             enableCategoryTracking: true
         });
 
-        this.chunksDiskDir = path.join(localStorageManager.STORAGE_ROOT, "chunks");
+        this.chunksDiskDir = paths.CHUNKS_ROOT;
     }
 
     getDocumentChunks(documentId) {
@@ -56,7 +57,10 @@ class Layer5_DocumentChunkCache {
         }
 
         // 3. Storage chunks directory fallback
-        const chunkFilePath = path.join(this.chunksDiskDir, `${safeDocId}.chunks.json`);
+        let chunkFilePath = path.join(this.chunksDiskDir, `${safeDocId}.chunks.json`);
+        if (!fs.existsSync(chunkFilePath)) {
+            chunkFilePath = path.join(localStorageManager.STORAGE_ROOT, "chunks", `${safeDocId}.chunks.json`);
+        }
         if (fs.existsSync(chunkFilePath)) {
             try {
                 const raw = fs.readFileSync(chunkFilePath, "utf-8");
@@ -125,7 +129,8 @@ class Layer5_DocumentChunkCache {
         layer10PersistentDiskCache.delete("chunks", safeDocId);
 
         // Clean any single chunk entries for this doc
-        for (const key of this.singleChunkCache.store.keys()) {
+        const keys = this.singleChunkCache?.store ? Array.from(this.singleChunkCache.store.keys()) : [];
+        for (const key of keys) {
             if (key.startsWith(`chunk:${safeDocId}:`)) {
                 this.singleChunkCache.delete(key);
             }

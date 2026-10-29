@@ -31,7 +31,17 @@ const validateChunk = (chunk) => {
     if (isOnlyPageNumber(text)) return { valid: false, reason: "page-number-only" };
     if (isOnlyHeaderFooter(text)) return { valid: false, reason: "header-footer-only" };
     if (isOcrGarbage(text)) return { valid: false, reason: "ocr-garbage" };
-    if (text.length < 50) return { valid: false, reason: "less-than-50-characters" };
+    if (text.length < 50) {
+        // Valid short chunks contain key-value facts, numbers/dates, table rows, or list entries
+        const hasKeyValue = /\b[A-Za-z0-9\s()/-]{2,25}\s*:\s*\S+/.test(text);
+        const hasTableSyntax = text.includes("|") || /\S+\s{2,}\S+/.test(text);
+        const hasFactualNumbers = /\d+/.test(text) && text.length >= 15;
+        const isStructuredBullet = /^[-*•]\s+\S+/.test(text) && text.length >= 20;
+
+        if (!hasKeyValue && !hasTableSyntax && !hasFactualNumbers && !isStructuredBullet) {
+            return { valid: false, reason: "incomplete-fragment" };
+        }
+    }
     return { valid: true, text };
 };
 

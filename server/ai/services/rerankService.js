@@ -128,7 +128,7 @@ const rerank = async (query, chunks, queryPlan = null) => {
         let entityScore = 0;
 
         // Check target entity match using extracted entity and tokens
-        if (targetEntity) {
+        if (targetEntity && targetEntity.length > 2 && !stopWords.has(targetEntity)) {
             const targetLower = targetEntity.toLowerCase();
             const fullChunkText = `${filename} ${heading} ${content}`;
             const exactEntityMatch = fullChunkText.includes(targetLower);
@@ -151,6 +151,65 @@ const rerank = async (query, chunks, queryPlan = null) => {
                 // about a completely different entity. OCR/image chunks often have sparse
                 // metadata tokens — do not penalize them based on zero-token extraction.
                 entityScore -= 0.20;
+            }
+        }
+
+        const fullChunkLower = `${filename} ${heading} ${content}`.toLowerCase();
+
+        // Programme Exclusivity (Prevent cross-programme contamination e.g. B.Tech for BCA)
+        if (plan && plan.program) {
+            const targetProg = String(plan.program).toLowerCase();
+            const chunkProg = String(chunk.metadata?.program || chunk.metadata?.course || "").toLowerCase();
+            const chunkPrograms = Array.isArray(chunk.metadata?.programs) ? chunk.metadata.programs.map(p => String(p).toLowerCase()) : [];
+
+            const isSameProgram = chunkProg === targetProg || 
+                                  chunkPrograms.includes(targetProg) || 
+                                  (targetProg === "bca" && (fullChunkLower.includes("bca") || fullChunkLower.includes("bachelor of computer applications"))) ||
+                                  (targetProg.includes("b.tech") && (fullChunkLower.includes("b.tech") || fullChunkLower.includes("btech") || fullChunkLower.includes("bachelor of technology")));
+
+            if (chunkProg && chunkProg !== "unknown" && chunkProg !== targetProg && !chunkProg.includes(targetProg) && !chunkPrograms.includes(targetProg)) {
+                entityScore -= 0.40;
+            } else if (isSameProgram) {
+                entityScore += 0.30;
+            }
+        }
+
+        // Specialization Precision & Exclusivity (e.g. BCA vs BCA MWT, B.Tech CSE vs B.Tech CSE AI/ML)
+        const SPECIALIZATIONS = [
+            { id: "mwt", pattern: /\b(?:mwt|mobile\s+application(?:\s+and\s+web\s+technologies)?|web\s+technologies)\b/i },
+            { id: "ai_ml", pattern: /\b(?:ai\s*(&|\+|and)?\s*ml|aiml|artificial\s+intelligence\s+(?:&|and)?\s*machine\s+learning)\b/i },
+            { id: "robotics", pattern: /\b(?:robotics|ai\s*(&|\+|and)?\s*robotics)\b/i },
+            { id: "cyber_security", pattern: /\b(?:cyber\s*security|cyber\s+science)\b/i },
+            { id: "data_science", pattern: /\b(?:data\s+science|data\s+analytics)\b/i }
+        ];
+
+        const querySpecs = SPECIALIZATIONS.filter(s => s.pattern.test(lowerQuery)).map(s => s.id);
+        const chunkSpecs = SPECIALIZATIONS.filter(s => s.pattern.test(fullChunkLower)).map(s => s.id);
+
+        if (chunkSpecs.length > 0) {
+            if (querySpecs.length === 0) {
+                // User asked for base/general programme without specialization: strictly penalize unrequested specializations
+                entityScore -= 0.45;
+            } else {
+                const hasMatchingSpec = chunkSpecs.some(s => querySpecs.includes(s));
+                const hasConflictingSpec = chunkSpecs.some(s => !querySpecs.includes(s));
+                if (hasMatchingSpec && !hasConflictingSpec) {
+                    entityScore += 0.45;
+                } else if (hasConflictingSpec) {
+                    entityScore -= 0.45;
+                }
+            }
+        } else if (querySpecs.length > 0) {
+            // Specific specialization was requested, but chunk has no specialization
+            entityScore -= 0.25;
+        }
+
+        // Fee Structure & Schedule Precision
+        const isFeeIntent = plan.intent === "FEE_QUERY" || plan.documentType === "Fee Structure" || /\b(?:fee|fees)\b/i.test(lowerQuery);
+        if (isFeeIntent) {
+            const hasFeeSchedule = /\b(?:total\s+course\s+fee|fee\s+card|semester\s*1)\b/i.test(fullChunkLower);
+            if (hasFeeSchedule) {
+                entityScore += 0.40;
             }
         }
 
@@ -186,11 +245,13 @@ const rerank = async (query, chunks, queryPlan = null) => {
         }
         
         // Combined Base Score (40% semantic + 25% keyword + 20% metadata + entity precision)
-        const baseScore = Math.max(0, Math.min(1, (0.40 * semanticScore) + (0.25 * keywordScore) + (0.20 * metadataScore) + entityScore));
+        const rawScore = (0.40 * semanticScore) + (0.25 * keywordScore) + (0.20 * metadataScore) + entityScore;
+        const baseScore = Math.max(0, Math.min(1, rawScore));
         
         return {
             ...chunk,
             initialScore: parseFloat(initialScore.toFixed(4)),
+            rawScore: parseFloat(rawScore.toFixed(4)),
             baseScore: parseFloat(baseScore.toFixed(4)),
             score: parseFloat(baseScore.toFixed(4)),
             rerankScore: parseFloat(baseScore.toFixed(4)),
@@ -205,7 +266,7 @@ const rerank = async (query, chunks, queryPlan = null) => {
     });
     
     // Sort by base score before applying section preference
-    scoredChunks.sort((a, b) => b.baseScore - a.baseScore);
+    scoredChunks.sort((a, b) => b.rawScore !== a.rawScore ? b.rawScore - a.rawScore : b.baseScore - a.baseScore);
     
     // Apply Section Preference (Anchor coherence bonus without allowing secondary chunks to leapfrog the anchor)
     const anchor = scoredChunks[0];

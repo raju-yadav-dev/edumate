@@ -244,7 +244,15 @@ async function deleteDocumentChunks(documentId) {
  * Replaces chunk file on re-chunking.
  */
 async function replaceDocumentChunks(documentId, chunks, docMeta) {
-    await deleteDocumentChunks(documentId);
+    // Invalidate caches before replacement
+    try {
+        const smartCacheHub = require("../services/cache/SmartCacheHub");
+        if (smartCacheHub?.l5?.invalidateDocument) {
+            smartCacheHub.l5.invalidateDocument(documentId);
+        }
+    } catch (_) {}
+
+    // Atomic write via temp file (safe: does not destroy existing file if saving throws)
     return await saveDocumentChunks(documentId, chunks, docMeta);
 }
 
@@ -443,11 +451,30 @@ function searchLocalChunks(queryText = "", filters = {}, limit = 30) {
                     if (filters.program && (chunkProg.includes(String(filters.program).toLowerCase()) || contentLower.includes(String(filters.program).toLowerCase()))) {
                         score += 3.0;
                     }
-                    if (filters.category && chunkCat.includes(String(filters.category).toLowerCase())) {
-                        score += 2.0;
+                    if (filters.category) {
+                        const filterCategories = Array.isArray(filters.category)
+                            ? filters.category.map(c => String(c).toLowerCase())
+                            : [String(filters.category).toLowerCase()];
+                        if (filterCategories.some(fc => chunkCat === fc || chunkCat.includes(fc) || fc.includes(chunkCat))) {
+                            score += 2.0;
+                        }
                     }
-                    if (filters.documentType && chunkDocType.includes(String(filters.documentType).toLowerCase())) {
-                        score += 2.0;
+                    if (filters.documentType) {
+                        const targetDocType = String(filters.documentType).toLowerCase();
+                        if (chunkDocType.includes(targetDocType) || (targetDocType.includes("fee") && (chunkCat === "fees" || chunkKeywords.some(k => k.includes("fee"))))) {
+                            score += 2.5;
+                        }
+                    }
+
+                    // Special fee query alignment: prioritize actual fee cards / fee schedules over generic text
+                    const isFeeQuery = tokens.includes("fee") || tokens.includes("fees") || String(filters.documentType || "").toLowerCase().includes("fee");
+                    if (isFeeQuery) {
+                        const hasFeeTable = contentLower.includes("total course fee") || contentLower.includes("fee card") || (contentLower.includes("semester 1") && contentLower.includes("semester 2"));
+                        if (hasFeeTable) {
+                            score += 15.0;
+                        } else if (chunkCat === "fees" || chunkKeywords.some(k => k.includes("fee"))) {
+                            score += 4.0;
+                        }
                     }
 
                     if (score > 0 && matchedTerms > 0) {
@@ -457,7 +484,7 @@ function searchLocalChunks(queryText = "", filters = {}, limit = 30) {
                         results.push({
                             id: chunk.chunkId || `${docId}_${chunk.chunkIndex}`,
                             content: chunk.content,
-                            score: Math.min(1.0, finalScore),
+                            score: finalScore,
                             metadata: {
                                 ...meta,
                                 documentId: docId,

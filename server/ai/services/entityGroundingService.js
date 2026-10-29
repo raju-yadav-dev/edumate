@@ -58,7 +58,7 @@ function extractQueryTarget(question = "", conversationContext = null) {
 
     // Pattern 2: "What is the room number of [Entity]?" / "room of [Entity]" / "building of [Entity]" / "fees of [Entity]"
     if (!targetEntity) {
-        const ofMatch = lower.match(/\b(?:room(?:\s+number)?|building|floor|office|head|hod|fee|fees|cost|eligibility|duration|details?)\s+(?:of|for|in)\s+(?:the\s+)?([^?.,!]+)/i);
+        const ofMatch = lower.match(/\b(?:room(?:\s+number)?|building|floor|office|head|hod|fee|fees|cost|eligibility|duration|details?)\s+(?:of|for|in)\s+(?:the\s+)?([^?,!]+)/i);
         if (ofMatch) {
             targetEntity = ofMatch[1].trim();
         }
@@ -93,8 +93,8 @@ function extractQueryTarget(question = "", conversationContext = null) {
 
     // Clean up trailing words from targetEntity (e.g. "vfx lab in", "vfx lab?")
     targetEntity = targetEntity
-        .replace(/\b(?:in|at|on|located|and|or|its|fees|fee)\b.*$/i, "")
-        .replace(/[?.,!]/g, "")
+        .replace(/\b(?:in|at|on|located|and|or|its|fees|fee)\s*$/i, "")
+        .replace(/[?,!]/g, "")
         .trim();
 
     // Check if this is a follow-up referring to the last entity
@@ -260,6 +260,15 @@ function parseChunkRecords(chunk) {
             foundSegments = true;
             const room = match[1].trim();
             let desc = match[2].trim();
+
+            // Ignore 4-digit years (1900-2099)
+            if (/^(?:19\d\d|20\d\d)$/.test(room)) continue;
+
+            // Ignore street addresses and non-room numbers
+            if (/^(?:road|street|lane|avenue|sarani|highway|nagar|sector|pin|kolkata|barasat|west bengal)\b/i.test(desc)) continue;
+
+            // Ignore fee/academic headings
+            if (/^(?:fee|fees|session|duration|semester|sem\b|course|admission|rs\.?|inr|total)\b/i.test(desc)) continue;
 
             let itemFloor = currentFloor;
             const itemFloorMatch = desc.match(/\b([0-9]+(?:st|nd|rd|th)\s+floor|ground\s+floor)\b/i);

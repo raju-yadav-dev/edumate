@@ -372,29 +372,29 @@ function Chat() {
             return;
         }
 
-        const map = { ...activeChildMap };
-        let changed = false;
+        setActiveChildMap((prevMap) => {
+            const map = { ...prevMap };
+            let changed = false;
 
-        const parentToChildren = {};
-        normalized.forEach(msg => {
-            const pId = msg.parentId || "root";
-            if (!parentToChildren[pId]) parentToChildren[pId] = [];
-            parentToChildren[pId].push(msg);
-        });
+            const parentToChildren = {};
+            normalized.forEach(msg => {
+                const pId = msg.parentId || "root";
+                if (!parentToChildren[pId]) parentToChildren[pId] = [];
+                parentToChildren[pId].push(msg);
+            });
 
-        Object.keys(parentToChildren).forEach(pId => {
-            const children = parentToChildren[pId];
-            if (children.length > 0) {
-                if (!map[pId] || !children.some(c => c.id === map[pId])) {
-                    map[pId] = children[children.length - 1].id;
-                    changed = true;
+            Object.keys(parentToChildren).forEach(pId => {
+                const children = parentToChildren[pId];
+                if (children.length > 0) {
+                    if (!map[pId] || !children.some(c => c.id === map[pId])) {
+                        map[pId] = children[children.length - 1].id;
+                        changed = true;
+                    }
                 }
-            }
-        });
+            });
 
-        if (changed) {
-            setActiveChildMap(map);
-        }
+            return changed ? map : prevMap;
+        });
     }, [activeThreadId, activeThread?.messages]);
 
     const activeBranchMessages = useMemo(() => {
@@ -547,13 +547,25 @@ function Chat() {
                         finalText += event.content;
                         setStreamingText((prev) => prev + event.content);
                     } else if (event.type === "done") {
-                        finalText = event.message || finalText;
+                        const finalMessageText = (finalText && finalText.trim().length > 0) ? finalText : (event.message || "");
+                        finalText = finalMessageText;
                         setStreamingText("");
                         setStreamingMessageId(null);
                         
                         if (event.conversationId) {
                             setConversationId(event.conversationId);
                         }
+
+                        setActiveChildMap(prev => {
+                            const next = { ...prev };
+                            if (finalParentId) {
+                                next[finalParentId] = uMsgId;
+                            } else {
+                                next["root"] = uMsgId;
+                            }
+                            next[uMsgId] = aMsgId;
+                            return next;
+                        });
                         
                         setThreads((currentThreads) => currentThreads.map((thread) => {
                             if (thread.id !== currentThreadId) {
@@ -566,7 +578,7 @@ function Chat() {
                                     if (m.id === aMsgId) {
                                         return {
                                             ...m,
-                                            content: event.message || finalText || m.content,
+                                            content: finalMessageText || m.content,
                                             sources: event.sources || [],
                                             confidence: event.confidence || "medium",
                                             mapData: event.mapData || null,
@@ -575,7 +587,7 @@ function Chat() {
                                     }
                                     return m;
                                 }),
-                                preview: event.message || thread.preview,
+                                preview: finalMessageText || thread.preview,
                                 updatedLabel: formatThreadLabel(new Date())
                             };
                         }));

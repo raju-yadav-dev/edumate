@@ -271,11 +271,14 @@ const mergeConsecutiveSectionChunks = (chunks) => {
 
             // Preserve and demarcate individual records within multi-record chunks generically (Requirement 2 & 3)
             try {
-                const parsed = parseChunkRecords(chunk);
-                const roomRecords = parsed.filter(r => r.room);
-                const isTable = String(chunk.content || "").includes("|");
-                // Only format as discrete record bullets if the chunk is specifically a multi-room directory listing or table
-                if (roomRecords.length >= 2 || (isTable && parsed.length >= 2)) {
+                const chunkMeta = chunk.metadata || {};
+                const isNavDoc = chunkMeta.category === "campus_nav" || /campus|navigation|building|floor|location/i.test(chunkMeta.category || "") || /building/i.test(chunkMeta.originalName || "") || chunk.campusMeta;
+                if (isNavDoc) {
+                    const parsed = parseChunkRecords(chunk);
+                    const roomRecords = parsed.filter(r => r.room);
+                    const isTable = String(chunk.content || "").includes("|");
+                    // Only format as discrete record bullets if the chunk is specifically a multi-room directory listing or table
+                    if (roomRecords.length >= 2 || (isTable && parsed.length >= 2)) {
                     const formattedRecords = parsed.map(rec => {
                         const parts = [];
                         if (rec.room) parts.push(`Room: ${rec.room}`);
@@ -293,6 +296,7 @@ const mergeConsecutiveSectionChunks = (chunks) => {
                         return `• ${parts.join(" | ")}`;
                     });
                     rawCleaned = formattedRecords.join("\n");
+                    }
                 }
             } catch (_) {}
 
@@ -333,6 +337,7 @@ const mergeConsecutiveSectionChunks = (chunks) => {
                     documentTitle: docGroup.title,
                     category: meta.category || docGroup.category,
                     department: meta.department || docGroup.department,
+                    program: meta.program || meta.course || (Array.isArray(meta.programs) ? meta.programs[0] : ""),
                     parentSection: meta.parentSection || "General",
                     heading: meta.heading || meta.parentHeading || sectionKey,
                     sectionKey,
@@ -356,6 +361,7 @@ const mergeConsecutiveSectionChunks = (chunks) => {
                 : `${pagesList[0] || 1}`;
 
             const headerParts = [`Document: ${section.documentTitle}`];
+            if (section.program) headerParts.push(`Program: ${section.program}`);
             if (section.category) headerParts.push(`Category: ${section.category}`);
             if (section.department) headerParts.push(`Department: ${section.department}`);
             if (section.parentSection && section.parentSection !== "General") headerParts.push(`Section: ${section.parentSection}`);

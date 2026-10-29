@@ -147,12 +147,19 @@ const extractText = async (pdfBuffer) => {
         let text = "";
 
         for (const item of textContent.items) {
-            if (lastY === item.transform[5] || !lastY) {
+            const currentY = item.transform[5];
+            if (lastY === undefined || !lastY) {
+                text += item.str;
+            } else if (Math.abs(lastY - currentY) < 2) {
+                // Same line: insert space if neither previous text ends with space nor current token starts with space
+                if (text.length > 0 && !/\s$/.test(text) && !/^\s/.test(item.str)) {
+                    text += " ";
+                }
                 text += item.str;
             } else {
                 text += "\n" + item.str;
             }
-            lastY = item.transform[5];
+            lastY = currentY;
         }
 
         let trimmedText = text.trim();

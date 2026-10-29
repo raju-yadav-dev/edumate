@@ -91,6 +91,10 @@ const buildPlannerQdrantFilter = ({
             categoryShould.push({ key: "category", match: { value: cat } });
             categoryShould.push({ key: "category", match: { value: String(cat).toLowerCase() } });
         });
+        if (queryPlan.documentType === "Fee Structure" || queryPlan.intent === "FEE_QUERY" || catArray.some(c => /fee/i.test(String(c)))) {
+            categoryShould.push({ key: "category", match: { value: "fees" } });
+            categoryShould.push({ key: "category", match: { value: "fee" } });
+        }
         // Always include general, image, and empty-category chunks so OCR-derived content is never
         // pre-filtered at the Qdrant level — reranking will down-score non-matching ones later.
         categoryShould.push({ key: "category", match: { value: "general" } });
@@ -133,7 +137,7 @@ const buildPlannerQdrantFilter = ({
         // Add common production aliases so strict filter doesn't zero-out on the first attempt.
         // Many uploaded documents are indexed with generic values (academics, admission) rather
         // than the canonical labels (Fee Structure, Admission Brochure, Syllabus).
-        const productionAliases = ["academics", "admission", "general", "document", "pdf"];
+        const productionAliases = ["academics", "admission", "fees", "fee", "fee structure", "general", "document", "pdf"];
         productionAliases.forEach(alias => {
             dtShould.push({ key: "documentType", match: { value: alias } });
         });
@@ -211,10 +215,12 @@ const retrieveRelevantChunks = async ({
 
                 let content = payload.content || "";
                 let localMeta = {};
-                if (!content && docId) {
+                if (docId) {
                     const localChunk = localChunkManager.getChunk(docId, chunkId);
                     if (localChunk) {
-                        content = localChunk.content || "";
+                        if (!content || (localChunk.content && localChunk.content.length > content.length)) {
+                            content = localChunk.content;
+                        }
                         localMeta = localChunk.metadata || {};
                     }
                 }
@@ -411,7 +417,16 @@ const computeKeywordScore = (query, chunk, queryPlan) => {
         }
     }
 
-    const rawKeywordScore = (termOverlapRatio * 0.80) + phraseBonus;
+    const isFeeQuery = queryTerms.includes("fee") || queryTerms.includes("fees") || queryPlan?.intent === "FEE_QUERY" || queryPlan?.documentType === "Fee Structure";
+    let feeBonus = 0;
+    if (isFeeQuery) {
+        const hasFeeSchedule = content.includes("total course fee") || content.includes("fee card") || /\bsemester\s*1\b/i.test(content) || chunkKeywords.some(k => k.includes("fee"));
+        if (hasFeeSchedule) {
+            feeBonus = 0.35;
+        }
+    }
+
+    const rawKeywordScore = (termOverlapRatio * 0.80) + phraseBonus + feeBonus;
     return Math.max(0, Math.min(1, rawKeywordScore));
 };
 
@@ -441,8 +456,9 @@ const computeMetadataScore = (queryPlan, chunk) => {
         const targetCats = Array.isArray(queryPlan.category)
             ? queryPlan.category.map(c => String(c).toLowerCase())
             : [String(queryPlan.category).toLowerCase()];
+        const isFeeIntent = queryPlan.intent === "FEE_QUERY" || queryPlan.documentType === "Fee Structure";
         const matchesCategory = targetCats.some(tc =>
-            chunkCat === tc || chunkCat.includes(tc) || tc.includes(chunkCat) || chunkCat === "general"
+            chunkCat === tc || chunkCat.includes(tc) || tc.includes(chunkCat) || chunkCat === "general" || (isFeeIntent && (chunkCat === "fees" || chunkCat === "fee"))
         );
         if (matchesCategory) {
             score += 0.25;
@@ -477,7 +493,10 @@ const computeMetadataScore = (queryPlan, chunk) => {
     // DocumentType match
     if (queryPlan.documentType) {
         totalWeights += 0.20;
-        if (chunkDocType === queryPlan.documentType.toLowerCase()) {
+        const targetDocType = queryPlan.documentType.toLowerCase();
+        const matchesDocType = chunkDocType === targetDocType ||
+            (targetDocType.includes("fee") && (chunkCat === "fees" || chunkCat === "fee" || chunkKeywords.some(k => k.includes("fee"))));
+        if (matchesDocType) {
             score += 0.20;
         }
     }
@@ -706,21 +725,33 @@ const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL
     const rawPool = [...semanticCandidates, ...keywordCandidates];
     filteredCount = rawPool.length;
 
-    const seenIds = new Set();
-    const seenSignatures = new Set();
-    const uniquePool = [];
+    const sigMap = new Map();
+    const idMap = new Map();
 
     for (const cand of rawPool) {
         const chunkId = String(cand.id || cand.metadata?.chunkId || "");
-        const sig = `${cand.metadata?.documentId || cand.metadata?.sourceDocumentId}_${cand.content.trim().slice(0, 80)}`;
+        const docId = String(cand.metadata?.documentId || cand.metadata?.sourceDocumentId || "");
+        const sig = docId + "_" + cand.content.trim().slice(0, 80);
 
-        if (chunkId && seenIds.has(chunkId)) continue;
-        if (seenSignatures.has(sig)) continue;
+        const existingSig = sigMap.get(sig);
+        const existingId = chunkId ? idMap.get(chunkId) : null;
+        const existing = existingSig || existingId;
 
-        if (chunkId) seenIds.add(chunkId);
-        seenSignatures.add(sig);
-        uniquePool.push(cand);
+        if (!existing) {
+            sigMap.set(sig, cand);
+            if (chunkId) idMap.set(chunkId, cand);
+        } else if ((cand.content?.length || 0) > (existing.content?.length || 0)) {
+            const oldSig = String(existing.metadata?.documentId || existing.metadata?.sourceDocumentId || "") + "_" + existing.content.trim().slice(0, 80);
+            const oldId = String(existing.id || existing.metadata?.chunkId || "");
+            sigMap.delete(oldSig);
+            if (oldId) idMap.delete(oldId);
+
+            sigMap.set(sig, cand);
+            if (chunkId) idMap.set(chunkId, cand);
+        }
     }
+
+    const uniquePool = Array.from(sigMap.values());
 
     // Jaccard similarity deduplication (threshold = 0.80)
     const deduplicated = jaccardDeduplicate(uniquePool, 0.80);
@@ -735,7 +766,18 @@ const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL
         const metadataScore = computeMetadataScore(queryPlan, chunk);
 
         // Weighted combination: 45% semantic, 25% keyword, 25% metadata
-        const baseScore = (0.45 * semanticScore) + (0.25 * keywordScore) + (0.25 * metadataScore);
+        let baseScore = (0.45 * semanticScore) + (0.25 * keywordScore) + (0.25 * metadataScore);
+
+        // Fee schedule bonus: prioritize authoritative fee cards / schedules over generic text
+        const isFeeIntent = queryPlan?.intent === "FEE_QUERY" || queryPlan?.documentType === "Fee Structure";
+        if (isFeeIntent) {
+            const contentLower = String(chunk.content || "").toLowerCase();
+            const chunkCat = String(chunk.metadata?.category || "").toLowerCase();
+            const hasFeeSchedule = contentLower.includes("total course fee") || contentLower.includes("fee card") || /\bsemester\s*1\b/i.test(contentLower) || chunkCat === "fees";
+            if (hasFeeSchedule) {
+                baseScore += 0.15;
+            }
+        }
 
         return {
             ...chunk,

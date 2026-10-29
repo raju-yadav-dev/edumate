@@ -125,7 +125,7 @@ class StructureAwareChunker {
                     type: "table",
                     text: tableContent,
                     headingText: headingLine,
-                    boundary: true,
+                    boundary: false,
                     atomic: true
                 });
                 continue;
@@ -313,9 +313,25 @@ class StructureAwareChunker {
     toMarkdownTable(lines) {
         const rows = lines
             .filter((line) => !this.isTableSeparator(line))
-            .map((line) => line.split(line.includes("|") ? "|" : /\t+/).map((cell) => cell.trim()).filter(Boolean));
+            .map((line) => {
+                if (line.includes("|")) {
+                    return line.split("|").map((cell) => cell.trim()).filter(Boolean);
+                }
+                if (line.includes("\t")) {
+                    return line.split(/\t+/).map((cell) => cell.trim()).filter(Boolean);
+                }
+                if (/\s{2,}/.test(line)) {
+                    return line.split(/\s{2,}/).map((cell) => cell.trim()).filter(Boolean);
+                }
+                return [line.trim()];
+            });
 
         if (!rows.length) return lines.join("\n");
+
+        const hasMultiCols = rows.some(r => r.length > 1);
+        if (!hasMultiCols) {
+            return lines.join("\n");
+        }
 
         const width = Math.max(...rows.map((row) => row.length));
         const normalized = rows.map((row) => Array.from({ length: width }, (_, index) => row[index] || ""));
@@ -332,8 +348,20 @@ class StructureAwareChunker {
     }
 
     isTable(line) {
-        return (line.includes("|") && line.split("|").length >= 3)
-            || (line.includes("\t") && line.split(/\t+/).length >= 2);
+        if (!line) return false;
+        if (line.includes("|") && line.split("|").length >= 3) return true;
+        if (line.includes("\t") && line.split(/\t+/).length >= 2) return true;
+
+        // Structured tabular patterns (common in OCR, fee structures, schedules, timetables)
+        if (/^(?:semesters?|particulars|course|item|description|components?)\b.*?\b(?:fees?|amount|due\s*date|date)/i.test(line)) return true;
+        if (/^(?:percentage|marks)\b.*?\b(?:scholarship|amount)/i.test(line)) return true;
+        if (/^(?:semester|sem\.?)\s+[0-9ivx]+[\s:.-]+[₹$Rs.]?\s*[\d,.]+/i.test(line)) return true;
+        if (/^(?:[^A-Za-z0-9]*[A-Za-z0-9]?\s*of\s+admission|:\s*[a-z])/i.test(line)) return true;
+        if (/^(?:total(?:\s+course)?\s+fee|grand\s+total)\b.*?[₹$Rs.]?\s*[\d,.]+/i.test(line)) return true;
+        if (/^(?:>=|>|<=|<)?\s*\d+%\s*.*?\b[\d,.]+/i.test(line)) return true;
+        if (/\S+(?:\s{2,}|\t+)\S+/.test(line) && /(?:[\d,.]+|admission|due\s+date|december|june|applicable)/i.test(line)) return true;
+
+        return false;
     }
 
     isList(line) {
@@ -341,18 +369,23 @@ class StructureAwareChunker {
     }
 
     isStructuredTableHeading(line) {
-        return /\b(?:fee\s+structure|fee\s+table|tuition\s+fees|fee\s+schedule|timetable|time\s+table|schedule\s+of\s+fees|hostel\s+fee|admission\s+fees?|salary\s+breakup|placement\s+table|course\s+schedule)\b/i.test(line)
+        return /\b(?:fee\s+card|fee\s+structure|fee\s+table|tuition\s+fees?|fee\s+schedule|timetable|time\s+table|schedule\s+of\s+fees|hostel\s+fee|admission\s+fees?|salary\s+breakup|placement\s+table|course\s+schedule|scholarship\s+eligibility|eligibility\s+criteria|scholarship\s+amount|semesters?\s+fees?)\b/i.test(line)
             && !/[.!?]$/.test(line);
     }
 
     isDomainSectionHeading(line) {
         if (!line || this.isList(line) || this.isTable(line) || line.length > 120 || /[.!?]$/.test(line)) return false;
+        // Continuation lines or clause fragments starting with conjunctions/prepositions are never headings
+        if (/^(?:[a-z]|[^A-Za-z0-9]*[A-Za-z0-9]?\s*(?:of|or|and|with|in|to|for|by|from|at|on|as)\b)/i.test(line)) return false;
+        if (/^(?:of|or|and|with|in|to|for|by|from|at|on|as|either|neither|both|each|such|which|that|who|mandatory)\b/i.test(line)) return false;
+        // Don't treat lines with fee amounts or table rows as section headings
+        if (/[\d,.]{4,}|(?:Rs\.?|₹)\s*\d+/i.test(line)) return false;
 
         const patterns = [
             /\b(?:admission|admissions|eligibility|application\s+procedure|selection\s+criteria)\b/i,
             /\b(?:fee\s+structure|tuition\s+fees|hostel\s+fee|payment\s+schedule|refund\s+policy)\b/i,
             /\b(?:faculty|professors?|head\s+of\s+department|hod|dean|teaching\s+staff)\b/i,
-            /\b(?:syllabus|curriculum|course\s+structure|subjects?|semester\s+[0-9ivx]+)\b/i,
+            /\b(?:syllabus|curriculum|course\s+structure|subjects?)\b/i,
             /\b(?:hostel\s+rules|hostel\s+regulations|mess\s+rules|accommodation)\b/i,
             /\b(?:placement\s+records?|placements|recruiters|career\s+services)\b/i,
             /\b(?:scholarships?|financial\s+aid|fee\s+waiver|fellowship)\b/i,
@@ -367,7 +400,9 @@ class StructureAwareChunker {
         if (!line || this.isList(line) || this.isTable(line)) return false;
         if (/^#{1,6}\s+/.test(line)) return true;
         if (/^\d+(?:\.\d+)*\s+[A-Z]/.test(line)) return true;
-        if (/^(?:Section|Chapter|Part|Module|Unit|Semester)\s+[0-9IVX]+/i.test(line)) return true;
+        if (/^(?:Section|Chapter|Part|Module|Unit)\s+[0-9IVX]+/i.test(line)) return true;
+        // Standalone or titled semester heading (no amounts)
+        if (/^Semester\s+[0-9IVX]+(?:\s*[:\-]\s*[A-Za-z]|\s*$)/i.test(line) && !/[\d,.]{4,}|(?:Rs\.?|₹)\s*\d+/i.test(line)) return true;
         if (/^[A-Z\s]{4,60}$/.test(line) && !line.includes(",") && !line.includes(".")) return true;
         return false;
     }

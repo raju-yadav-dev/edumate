@@ -116,8 +116,8 @@ const validateResponse = ({
                 let contradictionReason = "";
 
                 // Check 1: Room Number Consistency
-                if (bestRecord.room) {
-                    const genRoomMatch = generatedAnswer.match(/\b(?:room\s*(?:no\.?|number)?\s*|#\s*)?([0-9]{3,4}[a-z]?)\b/i);
+                if (requestedAttrs.asksRoom && bestRecord.room) {
+                    const genRoomMatch = generatedAnswer.match(/\b(?:room\s*(?:no\.?|number)?\s*|#\s*)([0-9]{3,4}[a-z]?)\b/i);
                     if (genRoomMatch) {
                         const claimedRoom = genRoomMatch[1];
                         if (claimedRoom !== bestRecord.room) {
