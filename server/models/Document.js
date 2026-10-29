@@ -122,6 +122,7 @@ const documentSchema = new mongoose.Schema(
                 "indexing",
                 "completed",
                 "indexed",
+                "partial",
                 "failed",
                 "cancelled",
                 "paused",

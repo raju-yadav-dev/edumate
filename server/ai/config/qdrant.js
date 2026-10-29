@@ -304,6 +304,15 @@ Embedding dimension: ${actualEmbeddingDimension}
 Qdrant dimension: ${qdrantDimension}
 Status: PASS
 `);
+
+        // Ensure payload field indexes for Qdrant filtering
+        const indexedFields = ["documentId", "sourceDocumentId", "category", "institution", "department", "documentType"];
+        for (const field of indexedFields) {
+            try {
+                await client.createPayloadIndex(collectionName, { field_name: field, field_schema: "keyword" });
+            } catch (_) {}
+        }
+
         isCollectionEnsured = true;
     } catch (e) {
         console.error(`Qdrant Connection Error: Unable to configure collection "${collectionName}": ${e.message}`);

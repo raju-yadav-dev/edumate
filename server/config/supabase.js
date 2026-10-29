@@ -39,3 +39,4 @@ if (createClient && process.env.CRAWLER_SUPABASE_URL && crawlerKey) {
 
 module.exports = supabase;
 module.exports.crawlerSupabase = crawlerSupabase;
+
