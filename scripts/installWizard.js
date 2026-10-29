@@ -31,10 +31,15 @@ console.log(`  ✓ Node.js v${nodeVersion} detected (Supported).\n`);
 console.log("📁 2. Initializing Local Storage & Cache Directories...");
 const requiredDirs = [
     "storage",
+    "storage/academics",
+    "storage/admissions",
+    "storage/fees",
+    "storage/hostel",
+    "storage/general",
     "storage/file_explorer",
-    "logs",
-    "llama.cpp",
-    "models"
+    "storage/.data",
+    "server/ai-models",
+    "llama.cpp"
 ];
 
 requiredDirs.forEach((dir) => {

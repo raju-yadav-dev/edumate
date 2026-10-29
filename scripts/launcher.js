@@ -131,23 +131,14 @@ async function startMasterLauncher() {
         formatStatus("Local LLM Runtime", "ACTIVE", 8080, "yellow");
     }
 
-    // B. Chunking Server (Port 5001)
-    const chunkingProcess = spawn("node", ["server/chunkingServer.js"], {
-        cwd: rootPath,
-        stdio: "pipe",
-        shell: true
-    });
-    runningProcesses.push({ name: "Chunking Server", process: chunkingProcess });
-    formatStatus("Chunking Microservice", "ONLINE", 5001, "green");
-
-    // C. Express Backend API (Port 5000)
+    // B. Express Backend API & Knowledge Studio (Port 5000)
     const backendProcess = spawn("node", ["server/server.js"], {
         cwd: rootPath,
         stdio: "pipe",
         shell: true
     });
     runningProcesses.push({ name: "Express Backend API", process: backendProcess });
-    formatStatus("Express Backend API", "ONLINE", 5000, "green");
+    formatStatus("Express API & Studio", "ONLINE", 5000, "green");
 
     // D. React Client Application (Port 5173)
     const clientProcess = spawn("npm", ["run", "dev", "--prefix", "client"], {
