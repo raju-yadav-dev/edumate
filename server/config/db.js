@@ -14,6 +14,9 @@ const configureDNSFallback = () => {
 };
 
 const connectDB = async () => {
+    if (process.env.MONGODB_URI && process.env.MONGODB_URI.startsWith("mongodb+srv://")) {
+        configureDNSFallback();
+    }
     const options = {
         serverSelectionTimeoutMS: 5000,
         connectTimeoutMS: 5000,
