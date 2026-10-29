@@ -33,6 +33,8 @@ build/
 llama.cpp/
 llama.cpp
 models/
+server/ai-models/*
+!server/ai-models/.gitkeep
 server/ai/ai-models/*
 backend/ai-models/*
 *.gguf
@@ -50,7 +52,12 @@ backend/ai-models/*
 # Local Storage, Chunks, Embeddings & Data Roots
 # ===============================================
 edumate-data/
-storage/
+storage/.data/
+storage/temp/
+storage/chunks/
+storage/cache/
+storage/embeddings/
+storage/backups/
 chunks/
 embeddings/
 backups/
@@ -58,6 +65,7 @@ temp/
 *.chunks.json
 *.cache.json
 *.cache.json.gz
+!.gitkeep
 
 # ===============================================
 # Uploads & Temporary Direct Files
@@ -107,6 +115,6 @@ Thumbs.db
 # ===============================================
 # Temporary / Scratch Files
 # ===============================================
-scratch/*
+scratch/
 *.tmp
 .codex_acl.probe.tmp

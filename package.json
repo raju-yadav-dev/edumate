@@ -7,44 +7,22 @@
     "server"
   ],
   "scripts": {
-    "edumate": "node scripts/startup.js",
-    "web": "npm run dev --prefix client",
-    "api": "node server/server.js",
-    "studio": "node server/chunkingServer.js",
-    "ingest": "node server/scripts/runChunkingWorker.js",
-    "reindex": "node scripts/migrateToJina.js",
-    "sync-storage": "node server/scripts/syncStorage.js",
-    "health": "node scripts/doctor.js",
-    "qa": "node tests/runner.js",
-    "backup": "node scripts/backupRestoreCenter.js --backup",
-    "restore": "node scripts/backupRestoreCenter.js --restore",
-    "clean-cache": "node scripts/clean.js",
-    "clean-studio": "node scripts/cleanStudio.js",
-    "reset-kb": "node scripts/resetKnowledgeBase.js",
     "dev": "node scripts/startup.js",
     "start": "node server/server.js",
     "server": "node server/server.js",
-    "chunking": "node server/chunkingServer.js",
-    "doctor": "node scripts/doctor.js",
     "client": "npm run dev --prefix client",
-    "client:dev": "npm run dev --prefix client",
+    "ingest": "node server/scripts/runChunkingWorker.js",
+    "sync-storage": "node server/scripts/syncStorage.js",
+    "reindex": "node scripts/migrateToJina.js",
+    "doctor": "node scripts/doctor.js",
+    "qa": "node tests/runner.js",
     "clean": "node scripts/clean.js",
     "setup": "node scripts/setup.js",
-    "reset": "node scripts/reset.js",
     "format": "node scripts/format.js",
     "lint": "npm run lint --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
-    "test:embedding": "node scripts/testEmbedding.js",
-    "test:e2e": "node tests/browser/browserAutomation.js",
-    "test:performance": "node tests/performance/performanceBenchmark.js",
-    "test:security": "node server/scripts/testMission19SecuritySuite.js",
-    "test:developer": "node server/scripts/testMission21DeveloperModeSuite.js",
-    "test:agents": "node server/scripts/testMission22AgentSuite.js",
-    "benchmark:models": "node scripts/benchmarkModels.js",
-    "package:release": "node scripts/packageRelease.js",
-    "release:qa": "node scripts/releaseMasterQA.js",
-    "install:wizard": "node scripts/installWizard.js",
-    "qa:report": "node tests/reports/reportGenerator.js"
+    "backup": "node scripts/backupRestoreCenter.js --backup",
+    "restore": "node scripts/backupRestoreCenter.js --restore"
   },
   "devDependencies": {
     "concurrently": "^8.2.2",
@@ -52,7 +30,6 @@
   },
   "dependencies": {
     "@qdrant/js-client-rest": "^1.18.0",
-    "dotenv": "^17.4.2",
-    "undici": "^8.9.0"
+    "dotenv": "^17.4.2"
   }
 }

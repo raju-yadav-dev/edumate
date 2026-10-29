@@ -8,6 +8,11 @@ const STORAGE_ROOT = paths.STORAGE_ROOT;
 const FILE_EXPLORER_DIR = paths.FILE_EXPLORER_DIR;
 
 const DEFAULT_FOLDERS = [
+    "academics",
+    "admissions",
+    "fees",
+    "hostel",
+    "general",
     "file_explorer"
 ];
 
@@ -39,6 +44,8 @@ const SUPPORTED_DOCUMENT_EXTENSIONS = new Set([
 ]);
 
 const IGNORED_DIRECTORIES = new Set([
+    ".data",
+    "data",
     "cache",
     "temp",
     "backups",

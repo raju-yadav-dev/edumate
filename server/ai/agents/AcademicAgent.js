@@ -1,8 +1,8 @@
 /**
- * Academic Tutor Agent — EduMate Mission 22
- * Specialization: Curriculum breakdown, notes synthesis, flashcards, MCQs, viva preparation, study plans
+ * Academic Tutor Agent — Real LLM-Powered Study & Exam Prep Specialist
  */
 
+const llmService = require("../services/llmService");
 const agentTools = require("./AgentTools");
 
 class AcademicAgent {
@@ -12,32 +12,48 @@ class AcademicAgent {
         this.role = "Curriculum & Exam Prep Specialist";
         this.tools = ["rag_search"];
         this.permissions = ["READ_KNOWLEDGE_BASE"];
-        this.systemPrompt = "You are the Academic Tutor Agent for EduMate. Help students master course syllabus topics, generate study guides, flashcards, and exam preparation materials.";
+        this.systemPrompt = "You are the Academic Tutor Agent for EduMate. Help students master course syllabus topics, generate study guides, flashcards, and exam preparation materials based on curriculum and university standards.";
     }
 
-    async process({ question, context = {}, memory }) {
+    async process({ question }) {
         const start = Date.now();
-        const chunks = await agentTools.executeTool("rag_search", { query: question, limit: 3 });
+        try {
+            const chunks = await agentTools.executeTool("rag_search", { query: question, limit: 3 }).catch(() => []);
+            const contextText = Array.isArray(chunks) && chunks.length > 0 
+                ? chunks.map(c => `[${c.document} - Page ${c.page}]: ${c.text}`).join("\n\n")
+                : "";
 
-        const answer = `### 📚 Academic Study Guide & Key Concepts\n\n` +
-            `**Topic Overview:** ${question}\n\n` +
-            `**1. Core Principles:**\n` +
-            `- Understand foundational theoretical definitions.\n` +
-            `- Master standard analytical methodologies and problem patterns.\n\n` +
-            `**2. Flashcards & Quick Recall:**\n` +
-            `- **Q:** What is the primary objective of this subject?\n` +
-            `- **A:** To build conceptual clarity, rigorous problem-solving, and practical application skills.\n\n` +
-            `**3. Viva / Exam Practice Question:**\n` +
-            `- *Explain the architectural significance and trade-offs of this concept.*`;
+            const userPrompt = contextText
+                ? `Institutional Knowledge Context:\n${contextText}\n\nStudent Academic Question: ${question}`
+                : question;
 
-        return {
-            agentId: this.id,
-            agentName: this.name,
-            answer,
-            citations: chunks.map(c => ({ document: c.document, page: c.page, snippet: c.text?.slice(0, 100) })),
-            toolsUsed: ["rag_search"],
-            durationMs: Date.now() - start
-        };
+            const answer = await llmService.generateCompletion([
+                { role: "system", content: this.systemPrompt },
+                { role: "user", content: userPrompt }
+            ]);
+
+            return {
+                agentId: this.id,
+                agentName: this.name,
+                answer: typeof answer === "string" ? answer : JSON.stringify(answer),
+                citations: (chunks || []).map(c => ({
+                    document: c.document,
+                    page: c.page,
+                    snippet: c.text ? c.text.slice(0, 100) : ""
+                })),
+                toolsUsed: ["rag_search", "llm_tutor"],
+                durationMs: Date.now() - start
+            };
+        } catch (err) {
+            return {
+                agentId: this.id,
+                agentName: this.name,
+                answer: `Academic tutor encountered an error: ${err.message}`,
+                citations: [],
+                toolsUsed: [],
+                durationMs: Date.now() - start
+            };
+        }
     }
 }
 

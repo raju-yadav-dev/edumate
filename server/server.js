@@ -211,17 +211,7 @@ const startServer = async () => {
                 }
 
                 // Parallel checks for other services
-                const [supabaseConnected, aiCheck, mapCheck] = await Promise.all([
-                    // Supabase check
-                    (async () => {
-                        try {
-                            const supabase = require("./config/supabase");
-                            const { error } = await supabase.storage.listBuckets();
-                            return !error;
-                        } catch (e) {
-                            return false;
-                        }
-                    })(),
+                const [aiCheck, mapCheck] = await Promise.all([
                     // AI services check (llama.cpp probe)
                     (async () => {
                         try {
@@ -350,24 +340,13 @@ const startServer = async () => {
                 
                 dashboard.push("");
                 
-                // Storage section based on configured provider
-                const storageProvider = process.env.STORAGE_PROVIDER || "local";
-                if (storageProvider === "supabase") {
-                    const supabaseStatusText = supabaseConnected ? "✓ Connected" : "❌ Disconnected";
-                    const supabaseStorageText = supabaseConnected ? "✓ Available" : "⚠️ Unavailable";
-                    dashboard.push(makeSectionHeader("SUPABASE STORAGE"));
-                    dashboard.push(padLine("Status", supabaseStatusText, 12, 60, supabaseConnected ? colors.green : colors.red));
-                    dashboard.push(padLine("Service", "Supabase Storage", 12));
-                    dashboard.push(padLine("Storage", supabaseStorageText, 12, 60, supabaseConnected ? colors.green : colors.red));
-                    dashboard.push(borderSingle);
-                } else {
-                    const localPath = process.env.LOCAL_STORAGE_PATH || "./storage";
-                    dashboard.push(makeSectionHeader("LOCAL STORAGE"));
-                    dashboard.push(padLine("Status", "✓ Ready", 12, 60, colors.green));
-                    dashboard.push(padLine("Provider", "Local Filesystem", 12));
-                    dashboard.push(padLine("Path", localPath, 12));
-                    dashboard.push(borderSingle);
-                }
+                // Storage section
+                const localPath = process.env.LOCAL_STORAGE_PATH || "./storage";
+                dashboard.push(makeSectionHeader("LOCAL STORAGE"));
+                dashboard.push(padLine("Status", "✓ Ready", 12, 60, colors.green));
+                dashboard.push(padLine("Provider", "Local Filesystem", 12));
+                dashboard.push(padLine("Path", localPath, 12));
+                dashboard.push(borderSingle);
                 
                 dashboard.push("");
                 

@@ -253,7 +253,6 @@ const startDev = async () => {
     };
 
     startBackend();
-    startStudio();
     startFrontend();
 
     // Stage 7: Health Monitoring & Browser Auto-Launch
@@ -271,8 +270,7 @@ const startDev = async () => {
             console.log("\n" + logger.green("======================================================="));
             console.log(logger.green("  🎉 EDUMATE PLATFORM READY & ACTIVE"));
             console.log(logger.cyan("  ➜ Web App (Frontend):  http://localhost:5173"));
-            console.log(logger.cyan("  ➜ REST API (Backend):  http://localhost:5000"));
-            console.log(logger.cyan("  ➜ Knowledge Studio:    http://localhost:5001"));
+            console.log(logger.cyan("  ➜ REST API & Studio:   http://localhost:5000"));
             console.log(logger.green("=======================================================\n"));
 
             // Open browser automatically on Windows / macOS / Linux

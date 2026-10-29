@@ -23,7 +23,6 @@ const runSetup = async () => {
     const { startQdrantContainer } = require("./dockerManager");
     const { verifyQdrant } = require("./verifyQdrant");
     const { verifyMongo } = require("./verifyMongo");
-    const { verifySupabase } = require("./verifySupabase");
     const { verifyGemini } = require("./verifyGemini");
 
     logger.info("\n🚀 Verifying database and AI services...");
@@ -45,12 +44,7 @@ const runSetup = async () => {
         process.exit(1);
     }
 
-    // Verify Supabase
-    const supabaseOk = await verifySupabase();
-    if (!supabaseOk) {
-        logger.error("❌ Setup failed: Supabase connection check failed.");
-        process.exit(1);
-    }
+
 
     // Verify Gemini API
     const geminiOk = await verifyGemini();

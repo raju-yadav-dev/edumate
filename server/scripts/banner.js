@@ -27,7 +27,7 @@ const printDashboard = (stats) => {
 
     console.log(`${colors.green("✓")} Environment Variables Loaded`);
     console.log(`${colors.green("✓")} MongoDB Connected`);
-    console.log(`${colors.green("✓")} Supabase Connected`);
+    console.log(`${colors.green("✓")} Local Storage Ready`);
     console.log(`${colors.green("✓")} ${aiProviderName} Connected`);
     console.log(`${colors.green("✓")} Qdrant Running`);
     console.log(`${colors.green("✓")} Vector Collection Ready`);
@@ -39,7 +39,7 @@ const printDashboard = (stats) => {
     console.log(`${colors.bold("Port")}        : ${colors.green(stats.port || "5000")}`);
     console.log(`${colors.bold("API")}         : ${colors.green(`http://localhost:${stats.port || "5000"}`)}`);
     console.log(`${colors.bold("Database")}    : ${colors.green("MongoDB Atlas")}`);
-    console.log(`${colors.bold("Storage")}     : ${colors.green("Supabase")}`);
+    console.log(`${colors.bold("Storage")}     : ${colors.green("Local Filesystem")}`);
     console.log(`${colors.bold("Vector DB")}   : ${colors.green("Qdrant")}`);
     console.log(`${colors.bold("AI Model")}    : ${colors.green(aiModelName)}`);
     console.log(`${colors.bold("Embeddings")}  : ${colors.green(embeddingModelName)}`);

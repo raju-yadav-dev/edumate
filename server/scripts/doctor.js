@@ -2,7 +2,6 @@ const colors = require("./colors");
 const { verifyNodeVersion, verifyDependencies } = require("./dependencyInstaller");
 const { verifyEnvironment } = require("./verifyEnvironment");
 const { verifyMongo } = require("./verifyMongo");
-const { verifySupabase } = require("./verifySupabase");
 const { verifyGroq } = require("./verifyGroq");
 const { verifyQdrant } = require("./verifyQdrant");
 const { checkInternet } = require("./healthCheck");
@@ -56,15 +55,6 @@ const runDoctor = async () => {
             console.log(colors.yellow("💡 Suggestion: Confirm MONGODB_URI is correct and your IP is whitelisted."));
         }
         
-        console.log();
-
-        // 6. Verify Supabase connectivity
-        const supabaseOk = await verifySupabase();
-        if (!supabaseOk) {
-            hasErrors = true;
-            console.log(colors.yellow("💡 Suggestion: Verify SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are set correctly."));
-        }
-
         console.log();
 
         // 7. Verify Groq API connectivity

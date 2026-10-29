@@ -1,450 +1,190 @@
 /**
- * SmartCacheHub — 10-Layer Smart Cache Architecture Orchestrator
- * EduMate Mission 17 — Production Grade
- * 
- * Unified Controller for all 10 Independent Cache Layers:
- * - Layer 1: Client/UI Cache (TTL 5-10m)
- * - Layer 2: Prompt Cache / Query Planner (TTL 1h)
- * - Layer 3: Embedding Cache (Infinite TTL / local storage)
- * - Layer 4: Vector Search Cache (TTL 15m)
- * - Layer 5: Document Chunk Cache (Parsed chunks / disk cache)
- * - Layer 6: Retriever Cache (Reranked results, TTL 15m)
- * - Layer 7: LLM Response Cache (TTL 30m)
- * - Layer 8: Conversation Context Cache (Session lifetime)
- * - Layer 9: Model KV Cache (llama.cpp slot management)
- * - Layer 10: Persistent Disk Cache (storage/cache/ with 8 subfolders + gzip)
+ * SmartCacheHub — Unified Lightweight In-Memory LRU Cache
+ * Replaces 10-tier multi-file cache bloat with a fast, single-process LRU.
  */
 
-const layer1ClientCache = require("./Layer1_ClientCache");
-const layer2PromptQueryCache = require("./Layer2_PromptQueryCache");
-const layer3EmbeddingCache = require("./Layer3_EmbeddingCache");
-const layer4VectorSearchCache = require("./Layer4_VectorSearchCache");
-const layer5DocumentChunkCache = require("./Layer5_DocumentChunkCache");
-const layer6RetrieverCache = require("./Layer6_RetrieverCache");
-const layer7LLMResponseCache = require("./Layer7_LLMResponseCache");
-const layer8ConversationContextCache = require("./Layer8_ConversationContextCache");
-const layer9ModelKVCache = require("./Layer9_ModelKVCache");
-const layer10PersistentDiskCache = require("./Layer10_PersistentDiskCache");
+class SimpleLRU {
+    constructor(maxSize = 500, defaultTtlMs = 15 * 60 * 1000) {
+        this.maxSize = maxSize;
+        this.defaultTtl = defaultTtlMs;
+        this.map = new Map();
+        this.hits = 0;
+        this.misses = 0;
+    }
 
-class SmartCacheHub {
+    get(key) {
+        if (!key) return null;
+        const entry = this.map.get(key);
+        if (!entry) {
+            this.misses++;
+            return null;
+        }
+        if (Date.now() > entry.exp) {
+            this.map.delete(key);
+            this.misses++;
+            return null;
+        }
+        // Refresh MRU position
+        this.map.delete(key);
+        this.map.set(key, entry);
+        this.hits++;
+        return entry.val;
+    }
+
+    set(key, val, customTtlMs) {
+        if (!key) return;
+        const ttl = customTtlMs || this.defaultTtl;
+        if (this.map.has(key)) {
+            this.map.delete(key);
+        } else if (this.map.size >= this.maxSize) {
+            // Evict oldest
+            const oldestKey = this.map.keys().next().value;
+            this.map.delete(oldestKey);
+        }
+        this.map.set(key, { val, exp: Date.now() + ttl });
+    }
+
+    del(key) {
+        return this.map.delete(key);
+    }
+
+    clear() {
+        this.map.clear();
+        this.hits = 0;
+        this.misses = 0;
+    }
+
+    get size() {
+        return this.map.size;
+    }
+}
+
+class UnifiedCacheHub {
     constructor() {
-        this.l1 = layer1ClientCache;
-        this.l2 = layer2PromptQueryCache;
-        this.l3 = layer3EmbeddingCache;
-        this.l4 = layer4VectorSearchCache;
-        this.l5 = layer5DocumentChunkCache;
-        this.l6 = layer6RetrieverCache;
-        this.l7 = layer7LLMResponseCache;
-        this.l8 = layer8ConversationContextCache;
-        this.l9 = layer9ModelKVCache;
-        this.l10 = layer10PersistentDiskCache;
-
         this.kbVersion = Number(process.env.CACHE_VERSION || 1);
-        this.isInitialized = false;
-
-        // Telemetry tracking
         this.totalLatencySavedMs = 0;
         this.savedOpsCount = 0;
 
-        this._initStartup();
-    }
+        // Shared fast memory caches
+        this._llmCache = new SimpleLRU(300, 30 * 60 * 1000);
+        this._retrieverCache = new SimpleLRU(300, 15 * 60 * 1000);
+        this._chunkCache = new SimpleLRU(500, 60 * 60 * 1000);
+        this._contextCache = new SimpleLRU(200, 60 * 60 * 1000);
 
-    _initStartup() {
-        if (this.isInitialized) return;
-        this.isInitialized = true;
+        // Layer adapters preserving compatibility
+        this.l1 = { get: () => null, set: () => {}, clear: () => {} };
+        this.l2 = { get: () => null, set: () => {}, clear: () => {} };
+        this.l3 = { get: () => null, set: () => {}, clear: () => {} };
+        this.l4 = { get: () => null, set: () => {}, clear: () => {} };
 
-        // Auto-prune expired disk entries in background
-        try {
-            this.l10.pruneExpired();
-        } catch (_) {}
+        // L5: Chunks
+        this.l5 = {
+            setDocumentChunks: (docId, chunks) => this._chunkCache.set(`doc_${docId}`, chunks),
+            getDocumentChunks: (docId) => this._chunkCache.get(`doc_${docId}`),
+            getChunk: (docId, chunkId) => {
+                const chunks = this._chunkCache.get(`doc_${docId}`);
+                return Array.isArray(chunks) ? chunks.find(c => c.chunkId === chunkId) || null : null;
+            },
+            invalidateDocument: (docId) => this._chunkCache.del(`doc_${docId}`),
+            clear: () => this._chunkCache.clear()
+        };
 
-        // Warm startup cache automatically
-        this.warmStartupCache();
+        // L6: Retriever
+        this.l6 = {
+            get: (query) => this._retrieverCache.get(`q_${query}`),
+            set: (query, filters, candidates, cat, kb, inst, topK, ttl) => this._retrieverCache.set(`q_${query}`, candidates, ttl),
+            clear: () => this._retrieverCache.clear()
+        };
+
+        // L7: LLM Response
+        this.l7 = {
+            get: (query) => this._llmCache.get(`ans_${query}`),
+            set: (query, val, cat, mode, hash, docType, dept, kb, ttl) => this._llmCache.set(`ans_${query}`, val, ttl),
+            del: (query) => this._llmCache.del(`ans_${query}`),
+            clear: () => this._llmCache.clear()
+        };
+
+        // L8: Conversation context
+        this.l8 = {
+            getMergedContext: (chunkIds) => this._contextCache.get(`ctx_${chunkIds?.join("_")}`),
+            setMergedContext: (chunkIds, ctx, kb, ttl) => this._contextCache.set(`ctx_${chunkIds?.join("_")}`, ctx, ttl),
+            getRecentMemory: (userId, convId) => this._contextCache.get(`mem_${userId}_${convId}`) || [],
+            setConversationContext: (userId, convId, data) => this._contextCache.set(`mem_${userId}_${convId}`, data),
+            getConversationContext: (userId, convId) => this._contextCache.get(`mem_${userId}_${convId}`),
+            clear: () => this._contextCache.clear()
+        };
+
+        this.l9 = { recordHit: () => {}, recordMiss: () => {}, clear: () => {} };
+        this.l10 = { pruneExpired: () => {}, clear: () => {} };
     }
 
     getKbVersion() {
-        return String(this.kbVersion);
+        return this.kbVersion;
     }
 
     incrementKbVersion() {
-        this.kbVersion++;
-        console.log(`[SmartCacheHub] Dynamic Knowledge-Base Version incremented to: ${this.kbVersion}`);
-        return String(this.kbVersion);
+        this.kbVersion += 1;
+        this.invalidateAll();
+        return this.kbVersion;
     }
 
     recordLatencySaved(savedMs) {
-        if (typeof savedMs === "number" && savedMs > 0) {
-            this.totalLatencySavedMs += savedMs;
-            this.savedOpsCount++;
+        if (Number(savedMs) > 0) {
+            this.totalLatencySavedMs += Number(savedMs);
+            this.savedOpsCount += 1;
         }
     }
 
-    // =========================================================================
-    // CACHE WARMING (Mission 17 Rules)
-    // =========================================================================
-
-    /**
-     * Pre-warms essential caches on server boot:
-     * - Top FAQs and popular university query plans
-     * - System health status
-     * - Analytics card templates
-     */
-    warmStartupCache() {
-        console.log("[SmartCacheHub:Warming] Initializing cache warming routine...");
-        const start = Date.now();
-        let warmedCount = 0;
-
-        try {
-            // 1. Warm Top Popular University Query Plans (Layer 2)
-            const popularQuestions = [
-                {
-                    q: "Who is the HOD of Computational Sciences department?",
-                    plan: { intent: "FACULTY_INQUIRY", entities: { department: "Computational Sciences", role: "HOD" }, routingMode: "RAG_LLM", category: "faculty" }
-                },
-                {
-                    q: "What is the admission procedure for B.Tech in CSE?",
-                    plan: { intent: "ADMISSION_INQUIRY", entities: { course: "B.Tech CSE" }, routingMode: "RAG_LLM", category: "admissions" }
-                },
-                {
-                    q: "What are the semester exam passing criteria and grading rules?",
-                    plan: { intent: "EXAM_RULES", entities: { topic: "grading" }, routingMode: "RAG_LLM", category: "academics" }
-                },
-                {
-                    q: "What are the campus emergency contact numbers?",
-                    plan: { intent: "CONTACT_INFO", entities: { topic: "emergency" }, routingMode: "LLM_ONLY", category: "general" }
-                },
-                {
-                    q: "What is the fee structure for BCA program?",
-                    plan: { intent: "FEES_INQUIRY", entities: { course: "BCA" }, routingMode: "RAG_LLM", category: "fees" }
-                }
-            ];
-
-            for (const item of popularQuestions) {
-                this.l2.setQueryPlan(item.q, item.plan, 3600);
-                warmedCount++;
-            }
-
-            // 2. Warm Analytics Cards (Layer 1)
-            this.l1.setAnalyticsCard("overview_summary", {
-                activeStatus: "optimal",
-                warmedAt: new Date().toISOString()
-            }, 300);
-            warmedCount++;
-
-            // 3. Warm System Health Status in Persistent Disk Cache (Layer 10)
-            this.l10.set("analytics", "system_health_bootstrap", {
-                status: "healthy",
-                warmedAt: new Date().toISOString()
-            }, 86400);
-            warmedCount++;
-
-            console.log(`[SmartCacheHub:Warming] Warmup completed in ${Date.now() - start}ms (${warmedCount} entries warmed)`);
-        } catch (err) {
-            console.warn("[SmartCacheHub:Warming] Warning during cache warmup:", err.message);
-        }
-
-        return warmedCount;
+    invalidateCategory() {
+        this.invalidateAll();
     }
 
-    // =========================================================================
-    // AUTOMATIC INVALIDATION HANDLERS (Mission 17 Rules)
-    // =========================================================================
-
-    /**
-     * Automatic invalidation on new document upload
-     */
-    invalidateUpload(document) {
-        if (!document) return;
-        const category = document.category || "";
-        console.log(`[SmartCacheHub:Invalidation] Trigger: UPLOAD | Category: "${category}" | Doc: "${document.originalName || document._id}"`);
-
-        this.incrementKbVersion();
-        if (category) {
-            this.invalidateCategory(category);
-        } else {
-            this.l4.clear();
-            this.l6.clear();
-            this.l7.clear();
-        }
-    }
-
-    /**
-     * Automatic invalidation on document rechunk / regeneration
-     */
-    invalidateRechunk(documentId, category = "") {
-        console.log(`[SmartCacheHub:Invalidation] Trigger: RECHUNK | DocId: "${documentId}" | Category: "${category}"`);
-        this.incrementKbVersion();
-
-        if (documentId) {
-            this.l5.invalidateDocument(documentId);
-        }
-        if (category) {
-            this.invalidateCategory(category);
-        } else {
-            this.l4.clear();
-            this.l6.clear();
-            this.l7.clear();
-            this.l8.clear();
-        }
-    }
-
-    /**
-     * Automatic invalidation on document delete
-     */
-    invalidateDelete(documentId, category = "") {
-        console.log(`[SmartCacheHub:Invalidation] Trigger: DELETE | DocId: "${documentId}" | Category: "${category}"`);
-        this.incrementKbVersion();
-
-        if (documentId) {
-            this.l5.invalidateDocument(documentId);
-        }
-        if (category) {
-            this.invalidateCategory(category);
-        } else {
-            this.l4.clear();
-            this.l6.clear();
-            this.l7.clear();
-            this.l8.clear();
-        }
-    }
-
-    /**
-     * Automatic invalidation on category / system reindex
-     */
-    invalidateReindex(category = "") {
-        console.log(`[SmartCacheHub:Invalidation] Trigger: REINDEX | Category: "${category || 'ALL'}"`);
-        this.incrementKbVersion();
-
-        if (category) {
-            this.invalidateCategory(category);
-        } else {
-            this.l2.clear();
-            this.l4.clear();
-            this.l5.clear();
-            this.l6.clear();
-            this.l7.clear();
-            this.l8.clear();
-            this.l10.clear();
-        }
-    }
-
-    /**
-     * Automatic invalidation on document update
-     */
-    invalidateDocumentUpdate(documentId, category = "") {
-        console.log(`[SmartCacheHub:Invalidation] Trigger: UPDATE | DocId: "${documentId}" | Category: "${category}"`);
-        this.incrementKbVersion();
-
-        if (documentId) {
-            this.l5.invalidateDocument(documentId);
-        }
-        if (category) {
-            this.invalidateCategory(category);
-        }
-    }
-
-    /**
-     * Invalidation when embedding model changes
-     */
-    invalidateEmbeddingModelChange() {
-        console.log("[SmartCacheHub:Invalidation] Trigger: EMBEDDING_MODEL_CHANGE — Purging Embedding, Vector, and Retriever caches");
-        this.incrementKbVersion();
-        this.l3.clear();
-        this.l4.clear();
-        this.l6.clear();
-        this.l10.clear("embeddings");
-    }
-
-    /**
-     * Invalidation when LLM model changes
-     */
-    invalidateLLMModelChange() {
-        console.log("[SmartCacheHub:Invalidation] Trigger: LLM_MODEL_CHANGE — Purging LLM Response and Model KV caches");
-        this.incrementKbVersion();
-        this.l7.clear();
-        this.l9.clear();
-        this.l10.clear("responses");
-    }
-
-    /**
-     * Selective category invalidation cascading across layers
-     */
-    invalidateCategory(category) {
-        if (!category) return;
-        const cleanCat = String(category).trim().toLowerCase();
-        console.log(`[SmartCacheHub:Invalidation] Cascading category invalidation: "${cleanCat}" across all layers`);
-
-        this.incrementKbVersion();
-        this.l2.invalidateCategory(cleanCat);
-        this.l3.invalidateCategory(cleanCat);
-        this.l4.clear();
-        this.l5.invalidateCategory(cleanCat);
-        this.l6.clear();
-        this.l7.invalidateCategory(cleanCat);
-        this.l7.clear();
-        this.l10.invalidateCategory(cleanCat);
-    }
-
-    /**
-     * Total cache purge across all 10 layers and persistent disk cache
-     */
     invalidateAll() {
-        console.log("[SmartCacheHub:Invalidation] Purging ALL 10 Cache Layers & Disk Cache...");
-        this.incrementKbVersion();
-
-        this.l1.clear();
-        this.l2.clear();
-        this.l3.clear();
-        this.l4.clear();
-        this.l5.clear();
-        this.l6.clear();
-        this.l7.clear();
-        this.l8.clear();
-        this.l9.clear();
-        this.l10.clear();
+        this._llmCache.clear();
+        this._retrieverCache.clear();
+        this._chunkCache.clear();
+        this._contextCache.clear();
     }
 
-    // =========================================================================
-    // UNIFIED ANALYTICS & MONITORING (Mission 17 Metrics)
-    // =========================================================================
+    invalidateUpload() { this.invalidateAll(); }
+    invalidateRechunk() { this.invalidateAll(); }
+    invalidateDelete() { this.invalidateAll(); }
+    invalidateReindex() { this.invalidateAll(); }
+    invalidateDocumentUpdate() { this.invalidateAll(); }
+    invalidateEmbeddingModelChange() { this.invalidateAll(); }
+    invalidateLLMModelChange() { this.invalidateAll(); }
+    warmStartupCache() {}
 
-    /**
-     * Collects comprehensive analytics across all 10 cache layers
-     */
     getStats() {
-        const s1 = this.l1.getStats();
-        const s2 = this.l2.getStats();
-        const s3 = this.l3.getStats();
-        const s4 = this.l4.getStats();
-        const s5 = this.l5.getStats();
-        const s6 = this.l6.getStats();
-        const s7 = this.l7.getStats();
-        const s8 = this.l8.getStats();
-        const s9 = this.l9.getStats();
-        const s10 = this.l10.getStats();
-
-        const layers = [s1, s2, s3, s4, s5, s6, s7, s8, s9, s10];
-
-        let totalHits = 0;
-        let totalMisses = 0;
-        let totalEvictions = 0;
-        let totalEntries = 0;
-        let totalMemoryBytes = 0;
-        let totalDiskBytes = s10.diskBytes || 0;
-        let weightedLookupTime = 0;
-        let totalOps = 0;
-
-        let largestCacheName = "Layer 3 — Embedding Cache";
-        let largestCacheEntries = 0;
-
-        for (const l of layers) {
-            totalHits += (l.hits || 0);
-            totalMisses += (l.misses || 0);
-            totalEvictions += (l.evictions || 0);
-            totalEntries += (l.size || 0);
-            totalMemoryBytes += (l.memoryBytes || 0);
-
-            if ((l.size || 0) > largestCacheEntries) {
-                largestCacheEntries = l.size;
-                largestCacheName = l.name;
-            }
-
-            const ops = (l.hits || 0) + (l.misses || 0);
-            if (ops > 0 && l.avgLookupTimeMs) {
-                weightedLookupTime += (l.avgLookupTimeMs * ops);
-                totalOps += ops;
-            }
-        }
-
-        const globalOps = totalHits + totalMisses;
-        const globalHitRatePct = globalOps > 0 ? Number(((totalHits / globalOps) * 100).toFixed(2)) : 0;
-        const globalMissRatePct = globalOps > 0 ? Number(((totalMisses / globalOps) * 100).toFixed(2)) : 0;
-        const globalAvgLookupMs = totalOps > 0 ? Number((weightedLookupTime / totalOps).toFixed(3)) : 0;
-
-        const avgSavedMs = this.savedOpsCount > 0 
-            ? Number((this.totalLatencySavedMs / this.savedOpsCount).toFixed(1)) 
-            : 0;
+        const totalHits = this._llmCache.hits + this._retrieverCache.hits + this._chunkCache.hits;
+        const totalMisses = this._llmCache.misses + this._retrieverCache.misses + this._chunkCache.misses;
+        const total = totalHits + totalMisses;
+        const hitRate = total > 0 ? ((totalHits / total) * 100).toFixed(1) + "%" : "0%";
 
         return {
             global: {
-                totalEntries,
                 totalHits,
                 totalMisses,
-                hitRate: `${globalHitRatePct}%`,
-                hitRatePercent: globalHitRatePct,
-                missRate: `${globalMissRatePct}%`,
-                missRatePercent: globalMissRatePct,
-                evictions: totalEvictions,
-                memoryBytes: totalMemoryBytes,
-                memoryFormatted: this._formatBytes(totalMemoryBytes),
-                diskBytes: totalDiskBytes,
-                diskFormatted: this._formatBytes(totalDiskBytes),
-                avgLookupTimeMs: globalAvgLookupMs,
-                totalLatencySavedMs: this.totalLatencySavedMs,
-                avgLatencySavedMs: avgSavedMs,
-                largestCache: {
-                    name: largestCacheName,
-                    entries: largestCacheEntries
-                },
-                kbVersion: String(this.kbVersion),
-                activeLayers: 10,
-                status: "optimal"
+                hitRate,
+                totalSize: this._llmCache.size + this._retrieverCache.size + this._chunkCache.size,
+                totalLatencySavedMs: this.totalLatencySavedMs
             },
             layers: {
-                layer1_clientUI: s1,
-                layer2_promptQuery: s2,
-                layer3_embeddings: s3,
-                layer4_vectorSearch: s4,
-                layer5_documentChunks: s5,
-                layer6_retriever: s6,
-                layer7_llmResponses: s7,
-                layer8_conversationContext: s8,
-                layer9_modelKV: s9,
-                layer10_persistentDisk: s10
+                l5_chunks: { size: this._chunkCache.size, hits: this._chunkCache.hits },
+                l6_retriever: { size: this._retrieverCache.size, hits: this._retrieverCache.hits },
+                l7_llm: { size: this._llmCache.size, hits: this._llmCache.hits },
+                l8_context: { size: this._contextCache.size }
             }
         };
     }
 
-    _formatBytes(bytes) {
-        if (!bytes || bytes <= 0) return "0 B";
-        const units = ["B", "KB", "MB", "GB"];
-        const i = Math.floor(Math.log(bytes) / Math.log(1024));
-        return `${(bytes / Math.pow(1024, i)).toFixed(2)} ${units[i] || "B"}`;
-    }
-
     generateCacheReport() {
-        const stats = this.getStats();
-        const l = stats.layers;
-
-        const lines = [
-            "=========================================================================================",
-            "             EDUMATE MISSION 17 — 10-LAYER SMART CACHE ARCHITECTURE REPORT               ",
-            "=========================================================================================",
-            ` Global Status      : ${stats.global.status.toUpperCase()} (KB Version: v${stats.global.kbVersion})`,
-            ` Global Hit Rate    : ${stats.global.hitRate} (${stats.global.totalHits} Hits / ${stats.global.totalMisses} Misses)`,
-            ` Global Evictions   : ${stats.global.evictions} | Total Entries: ${stats.global.totalEntries}`,
-            ` Memory Footprint   : ${stats.global.memoryFormatted} | Persistent Disk: ${stats.global.diskFormatted}`,
-            ` Avg Lookup Latency : ${stats.global.avgLookupTimeMs} ms | Avg Latency Saved: ${stats.global.avgLatencySavedMs} ms`,
-            "-----------------------------------------------------------------------------------------",
-            " LAYER                      | ENTRIES | HIT RATE | AVG LATENCY | MEMORY/DISK | STATUS    ",
-            "-----------------------------------------------------------------------------------------",
-            ` 1. Client / UI Cache       | ${String(l.layer1_clientUI.size).padEnd(7)} | ${String(l.layer1_clientUI.hitRate).padEnd(8)} | ${String(l.layer1_clientUI.avgLookupTimeMs + 'ms').padEnd(11)} | ${String(l.layer1_clientUI.memoryFormatted).padEnd(11)} | ✓ HEALTHY `,
-            ` 2. Prompt Cache            | ${String(l.layer2_promptQuery.size).padEnd(7)} | ${String(l.layer2_promptQuery.hitRate).padEnd(8)} | ${String(l.layer2_promptQuery.avgLookupTimeMs + 'ms').padEnd(11)} | ${String(l.layer2_promptQuery.memoryFormatted).padEnd(11)} | ✓ HEALTHY `,
-            ` 3. Embedding Cache         | ${String(l.layer3_embeddings.size).padEnd(7)} | ${String(l.layer3_embeddings.hitRate).padEnd(8)} | ${String(l.layer3_embeddings.avgLookupTimeMs + 'ms').padEnd(11)} | ${String(l.layer3_embeddings.memoryFormatted).padEnd(11)} | ✓ HEALTHY `,
-            ` 4. Vector Search Cache     | ${String(l.layer4_vectorSearch.size).padEnd(7)} | ${String(l.layer4_vectorSearch.hitRate).padEnd(8)} | ${String(l.layer4_vectorSearch.avgLookupTimeMs + 'ms').padEnd(11)} | ${String(l.layer4_vectorSearch.memoryFormatted).padEnd(11)} | ✓ HEALTHY `,
-            ` 5. Document Chunk Cache    | ${String(l.layer5_documentChunks.size).padEnd(7)} | ${String(l.layer5_documentChunks.hitRate).padEnd(8)} | ${String(l.layer5_documentChunks.avgLookupTimeMs + 'ms').padEnd(11)} | ${String(l.layer5_documentChunks.memoryFormatted).padEnd(11)} | ✓ HEALTHY `,
-            ` 6. Retriever Cache         | ${String(l.layer6_retriever.size).padEnd(7)} | ${String(l.layer6_retriever.hitRate).padEnd(8)} | ${String(l.layer6_retriever.avgLookupTimeMs + 'ms').padEnd(11)} | ${String(l.layer6_retriever.memoryFormatted).padEnd(11)} | ✓ HEALTHY `,
-            ` 7. LLM Response Cache      | ${String(l.layer7_llmResponses.size).padEnd(7)} | ${String(l.layer7_llmResponses.hitRate).padEnd(8)} | ${String(l.layer7_llmResponses.avgLookupTimeMs + 'ms').padEnd(11)} | ${String(l.layer7_llmResponses.memoryFormatted).padEnd(11)} | ✓ HEALTHY `,
-            ` 8. Conversation Context    | ${String(l.layer8_conversationContext.size).padEnd(7)} | ${String(l.layer8_conversationContext.hitRate).padEnd(8)} | ${String(l.layer8_conversationContext.avgLookupTimeMs + 'ms').padEnd(11)} | ${String(l.layer8_conversationContext.memoryFormatted).padEnd(11)} | ✓ HEALTHY `,
-            ` 9. llama.cpp KV Cache      | ${String(l.layer9_modelKV.size).padEnd(7)} | ${String(l.layer9_modelKV.hitRate).padEnd(8)} | ${String(l.layer9_modelKV.avgLookupTimeMs + 'ms').padEnd(11)} | ${String(l.layer9_modelKV.memoryFormatted).padEnd(11)} | ✓ HEALTHY `,
-            ` 10. Persistent Disk Cache  | ${String(l.layer10_persistentDisk.size).padEnd(7)} | ${String(l.layer10_persistentDisk.hitRate).padEnd(8)} | ${String(l.layer10_persistentDisk.avgLookupTimeMs + 'ms').padEnd(11)} | ${String(l.layer10_persistentDisk.diskFormatted).padEnd(11)} | ✓ HEALTHY `,
-            "========================================================================================="
-        ];
-
-        return lines.join("\n");
+        return {
+            timestamp: new Date().toISOString(),
+            status: "HEALTHY",
+            stats: this.getStats()
+        };
     }
 }
 
-const smartCacheHub = new SmartCacheHub();
-
-module.exports = smartCacheHub;
+module.exports = new UnifiedCacheHub();

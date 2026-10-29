@@ -1,4 +1,3 @@
-const axios = require("axios");
 const locationHelper = require("../../utils/locationHelper");
 
 let cachedFeatures = null;
@@ -31,8 +30,11 @@ class GeoJsonCrimeProvider {
             headers["x-api-key"] = apiKey;
         }
 
-        const response = await axios.get(url, { headers, timeout: 5000 });
-        const geoJson = response.data;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+        const response = await fetch(url, { headers, signal: controller.signal });
+        clearTimeout(timeout);
+        const geoJson = await response.json();
 
         if (!geoJson || typeof geoJson !== "object") {
             throw new Error("Invalid GeoJSON response from crime data URL.");

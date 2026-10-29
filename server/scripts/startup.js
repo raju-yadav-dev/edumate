@@ -3,7 +3,6 @@ const { verifyNodeVersion, verifyDependencies } = require("./dependencyInstaller
 const { verifyEnvironment } = require("./verifyEnvironment");
 const { startQdrantContainer } = require("./dockerManager");
 const { verifyMongo } = require("./verifyMongo");
-const { verifySupabase } = require("./verifySupabase");
 const { verifyGroq } = require("./verifyGroq");
 const { verifyQdrant } = require("./verifyQdrant");
 const { printBanner, printDashboard } = require("./banner");
@@ -48,15 +47,6 @@ const startApp = async () => {
     const mongoOk = await verifyMongo();
     if (!mongoOk) {
         console.error(colors.red("❌ Startup blocked: MongoDB connection check failed."));
-        process.exit(1);
-    }
-
-    console.log();
-
-    // 5. Verify Supabase
-    const supabaseOk = await verifySupabase();
-    if (!supabaseOk) {
-        console.error(colors.red("❌ Startup blocked: Supabase connection check failed."));
         process.exit(1);
     }
 

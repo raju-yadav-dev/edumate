@@ -1,11 +1,11 @@
 {
   "name": "server",
   "version": "1.0.0",
-  "description": "",
+  "description": "EduMate Server",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "chunking": "node chunkingServer.js"
+    "dev": "nodemon server.js"
   },
   "keywords": [],
   "author": "",
@@ -14,7 +14,6 @@
   "dependencies": {
     "@mozilla/readability": "^0.6.0",
     "@qdrant/js-client-rest": "^1.18.0",
-    "@supabase/supabase-js": "^2.110.8",
     "adm-zip": "^0.6.0",
     "axios": "^1.19.0",
     "bcrypt": "^6.0.0",
@@ -36,7 +35,6 @@
     "officeparser": "^8.1.0",
     "openai": "^7.5.0",
     "pdf-parse": "^1.1.1",
-    "redis": "^6.2.1",
     "tesseract.js": "^7.0.0",
     "xlsx": "^0.18.5"
   },
