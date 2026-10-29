@@ -23,6 +23,9 @@ async function startEduMate() {
     console.log("Step 2/5: Probing MongoDB Document Database...");
     let mongoose;
     try {
+        if (process.env.MONGODB_URI && process.env.MONGODB_URI.startsWith("mongodb+srv://")) {
+            require("dns").setServers(["1.1.1.1", "8.8.8.8"]);
+        }
         mongoose = require("mongoose");
         await mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 4000 });
         console.log(`✓ MongoDB connection established (${mongoose.connection.name}).\n`);

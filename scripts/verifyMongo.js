@@ -27,6 +27,10 @@ const verifyMongo = async () => {
         return false;
     }
 
+    if (uri.startsWith("mongodb+srv://")) {
+        configureDNSFallback();
+    }
+
     const options = {
         serverSelectionTimeoutMS: 4000 // Timeout fast if unreachable
     };
@@ -46,6 +50,8 @@ const verifyMongo = async () => {
             
             const isDnsOrTimeoutError = err.message.includes("ENOTFOUND") || 
                                        err.message.includes("EREFUSED") || 
+                                       err.message.includes("ECONNREFUSED") ||
+                                       err.message.includes("querySrv") ||
                                        err.message.includes("Timeout") ||
                                        err.name === "MongooseServerSelectionError";
             if (isDnsOrTimeoutError && !attemptedFallback) {
