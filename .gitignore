@@ -53,6 +53,7 @@ backend/ai-models/*
 # ===============================================
 edumate-data/
 storage/.data/
+storage/file_explorer/
 storage/temp/
 storage/chunks/
 storage/cache/

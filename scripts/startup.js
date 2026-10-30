@@ -253,14 +253,16 @@ const startDev = async () => {
     };
 
     startBackend();
+    startStudio();
     startFrontend();
 
     // Stage 7: Health Monitoring & Browser Auto-Launch
     let browserOpened = false;
     const pollReadiness = setInterval(async () => {
         if (browserOpened || isShuttingDown) return;
-        const [backendUp, frontendUp] = await Promise.all([
+        const [backendUp, studioUp, frontendUp] = await Promise.all([
             checkHttpService("http://localhost:5000/api/health", 800),
+            checkHttpService("http://localhost:5001/health", 800),
             checkHttpService("http://localhost:5173", 800)
         ]);
 
@@ -270,7 +272,8 @@ const startDev = async () => {
             console.log("\n" + logger.green("======================================================="));
             console.log(logger.green("  🎉 EDUMATE PLATFORM READY & ACTIVE"));
             console.log(logger.cyan("  ➜ Web App (Frontend):  http://localhost:5173"));
-            console.log(logger.cyan("  ➜ REST API & Studio:   http://localhost:5000"));
+            console.log(logger.cyan("  ➜ REST API (Backend):  http://localhost:5000"));
+            console.log(logger.cyan("  ➜ Knowledge Studio:    http://localhost:5001"));
             console.log(logger.green("=======================================================\n"));
 
             // Open browser automatically on Windows / macOS / Linux

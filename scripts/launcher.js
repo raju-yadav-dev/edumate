@@ -131,14 +131,23 @@ async function startMasterLauncher() {
         formatStatus("Local LLM Runtime", "ACTIVE", 8080, "yellow");
     }
 
-    // B. Express Backend API & Knowledge Studio (Port 5000)
+    // B. Express Backend API (Port 5000)
     const backendProcess = spawn("node", ["server/server.js"], {
         cwd: rootPath,
         stdio: "pipe",
         shell: true
     });
     runningProcesses.push({ name: "Express Backend API", process: backendProcess });
-    formatStatus("Express API & Studio", "ONLINE", 5000, "green");
+    formatStatus("Express Backend API", "ONLINE", 5000, "green");
+
+    // C. Dedicated Knowledge Studio & Chunking Server (Port 5001)
+    const studioProcess = spawn("node", ["server/chunkingServer.js"], {
+        cwd: rootPath,
+        stdio: "pipe",
+        shell: true
+    });
+    runningProcesses.push({ name: "Knowledge Studio (Port 5001)", process: studioProcess });
+    formatStatus("Knowledge Studio", "ONLINE", 5001, "green");
 
     // D. React Client Application (Port 5173)
     const clientProcess = spawn("npm", ["run", "dev", "--prefix", "client"], {
@@ -155,9 +164,9 @@ async function startMasterLauncher() {
     console.log(logger.cyan("======================================================="));
     console.log(logger.bold("\n  🌐 Access URLs:"));
     console.log(`     • Student Chat Interface:    ${logger.cyan("http://localhost:5173")}`);
+    console.log(`     • Knowledge Studio:          ${logger.cyan("http://localhost:5001")}`);
     console.log(`     • Admin Security Hub:        ${logger.cyan("http://localhost:5173/admin")}`);
-    console.log(`     • Chunking Studio:           ${logger.cyan("http://localhost:5173/admin?tab=chunking")}`);
-    console.log(`     • REST API Documentation:    ${logger.cyan("http://localhost:5000/api/v1/health")}`);
+    console.log(`     • REST API Documentation:    ${logger.cyan("http://localhost:5000/api/health")}`);
     console.log(`     • Dedicated Chunking Engine: ${logger.cyan("http://localhost:5001/health")}`);
 
     console.log(logger.bold("\n  💡 Commands & Tips:"));

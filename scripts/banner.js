@@ -40,11 +40,11 @@ const printControlCenter = (options = {}) => {
     console.log(logger.bold(logger.yellow("SERVICES")));
     console.log(`Frontend         → ${logger.cyan("http://localhost:5173")}`);
     console.log(`Backend API      → ${logger.cyan(`http://localhost:${port}`)}`);
-    console.log(`Knowledge Studio → ${logger.cyan(`http://localhost:5173/admin`)}`);
+    console.log(`Knowledge Studio → ${logger.cyan(`http://localhost:${chunkingPort}`)}`);
     console.log(`LLM API          → ${logger.cyan(`http://localhost:${llamaPort}/v1`)}`);
     console.log(`Qdrant Dashboard → ${logger.cyan(`http://localhost:${qdrantPort}/dashboard`)}`);
     console.log(`Health API       → ${logger.cyan(`http://localhost:${port}/api/health`)}`);
-    console.log(`Knowledge Health → ${logger.cyan(`http://localhost:${port}/api/documents/queue/health`)}`);
+    console.log(`Knowledge Health → ${logger.cyan(`http://localhost:${chunkingPort}/health`)}`);
     console.log(logger.cyan("================================================================================"));
     console.log(logger.bold(logger.yellow("SYSTEM STATUS")));
     console.log(`MongoDB     ${isMongoOk ? logger.green(`${dot} Connected`) : logger.red(`${dot} Disconnected`)}`);
