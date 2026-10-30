@@ -11,7 +11,7 @@ const fetch = (() => {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const JINA_MAX_RETRIES = Number(process.env.JINA_MAX_RETRIES) || 5;
+const JINA_MAX_RETRIES = Number(process.env.JINA_MAX_RETRIES) || 8;
 const JINA_RETRY_DELAY_MS = Number(process.env.JINA_RETRY_DELAY_MS) || 2000;
 const JINA_MAX_RETRY_DELAY_MS = Number(process.env.JINA_MAX_RETRY_DELAY_MS) || 30000;
 
@@ -52,7 +52,7 @@ const isPermanentNetworkError = (error) => {
            code === "ENETUNREACH";
 };
 
-const fetchWithRetry = async (url, options, maxAttempts = 6) => {
+const fetchWithRetry = async (url, options, maxAttempts = 8) => {
     let attempt = 0;
     const timeoutMs = options.timeout || 15000; // 15s timeout
     while (attempt < maxAttempts) {
@@ -361,6 +361,9 @@ const embedTexts = async (texts, options = {}) => {
             const batchNum = Math.floor(i / batchSize) + 1;
             const subBatch = missingTexts.slice(i, i + batchSize);
             const subBatchOriginalIndices = missingIndices.slice(i, i + batchSize);
+            if (i > 0) {
+                await sleep(350);
+            }
 
             console.log(`[Embedding API] Batch ${batchNum}/${totalBatches} - Provider: ${provider}, Model: ${modelName}, Task: ${task}, Chunks: ${subBatch.length}, Qdrant Dim: ${qdrantDim}`);
 

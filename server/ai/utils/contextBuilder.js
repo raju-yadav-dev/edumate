@@ -272,7 +272,7 @@ const mergeConsecutiveSectionChunks = (chunks) => {
             // Preserve and demarcate individual records within multi-record chunks generically (Requirement 2 & 3)
             try {
                 const chunkMeta = chunk.metadata || {};
-                const isNavDoc = chunkMeta.category === "campus_nav" || /campus|navigation|building|floor|location/i.test(chunkMeta.category || "") || /building/i.test(chunkMeta.originalName || "") || chunk.campusMeta;
+                const isNavDoc = chunkMeta.category === "campus_nav" || /campus|navigation|building|floor|location|academic|block|bhavan|bhawan/i.test(chunkMeta.category || "") || /building|block|bhavan/i.test(chunkMeta.originalName || "") || chunk.campusMeta;
                 if (isNavDoc) {
                     const parsed = parseChunkRecords(chunk);
                     const roomRecords = parsed.filter(r => r.room);

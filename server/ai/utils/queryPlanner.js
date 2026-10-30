@@ -16,7 +16,8 @@ const INTENT_PATTERNS = [
     { intent: "PLACEMENT_QUERY", pattern: /\b(?:placement|placements|recruiter|recruiters|package|highest\s+package|average\s+package|salary|internship)\b/i },
     { intent: "SCHOLARSHIP_QUERY", pattern: /\b(?:scholarship|scholarships|financial\s+aid|fee\s+waiver|freeship|stipend)\b/i },
     { intent: "NOTICE_QUERY", pattern: /\b(?:notice|notices|circular|circulars|announcement|announcements|official\s+update)\b/i },
-    { intent: "COURSE_QUERY", pattern: /\b(?:course|courses|program|programs|programme|programmes|degree|degrees|btech|mtech|bca|mca|bba|mba)\b/i }
+    { intent: "COURSE_QUERY", pattern: /\b(?:course|courses|program|programs|programme|programmes|degree|degrees|btech|mtech|bca|mca|bba|mba)\b/i },
+    { intent: "CAMPUS_NAVIGATION", pattern: /\b(?:where\s+is|where\s+can\s+i\s+find|location\s+of|how\s+to\s+reach|how\s+to\s+go|go\s+to|directions?|routes?|navigation|campus\s+navigation|academic\s+blocks?|blocks?|building|buildings|floor|floors|room|rooms|lab|labs|office|offices|bhavan|bhawan|canteen|auditorium|library)\b/i }
 ];
 
 const QUERY_TYPE_RULES = [
@@ -96,16 +97,16 @@ const planQuery = (query, options = {}) => {
     let documentType = undefined;
     let heading = undefined;
 
-    const hasLocation = /\b(?:where\s+is|where\s+can\s+i\s+find|location\s+of|which\s+building|which\s+floor|room\s+number|room\s+no|room|office|cabin|floor|building)\b/i.test(source);
+    const hasLocation = /\b(?:where\s+is|where\s+can\s+i\s+find|location\s+of|which\s+building|which\s+floor|room\s+number|room\s+no|room|office|cabin|floor|building|academic\s+blocks?|blocks?|bhavan|bhawan|routes?|directions?|navigation|campus\s+navigation|how\s+to\s+reach|how\s+to\s+go)\b/i.test(source);
 
     if (hasHod && hasLocation) {
-        category = ["Campus", "Faculty"];
+        category = ["Campus", "Campus Navigation", "Faculty", "general"];
         // Do not set strict heading to exact "HOD" because campus navigation documents use section headings like "101 HOD-psychology..."
     } else if (hasHod) {
         category = "Faculty";
         heading = "HOD";
     } else if (hasLocation) {
-        category = ["Campus", "Faculty"];
+        category = ["Campus", "Campus Navigation", "Faculty", "general"];
     } else if (primaryIntent === "FACULTY_QUERY" || (metadata.facultyNames && metadata.facultyNames.length > 0)) {
         category = "Faculty";
         if (hasHod) heading = "HOD";
@@ -166,7 +167,14 @@ const planQuery = (query, options = {}) => {
     // Build Qdrant-compliant filter structure
     const qdrantMust = [];
     if (category) {
-        qdrantMust.push({ key: "category", match: { value: category } });
+        const catArray = Array.isArray(category) ? category : [category];
+        if (catArray.length === 1) {
+            qdrantMust.push({ key: "category", match: { value: catArray[0] } });
+        } else {
+            qdrantMust.push({
+                should: catArray.map(c => ({ key: "category", match: { value: c } }))
+            });
+        }
     }
     if (primaryDept) {
         qdrantMust.push({

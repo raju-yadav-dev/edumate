@@ -76,7 +76,8 @@ const buildCompactSystemPrompt = ({ activeInstitution, targetLanguage, intent, i
             "Rules:",
             "1. Explain general concepts using your broad academic knowledge, and use the provided [Verified Institutional Context] strictly for university-specific facts (fees, admissions, courses, faculty).",
             "2. If university-specific details are missing from context, state clearly: 'I couldn't find matching information in the university knowledge base.'",
-            "3. Format comparisons, fees, and multi-attribute data using markdown tables; use clear bullet points for lists."
+            "3. Format comparisons, fees, and multi-attribute data using markdown tables; use clear bullet points for lists.",
+            "4. Provide the direct output answer only. Do not provide sources, citations, references, document names, or bracket markers."
         ];
         if (isRepeat) {
             lines.push("4. The user is asking a follow-up. Answer directly without repeating prior text.");
@@ -94,7 +95,8 @@ const buildCompactSystemPrompt = ({ activeInstitution, targetLanguage, intent, i
         "3. If information is not in the context, state: 'This information was not found in the university knowledge base.' Never invent fees, dates, eligibility criteria, or policies.",
         "4. For comparison or synthesis questions, retrieve evidence from every relevant context block, then clearly compare or summarize based on that evidence. Label any logical inference explicitly as 'Based on the above information...' to distinguish it from sourced facts.",
         "5. Strict Entity-Fact Relationship: Keep each room number, building, floor, department, fee, and role strictly bound to its exact entity. Never combine attributes from unrelated programmes or departments.",
-        "6. Quote exact numbers and details verbatim from the context. Do not output <think> tags or reasoning chains."
+        "6. Quote exact numbers and details verbatim from the context. Do not output <think> tags or reasoning chains.",
+        "7. Provide the direct output answer only. Do not provide sources, citations, references, document names, or bracket markers (such as [1] or [Document])."
     ];
 
     if (isRepeat) {
@@ -105,9 +107,20 @@ const buildCompactSystemPrompt = ({ activeInstitution, targetLanguage, intent, i
     }
 
     const intentsArray = Array.isArray(intent) ? intent : [intent];
-    const isLocationIntent = intentsArray.some(i => i === "location" || i === "campus_navigation" || i === "Campus Navigation");
+    const isLocationIntent = intentsArray.some(i => i === "location" || i === "campus_navigation" || i === "Campus Navigation" || i === "CAMPUS_NAVIGATION");
     if (isLocationIntent) {
-        lines.push("8. For location/room inquiries: State the room number, person/department designation, and building concisely. If the building is requested and verified, include it; if not specified in the records, state so explicitly.");
+        lines.push("8. Campus Navigation and Academic Block Mapping:\n" +
+            "   - Academic Block 1 / Building I (Satyajit Bhavan): Psychology, Cyber Science & Technology, Media & Journalism.\n" +
+            "   - Academic Block 2 / Building II (Vidyasagar Bhavan): Admission Cell, Counseling, Language Lab, AI Future Skills Hub, Auditorium.\n" +
+            "   - Academic Block 3 / Building III (Prafulla Bhavan): Pharmacy, Cash Counter, Accounts, IT Support, Central Library, Exam Controller.\n" +
+            "   - Academic Block 4 / Building IV (Jagdish Bhavan): Engineering & Applied Sciences (Mechanical, Civil, Robotics, Soil Science, Electrical, Food & Nutrition, Agriculture, Biotech).\n" +
+            "   - Academic Block 5 / Building V (Ravindra Bhavan): Computer Science & Engineering (CSE, CSE AI-ML, CSE AI, CS & DS), Classrooms, Vice Chancellor, Registrar, Chancellor.\n" +
+            "   - Academic Block 6 / Building VI (Rammohan Bhavan): Law (School of Law, Moot Court), Computational Science, Management & Commerce.\n" +
+            "   - Academic Block 7 / Building VII (Aurobindo Bhavan): Yoga, Gymnasium, Pure Veg Canteen.\n" +
+            "   - Academic Block 8 / Building VIII (Satyendra Bhavan): Conference Room, Retail Lab, Health Care Lab, Placement, F&B Service Lab.\n" +
+            "   - Academic Block 9 / Building IX (Vivekananda Bhavan): Nursing & GNM, Nursing Library, Nursing Hostel.\n" +
+            "   - Hostels: Netaji Bhawan (Boys Hostel), Maa Agni Bhawan (Girls Hostel).\n" +
+            "When asked about routes or navigating between academic blocks, describe the direct walkway connecting the specified buildings/blocks, mention which facilities/departments are housed in each block, and give clear, helpful navigation directions.");
     }
 
     return lines.join("\n");

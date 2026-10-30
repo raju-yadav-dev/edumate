@@ -18,7 +18,7 @@ const getActiveProviderName = (options = {}) => {
 const generateAIResponse = async (messages, onChunk = null, options = {}) => {
     const activeProvider = getActiveProviderName(options);
     const maxTokens = options.maxTokens || options.max_tokens || 512;
-    const timeoutMs = options.timeoutMs || options.timeout || 25000;
+    const timeoutMs = options.timeoutMs || options.timeout || Number(process.env.LLM_TIMEOUT) || 60000;
 
     // 1. Route to requested provider
     if (activeProvider === "groq") {

@@ -29,16 +29,38 @@ async function lookupCampusLocation(name) {
     if (!name) return null;
     let cleanName = name.trim().toLowerCase();
 
-    // Map building terms to campus database nodes
-    if (cleanName.includes("building 2") || cleanName.includes("vidyasagar")) {
-        cleanName = "admission office";
+    // Map academic blocks and building terms to campus database nodes
+    if (cleanName.includes("block 1") || cleanName.includes("building 1") || cleanName.includes("building i") || cleanName.includes("satyajit")) {
+        cleanName = "Academic Block 1";
+    } else if (cleanName.includes("block 2") || cleanName.includes("building 2") || cleanName.includes("building ii") || cleanName.includes("vidyasagar")) {
+        cleanName = "Academic Block 2";
+    } else if (cleanName.includes("block 3") || cleanName.includes("building 3") || cleanName.includes("building iii") || cleanName.includes("prafulla")) {
+        cleanName = "Academic Block 3";
+    } else if (cleanName.includes("block 4") || cleanName.includes("building 4") || cleanName.includes("building iv") || cleanName.includes("jagdish")) {
+        cleanName = "Academic Block 4";
+    } else if (cleanName.includes("block 5") || cleanName.includes("building 5") || cleanName.includes("building v") || cleanName.includes("ravindra")) {
+        cleanName = "Academic Block 5";
+    } else if (cleanName.includes("block 6") || cleanName.includes("building 6") || cleanName.includes("building vi") || cleanName.includes("rammohan")) {
+        cleanName = "Academic Block 6";
+    } else if (cleanName.includes("block 7") || cleanName.includes("building 7") || cleanName.includes("building vii") || cleanName.includes("aurobindo")) {
+        cleanName = "Academic Block 7";
+    } else if (cleanName.includes("block 8") || cleanName.includes("building 8") || cleanName.includes("building viii") || cleanName.includes("satyendra")) {
+        cleanName = "Academic Block 8";
+    } else if (cleanName.includes("block 9") || cleanName.includes("building 9") || cleanName.includes("building ix") || cleanName.includes("vivekananda")) {
+        cleanName = "Academic Block 9";
     } else if (cleanName.includes("library")) {
         cleanName = "library";
     } else if (cleanName.includes("examination")) {
         cleanName = "examination cell";
     } else if (cleanName.includes("accounts")) {
         cleanName = "accounts office";
-    } else if (cleanName.includes("building") || cleanName.includes("bhavan") || cleanName.includes("bhawan")) {
+    } else if (cleanName.includes("admission")) {
+        cleanName = "admission office";
+    } else if (cleanName.includes("canteen")) {
+        cleanName = "canteen";
+    } else if (cleanName.includes("hostel")) {
+        cleanName = "hostel";
+    } else if (cleanName.includes("building") || cleanName.includes("bhavan") || cleanName.includes("bhawan") || cleanName.includes("block")) {
         cleanName = "departments block";
     }
 
@@ -174,7 +196,25 @@ async function resolveLocation(queryName) {
             latitude: 22.7317524,
             longitude: 88.4990443,
             source: "local_dictionary"
-        }
+        },
+        "academic block 1": { name: "Academic Block 1 (Building I - Satyajit Bhavan)", latitude: 22.7205, longitude: 88.4852, source: "campus_map" },
+        "academic block 2": { name: "Academic Block 2 (Building II - Vidyasagar Bhavan)", latitude: 22.7208, longitude: 88.4853, source: "campus_map" },
+        "academic block 3": { name: "Academic Block 3 (Building III - Prafulla Bhavan)", latitude: 22.7211, longitude: 88.4855, source: "campus_map" },
+        "academic block 4": { name: "Academic Block 4 (Building IV - Jagdish Bhavan)", latitude: 22.7210, longitude: 88.4848, source: "campus_map" },
+        "academic block 5": { name: "Academic Block 5 (Building V - Ravindra Bhavan)", latitude: 22.7212, longitude: 88.4853, source: "campus_map" },
+        "academic block 6": { name: "Academic Block 6 (Building VI - Rammohan Bhavan)", latitude: 22.7214, longitude: 88.4851, source: "campus_map" },
+        "academic block 7": { name: "Academic Block 7 (Building VII - Aurobindo Bhavan)", latitude: 22.7215, longitude: 88.4855, source: "campus_map" },
+        "academic block 8": { name: "Academic Block 8 (Building VIII - Satyendra Bhavan)", latitude: 22.7216, longitude: 88.4852, source: "campus_map" },
+        "academic block 9": { name: "Academic Block 9 (Building IX - Vivekananda Bhavan)", latitude: 22.7218, longitude: 88.4858, source: "campus_map" },
+        "building 1": { name: "Academic Block 1 (Building I - Satyajit Bhavan)", latitude: 22.7205, longitude: 88.4852, source: "campus_map" },
+        "building 2": { name: "Academic Block 2 (Building II - Vidyasagar Bhavan)", latitude: 22.7208, longitude: 88.4853, source: "campus_map" },
+        "building 3": { name: "Academic Block 3 (Building III - Prafulla Bhavan)", latitude: 22.7211, longitude: 88.4855, source: "campus_map" },
+        "building 4": { name: "Academic Block 4 (Building IV - Jagdish Bhavan)", latitude: 22.7210, longitude: 88.4848, source: "campus_map" },
+        "building 5": { name: "Academic Block 5 (Building V - Ravindra Bhavan)", latitude: 22.7212, longitude: 88.4853, source: "campus_map" },
+        "building 6": { name: "Academic Block 6 (Building VI - Rammohan Bhavan)", latitude: 22.7214, longitude: 88.4851, source: "campus_map" },
+        "building 7": { name: "Academic Block 7 (Building VII - Aurobindo Bhavan)", latitude: 22.7215, longitude: 88.4855, source: "campus_map" },
+        "building 8": { name: "Academic Block 8 (Building VIII - Satyendra Bhavan)", latitude: 22.7216, longitude: 88.4852, source: "campus_map" },
+        "building 9": { name: "Academic Block 9 (Building IX - Vivekananda Bhavan)", latitude: 22.7218, longitude: 88.4858, source: "campus_map" }
     };
 
     if (fallbackLocations[cleanQuery]) {

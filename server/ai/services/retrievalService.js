@@ -95,6 +95,11 @@ const buildPlannerQdrantFilter = ({
             categoryShould.push({ key: "category", match: { value: "fees" } });
             categoryShould.push({ key: "category", match: { value: "fee" } });
         }
+        if (queryPlan.intent === "CAMPUS_NAVIGATION" || catArray.some(c => /campus/i.test(String(c)))) {
+            categoryShould.push({ key: "category", match: { value: "campus navigation" } });
+            categoryShould.push({ key: "category", match: { value: "file_campus_navigation" } });
+            categoryShould.push({ key: "category", match: { value: "campus" } });
+        }
         // Always include general, image, and empty-category chunks so OCR-derived content is never
         // pre-filtered at the Qdrant level — reranking will down-score non-matching ones later.
         categoryShould.push({ key: "category", match: { value: "general" } });

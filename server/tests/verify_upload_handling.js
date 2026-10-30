@@ -105,5 +105,33 @@ const mockRes = {
     try { fs.unlinkSync(mockTempFile); } catch (_) {}
 
     console.log("✓ Local filesystem storage destination and move verified.");
-    console.log("\nALL UPLOAD VERIFICATION CHECKS PASSED!");
+
+    // 6. Verify JPEG and image formats support
+    assert.ok(localStorageManager.isSupportedDocument("photo.jpg"), "photo.jpg must be supported");
+    assert.ok(localStorageManager.isSupportedDocument("photo.jpeg"), "photo.jpeg must be supported");
+    assert.ok(localStorageManager.isSupportedDocument("photo.jfif"), "photo.jfif must be supported");
+    assert.ok(localStorageManager.isSupportedDocument("IMAGE.JPEG"), "IMAGE.JPEG must be case-insensitively supported");
+    assert.ok(fs.existsSync(path.join(__dirname, "..", "eng.traineddata")), "server/eng.traineddata must exist for local OCR");
+    console.log("✓ JPEG / JPG / JFIF format support and OCR model presence verified.");
+
+    // 7. Verify rate limit skip and increased threshold
+    assert.ok(appCode.includes("p.startsWith(\"/studio\")"), "Rate limiter must skip /studio routes");
+    assert.ok(appCode.includes("p.startsWith(\"/queue\")"), "Rate limiter must skip /queue routes");
+    assert.ok(appCode.includes("API_RATE_LIMIT_MAX || 2000"), "Rate limit max default must be at least 2000");
+    console.log("✓ Global rate limiter skip guards and increased capacity verified.");
+
+    // 8. Verify response validator un-grounded fallback
+    const { validateResponse } = require("../services/responseValidator");
+    const vResult = validateResponse({
+        question: "Tell me about physics",
+        questionType: "university_specific",
+        retrievedContext: { chunks: [] },
+        generatedAnswer: "Physics is the branch of science concerned with the nature and properties of matter and energy.",
+        sources: []
+    });
+    assert.strictEqual(vResult.valid, true, "Response validator must not reject answer when AI output is available");
+    assert.ok(vResult.groundedAnswer.includes("Physics is"), "Response validator must preserve AI answer");
+    console.log("✓ Response validator un-grounded AI answer fallback verified.");
+
+    console.log("\nALL UPLOAD & CHAT VERIFICATION CHECKS PASSED!");
 })();

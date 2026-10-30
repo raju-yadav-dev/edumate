@@ -102,11 +102,41 @@ app.use(cors({
     credentials: true
 }));
 
+const isLoopbackIp = (ip) => {
+    return !ip || ip === "127.0.0.1" || ip === "::1" || ip === "::ffff:127.0.0.1" || String(ip).includes("127.0.0.1");
+};
+
 app.use(rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: Number(process.env.API_RATE_LIMIT_MAX || 300),
+    max: Number(process.env.API_RATE_LIMIT_MAX || 2000),
     standardHeaders: true,
-    legacyHeaders: false
+    legacyHeaders: false,
+    skip: (req) => {
+        if (process.env.NODE_ENV !== "production" || isLoopbackIp(req.ip)) {
+            return true;
+        }
+        const p = (req.originalUrl || req.url || req.path || "").toLowerCase();
+        return p.startsWith("/studio") ||
+               p.startsWith("/queue") ||
+               p.startsWith("/worker") ||
+               p.startsWith("/storage") ||
+               p.startsWith("/chunking") ||
+               p.startsWith("/chunks") ||
+               p.startsWith("/logs") ||
+               p.startsWith("/upload") ||
+               p.includes("/studio") ||
+               p.includes("/queue") ||
+               p.includes("/worker") ||
+               p.includes("/storage") ||
+               p.includes("/chunking") ||
+               p.includes("/chunks") ||
+               p.includes("/logs") ||
+               p.includes("/upload") ||
+               p.includes("/health") ||
+               p.includes("/qdrant") ||
+               p.includes("/documents") ||
+               p.includes("/knowledge");
+    }
 }));
 
 app.use(express.json({

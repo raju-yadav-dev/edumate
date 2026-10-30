@@ -155,7 +155,7 @@ const detectIntent = (normalizedQuery) => {
     if (/\b(department|departments|branch|branches|discipline|disciplines|school of)\b/.test(q)) {
         return "HOD / Department";
     }
-    if (/\b(where is|where can i find|location of|how to reach|go to|directions|route|navigation|building|floor|room|lab|labs|office|offices|placement cell|admin office|canteen|gym|gymnasium|auditorium|sick room|board room|cash counter|moot court|skills hub)\b/.test(q)) {
+    if (/\b(where is|where can i find|location of|how to reach|how to go|go to|directions?|routes?|navigation|campus navigation|academic blocks?|blocks?|bhavan|bhawan|building|floor|room|lab|labs|office|offices|placement cell|admin office|canteen|gym|gymnasium|auditorium|sick room|board room|cash counter|moot court|skills hub)\b/.test(q)) {
         return "Campus Navigation";
     }
     if (/\b(faculty|professor|professors|teacher|teachers|lecturer|lecturers|dean|principal|registrar|staff)\b/.test(q)) {

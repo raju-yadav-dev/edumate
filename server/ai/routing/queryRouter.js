@@ -110,9 +110,19 @@ const UNIVERSITY_ENTITIES = [
     
     // Campus Buildings & Locations
     "building 1", "building 2", "building 3", "building 4", "building 5", "building 6", "building 7",
-    "building 8", "building 9", "room no", "room number", "cash counter", "accounts section", "sick room",
+    "building 8", "building 9", "building i", "building ii", "building iii", "building iv", "building v",
+    "building vi", "building vii", "building viii", "building ix",
+    "academic block", "academic blocks", "academic block 1", "academic block 2", "academic block 3",
+    "academic block 4", "academic block 5", "academic block 6", "academic block 7", "academic block 8",
+    "academic block 9", "block 1", "block 2", "block 3", "block 4", "block 5", "block 6", "block 7",
+    "block 8", "block 9", "satyajit bhavan", "vidyasagar bhavan", "prafulla bhavan", "jagdish bhavan",
+    "ravindra bhavan", "rammohan bhavan", "aurobindo bhavan", "satyendra bhavan", "satyendra bhawan",
+    "vivekananda bhavan", "netaji bhawan", "maa agni bhawan", "campus navigation", "campus route",
+    "campus routes", "route between", "routes between", "routes between academic block", "route between academic block",
+    "routes between academic blocks", "route between academic blocks", "directions between", "path between",
+    "room no", "room number", "cash counter", "accounts section", "sick room",
     "medical center", "board room", "seminar hall", "gymnasium", "auditorium", "counseling room", "language lab",
-    "moot court", "where is room", "where is building", "where is hod", "how to reach building"
+    "moot court", "where is room", "where is building", "where is hod", "how to reach building", "how to reach academic block"
 ];
 
 // Document Lookup Triggers (Mode C)

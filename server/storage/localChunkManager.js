@@ -477,9 +477,19 @@ function searchLocalChunks(queryText = "", filters = {}, limit = 30) {
                         }
                     }
 
+                    // Campus Navigation alignment bonus
+                    const isCampusQuery = tokens.some(t => ["building", "block", "bhavan", "bhawan", "campus", "navigation", "route", "routes"].includes(t));
+                    const isCampusDoc = chunkDocType === "campus" || /campus|navigation|building|block|bhavan/i.test(chunkCat) || /building/i.test(docOriginalName);
+                    if (isCampusQuery && isCampusDoc) {
+                        score += 8.0;
+                    }
+                    if (docOriginalName && tokens.some(t => docOriginalName.includes(t))) {
+                        score += 4.0;
+                    }
+
                     if (score > 0 && matchedTerms > 0) {
-                        const coverage = matchedTerms / tokens.length;
-                        const finalScore = parseFloat(((score * 0.1) * (0.5 + 0.5 * coverage)).toFixed(4));
+                        const coverage = matchedTerms / Math.min(tokens.length, 4);
+                        const finalScore = parseFloat(((score * 0.1) * (0.5 + 0.5 * Math.min(coverage, 1.0))).toFixed(4));
 
                         results.push({
                             id: chunk.chunkId || `${docId}_${chunk.chunkIndex}`,

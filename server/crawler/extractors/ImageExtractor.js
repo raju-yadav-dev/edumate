@@ -23,14 +23,16 @@ class ImageExtractor {
         try {
             const { createWorker } = require("tesseract.js");
             const serverDir = path.resolve(__dirname, "../../");
-            const engTrainedData = path.join(serverDir, "eng.traineddata");
+            const projectRoot = path.resolve(__dirname, "../../../");
+            const trainedDataDir = fs.existsSync(path.join(serverDir, "eng.traineddata")) ? serverDir : (fs.existsSync(path.join(projectRoot, "eng.traineddata")) ? projectRoot : process.cwd());
+            const engTrainedData = path.join(trainedDataDir, "eng.traineddata");
 
             if (!fs.existsSync(engTrainedData)) {
                 throw new Error(`OCR language model not found at '${engTrainedData}'. Local Tesseract OCR is unconfigured.`);
             }
 
             worker = await createWorker("eng", 1, {
-                langPath: serverDir,
+                langPath: trainedDataDir,
                 gzip: false
             });
 

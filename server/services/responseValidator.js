@@ -46,6 +46,15 @@ const validateResponse = ({
 
     // 1. Un-grounded Institutional Query Check
     if (qTypeLower === "university_specific" && !hasTrustedSources) {
+        if (generatedAnswer && generatedAnswer.trim().length > 0) {
+            return {
+                valid: true,
+                confidence: "MEDIUM",
+                score: 0.5,
+                groundedAnswer: `*(Note: Official university documents were not found in the local knowledge base for this query. Answering from general knowledge:)*\n\n${generatedAnswer}`,
+                reason: "Answering from general knowledge since no university-specific document context was retrieved."
+            };
+        }
         return {
             valid: false,
             confidence: "LOW",

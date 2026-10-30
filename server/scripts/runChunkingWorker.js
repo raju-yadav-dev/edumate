@@ -32,7 +32,13 @@ const MIME_MAP = {
     ".doc": "application/msword",
     ".txt": "text/plain",
     ".md": "text/markdown",
-    ".markdown": "text/markdown"
+    ".markdown": "text/markdown",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".jfif": "image/jpeg",
+    ".jpe": "image/jpeg",
+    ".webp": "image/webp"
 };
 
 const getMimeType = (filePath) => {

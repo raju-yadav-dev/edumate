@@ -208,13 +208,12 @@ export default function ChatMessage({ message, prevMessage, onRegenerate, isLast
     const sourceLabel = getSourceLabel();
 
     const getCleanContent = () => {
-        if (showCitations && (isCitationsOnlyRequest(prevMessage) || message.sourceLabel === "📚 University Documents")) {
-            return "Here are the supportive documents:";
-        }
         let content = message.content || "";
-        if (sourceLabel && content.startsWith(sourceLabel)) {
-            content = content.substring(sourceLabel.length).replace(/^\s+/, "");
-        }
+        content = content
+            .replace(/\[(?:Document|Doc|Source|Ref|Reference|Page)[^\]]*\]/gi, "")
+            .replace(/\s*\[\d+\]\s*/g, " ")
+            .replace(/^(📚|🌐|ℹ️|📖)?\s*(University Knowledge Base|University Documents|EduMate Assistant|EduMate AI)[^\n]*\n+/i, "")
+            .trim();
         return content;
     };
 
@@ -229,18 +228,12 @@ export default function ChatMessage({ message, prevMessage, onRegenerate, isLast
 
             <div className="message-content-container">
                 <div className={`message-bubble-body ${isAssistant ? "assistant" : "user"}`}>
-                    {isAssistant && sourceLabel && (
-                        <div className="message-source-badge">
-                            {sourceLabel}
-                        </div>
-                    )}
+
                     <div
                         className="message-rich-text"
                         dangerouslySetInnerHTML={{ __html: formattedContent }}
                     />
-                    {isAssistant && showCitations && (
-                        <SourceCitation sources={message.sources} />
-                    )}
+
                 </div>
 
                 {isAssistant && (

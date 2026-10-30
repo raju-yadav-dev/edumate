@@ -66,7 +66,10 @@ const isCampusNavigationQuery = (question) => {
         "where is", "where is the", "where can i find", "where to find", "how to find",
         "location of", "which building", "which floor", "room number", "room no", "room",
         "where is room", "office of", "where is the office", "where can i get", "find the",
-        "where to go for", "where is located", "how do i find"
+        "where to go for", "where is located", "how do i find", "how to go", "how to reach",
+        "route", "routes", "route to", "routes to", "route between", "routes between",
+        "directions", "direction", "navigation", "campus navigation", "way to", "path to",
+        "way between", "path between"
     ];
     
     const campusTargets = [
@@ -82,10 +85,15 @@ const isCampusNavigationQuery = (question) => {
         "dynamic of machines", "x-ray", "plant science", "thermal power", "welding",
         "applied thermodynamics", "heat transfer", "ic engine", "pattern shop",
         "transportation engineering", "geology", "concrete", "retail", "racw", "health care",
-        "ftcp", "f&b", "service lab", "veg items", "yoga", "building"
+        "ftcp", "f&b", "service lab", "veg items", "yoga", "building", "academic block", "block",
+        "blocks", "bhavan", "bhawan", "satyajit", "vidyasagar", "prafulla", "jagdish", "ravindra",
+        "rammohan", "aurobindo", "satyendra", "vivekananda", "campus"
     ];
 
-    if (/(?:building|buliding)\s*(?:[ivx0-9]+|\b[a-z]+\b)/i.test(q)) {
+    if (/(?:building|buliding|block|academic\s+block)\s*(?:[ivx0-9]+|\b[a-z]+\b)/i.test(q)) {
+        return true;
+    }
+    if (/\b(?:academic\s+blocks?|campus\s+navigation|routes?\s+between|route\s+between)\b/i.test(q)) {
         return true;
     }
     if (/\b(?:room|office|lab)\s*[0-9]+/i.test(q)) {
@@ -103,6 +111,17 @@ const isCampusNavigationQuery = (question) => {
 
 const normalizeLocationQuery = (query) => {
     let q = String(query || "").toLowerCase();
+    
+    // Normalize Academic Block / Blocks to Building / Bhavan names
+    if (/\bacademic\s+blocks?\b/i.test(q) || /\broutes?\s+between\b/i.test(q) || /\broute\s+to\b/i.test(q)) {
+        q = q.replace(/\bacademic\s+block\s*([0-9]+)\b/gi, (match, n) => {
+            const romanMap = { "1": "I (Satyajit Bhavan)", "2": "II (Vidyasagar Bhavan)", "3": "III (Prafulla Bhavan)", "4": "IV (Jagdish Bhavan)", "5": "V (Ravindra Bhavan)", "6": "VI (Rammohan Bhavan)", "7": "VII (Aurobindo Bhavan)", "8": "VIII (Satyendra Bhavan)", "9": "IX (Vivekananda Bhavan)" };
+            return `Building ${romanMap[n] || n} Academic Block ${n}`;
+        });
+        if (!/\bbuilding\b/i.test(q)) {
+            q += " Building I Satyajit Building II Vidyasagar Building III Prafulla Building IV Jagdish Building V Ravindra Building VI Rammohan Building VII Aurobindo Building VIII Satyendra Building IX Vivekananda campus navigation";
+        }
+    }
     
     // Normalize B.Tech / BTECT / BTech
     if (/\b(?:b\.?tech|b\.?tect|b\s*tech|b\s*tect)\b/i.test(q)) {
@@ -896,8 +915,8 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
         modeChosen === "LLM_TOOLS" ||
         routeChosen === "LLM_TOOLS" ||
         routeChosen === "MIXED" || 
-        (modeChosen === "RAG_LLM" && hasStrongContext) ||
-        (routeChosen === "UNIVERSITY_SPECIFIC" && hasStrongContext) ||
+        (modeChosen === "RAG_LLM") ||
+        (routeChosen === "UNIVERSITY_SPECIFIC") ||
         (modeChosen === "RAG_ONLY")
     );
 
@@ -1051,8 +1070,9 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
             sourceLabel = SOURCE_LABELS.UNIVERSITY;
         }
 
-        // Campus Navigation Map Enrichment (only for explicit outdoor route / navigation queries)
-        const isOutdoorNavQuery = /\b(?:navigate|directions?|how\s+to\s+reach|route\s+to|way\s+to|distance\s+to|walk\s+to|how\s+do\s+i\s+get\s+to|nearby|near\s+me|gps)\b/i.test(normalizedQuestion) || (latitude && longitude);
+        // Campus Navigation Map Enrichment (only for external outdoor commute / navigation queries, not internal campus block routes)
+        const isInternalBlockRoute = /\b(?:academic\s+blocks?|between\s+(?:the\s+)?blocks?|building\s+[0-9ivx]+|block\s+[0-9ivx]+|campus\s+navigation)\b/i.test(normalizedQuestion);
+        const isOutdoorNavQuery = !isInternalBlockRoute && (/\b(?:navigate|directions?|how\s+to\s+reach|route\s+to|way\s+to|distance\s+to|walk\s+to|how\s+do\s+i\s+get\s+to|nearby|near\s+me|gps)\b/i.test(normalizedQuestion) || (latitude && longitude));
         if (isOutdoorNavQuery && (recPrimaryIntent === "location" || recPrimaryIntent === "campus_navigation" || intent === "location" || intent === "campus_navigation")) {
             try {
                 const mapResult = await mapService.resolveLocationRequest({
@@ -1101,10 +1121,12 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
     // Verify and ground entity-location answers to preserve exact entity-fact relationship and handle follow-ups (Requirements 2, 3, 4, 7, 8)
     const resolvedGroundedQuery = rewrittenQuery || normalizedQuestion;
     const isLocationOrHod = isCampusNavigationQuery(normalizedQuestion) ||
-        /\b(?:room|building|floor|office|cabin|where\s+is|location)\b/i.test(normalizedQuestion) ||
+        /\b(?:room|building|floor|office|cabin|where\s+is|location|academic\s+block)\b/i.test(normalizedQuestion) ||
         /\b(?:hod|head\s+of\s+(?:the\s+)?department|department\s+head)\b/i.test(normalizedQuestion);
 
-    if (isLocationOrHod && combinedDocChunks.length > 0) {
+    const isRouteOrNavigation = /\b(?:routes?|navigation|directions?|path|walkway|between|how\s+to\s+(?:go|reach|walk|navigate))\b/i.test(normalizedQuestion);
+
+    if (isLocationOrHod && !isRouteOrNavigation && combinedDocChunks.length > 0) {
         textResponse = groundEntityLocationResponse({
             question: resolvedGroundedQuery,
             textResponse,
@@ -1323,8 +1345,8 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
         intent,
         intentConfidence: hasStrongContext ? 0.95 : 0.4,
         confidence: formatted.confidence,
-        sources: formatted.sources,
-        sourceLabel: formatted.sourceLabel || sourceLabel,
+        sources: [],
+        sourceLabel: "",
         provider,
         responseTimeMs,
         suggestions,

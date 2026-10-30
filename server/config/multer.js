@@ -12,7 +12,12 @@ const fileFilter = (req, file, cb) => {
 
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 
-        "text/plain"
+        "text/plain",
+        "image/jpeg",
+        "image/jpg",
+        "image/pjpeg",
+        "image/png",
+        "image/webp"
 
     ];
 

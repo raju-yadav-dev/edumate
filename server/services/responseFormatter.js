@@ -680,21 +680,20 @@ const formatAnswer = ({
         structuredAnswer = applyConfidenceNotice(structuredAnswer, confidence);
     }
 
-    // 7. Attach source label prefix if supplied and not a general question
-    if (!isGeneral && sourceLabel && !structuredAnswer.startsWith(sourceLabel) && !structuredAnswer.startsWith("> ")) {
-        structuredAnswer = `${sourceLabel}\n\n${structuredAnswer}`;
-    }
-
-    // 8. Attach section-level source metadata
-    const { sections } = attachSectionMetadata(structuredAnswer, sources);
+    // 7. Clean all citations, bracket references, and document names for pure direct output
+    structuredAnswer = structuredAnswer
+        .replace(/\[(?:Document|Doc|Source|Ref|Reference|Page)[^\]]*\]/gi, "")
+        .replace(/\s*\[\d+\]\s*/g, " ")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
 
     return {
         answer: structuredAnswer,
         confidence,
         formatType,
-        sources: sources || [],
-        sourceLabel: sourceLabel || SOURCE_LABELS.UNIVERSITY,
-        sections
+        sources: [],
+        sourceLabel: "",
+        sections: []
     };
 };
 

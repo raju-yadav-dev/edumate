@@ -255,7 +255,7 @@ const getLlmConfig = () => {
         port,
         contextSize: numberFromEnv("LLM_CONTEXT_SIZE", profile.contextSize || 4096),
         maxTokens: numberFromEnv("LLM_MAX_TOKENS", profile.recommendedMaxTokens || 512),
-        timeout: numberFromEnv("LLM_TIMEOUT", 30000),
+        timeout: numberFromEnv("LLM_TIMEOUT", 60000),
         stream: booleanFromEnv("LLM_STREAM", profile.supportsStreaming ?? true),
         temperature: numberFromEnv("LLM_TEMPERATURE", profile.recommendedTemperature ?? 0.2),
         topP: numberFromEnv("LLM_TOP_P", profile.recommendedTopP ?? 0.9),

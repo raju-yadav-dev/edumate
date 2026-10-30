@@ -26,6 +26,9 @@ const allowedTypes = [
     "text/html",
     "application/json",
     "image/jpeg",
+    "image/jpg",
+    "image/pjpeg",
+    "image/jfif",
     "image/png",
     "image/webp",
     "image/bmp",
@@ -59,7 +62,7 @@ function verifyFileSignature(buffer, mimetype) {
     }
 
     // 5. JPEG signature (\xFF\xD8\xFF)
-    if (mimetype === "image/jpeg") {
+    if (mimetype === "image/jpeg" || mimetype === "image/jpg" || mimetype === "image/pjpeg" || mimetype === "image/jfif") {
         return buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF;
     }
 

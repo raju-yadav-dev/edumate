@@ -719,7 +719,15 @@ const syncLocalStorage = asyncHandler(async (req, res) => {
         ".doc": "application/msword",
         ".txt": "text/plain",
         ".md": "text/markdown",
-        ".markdown": "text/markdown"
+        ".markdown": "text/markdown",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".jfif": "image/jpeg",
+        ".jpe": "image/jpeg",
+        ".webp": "image/webp",
+        ".bmp": "image/bmp",
+        ".tiff": "image/tiff"
     };
 
     let registeredCount = 0;

@@ -269,14 +269,17 @@ function MessageBubble({
     const isUser = message?.role === "user";
     const [isEditing, setIsEditing] = useState(false);
     const [editText, setEditText] = useState(message?.content || "");
-    const hasSources = Array.isArray(message?.sources) && message.sources.length > 0;
-    const showCitations = !isUser && hasSources;
+    const hasSources = false;
+    const showCitations = false;
 
     const displayContent = (() => {
-        if (!isUser && showCitations && isCitationsOnlyRequest(prevMessage)) {
-            return "Here are the supportive documents:";
-        }
-        return message?.content || "";
+        let text = message?.content || "";
+        text = text
+            .replace(/\[(?:Document|Doc|Source|Ref|Reference|Page)[^\]]*\]/gi, "")
+            .replace(/\s*\[\d+\]\s*/g, " ")
+            .replace(/^(📚|🌐|ℹ️|📖)?\s*(University Knowledge Base|University Documents|EduMate Assistant|EduMate AI)[^\n]*\n+/i, "")
+            .trim();
+        return text;
     })();
 
     const handleCitationClick = (citation) => {
@@ -485,27 +488,7 @@ function MessageBubble({
                         />
                     )}
 
-                    {showCitations ? (
-                        <div className="edu-chat-citations">
-                            <p className="edu-chat-section-label">
-                                Sources &amp; Citations ({message.sources.length})
-                            </p>
-                            <div className="edu-chat-citation-grid">
-                                {message.sources.map((citation, cIdx) => (
-                                    <CitationCard 
-                                        key={`${citation.title}-${citation.page}-${citation.section}-${cIdx}`} 
-                                        citation={citation} 
-                                        onClick={() => handleCitationClick(citation)} 
-                                    />
-                                ))}
-                            </div>
-                        </div>
-                    ) : (!isUser && !isStreaming && !message.isStreaming ? (
-                        <div className="edu-chat-no-source-notice">
-                            <span className="no-source-dot"></span>
-                            <span>No document source used.</span>
-                        </div>
-                    ) : null)}
+                    {/* Sources and citations omitted for clean output */}
 
                     {!isUser && !isStreaming ? (
                         <MessageActions

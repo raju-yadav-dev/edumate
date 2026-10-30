@@ -35,6 +35,8 @@ const SUPPORTED_DOCUMENT_EXTENSIONS = new Set([
     ".png",
     ".jpg",
     ".jpeg",
+    ".jfif",
+    ".jpe",
     ".webp",
     ".bmp",
     ".tiff",

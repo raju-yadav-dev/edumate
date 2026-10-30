@@ -29,7 +29,7 @@ var periodicRefreshTimer = null;
 
 function isImageExtension(name) {
     const ext = String(name || '').toLowerCase();
-    return ext.endsWith('.png') || ext.endsWith('.jpg') || ext.endsWith('.jpeg') || ext.endsWith('.webp');
+    return ext.endsWith('.png') || ext.endsWith('.jpg') || ext.endsWith('.jpeg') || ext.endsWith('.webp') || ext.endsWith('.jfif') || ext.endsWith('.jpe');
 }
 
 function getFileIcon(name) {
@@ -1090,7 +1090,7 @@ async function handleDataTransferItems(items) {
     }
 }
 
-const SUPPORTED_EXTS = ['.pdf', '.docx', '.doc', '.txt', '.md', '.markdown', '.png', '.jpg', '.jpeg', '.webp'];
+const SUPPORTED_EXTS = ['.pdf', '.docx', '.doc', '.txt', '.md', '.markdown', '.png', '.jpg', '.jpeg', '.webp', '.jfif', '.jpe'];
 
 function isFileSupported(name) {
     const lower = (name || '').toLowerCase();

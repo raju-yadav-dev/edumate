@@ -101,6 +101,15 @@ const getLocations = asyncHandler(async (req, res) => {
  */
 const seedLocations = asyncHandler(async (req, res) => {
     const campusLocations = [
+        { name: "Academic Block 1", latitude: 22.7205, longitude: 88.4852, type: "campus", description: "Building I (Satyajit Bhavan) - Psychology, Cyber Science & Technology, Media & Journalism." },
+        { name: "Academic Block 2", latitude: 22.7208, longitude: 88.4853, type: "campus", description: "Building II (Vidyasagar Bhavan) - Admission Cell, Language Lab, AI Future Skills Hub, Auditorium." },
+        { name: "Academic Block 3", latitude: 22.7211, longitude: 88.4855, type: "campus", description: "Building III (Prafulla Bhavan) - Pharmacy, Central Library, Accounts, Exam Controller." },
+        { name: "Academic Block 4", latitude: 22.7210, longitude: 88.4848, type: "campus", description: "Building IV (Jagdish Bhavan) - Engineering & Applied Sciences (Mechanical, Civil, Robotics, Biotech, Agriculture)." },
+        { name: "Academic Block 5", latitude: 22.7212, longitude: 88.4853, type: "campus", description: "Building V (Ravindra Bhavan) - Computer Science & Engineering, Central Admin, VC, Registrar, Chancellor." },
+        { name: "Academic Block 6", latitude: 22.7214, longitude: 88.4851, type: "campus", description: "Building VI (Rammohan Bhavan) - Law School, Moot Court, Computational Science, Management & Commerce." },
+        { name: "Academic Block 7", latitude: 22.7215, longitude: 88.4855, type: "campus", description: "Building VII (Aurobindo Bhavan) - Yoga, Gymnasium, Pure Veg Canteen." },
+        { name: "Academic Block 8", latitude: 22.7216, longitude: 88.4852, type: "campus", description: "Building VIII (Satyendra Bhavan) - Conference Hall, Retail Lab, Healthcare, Placement Cell." },
+        { name: "Academic Block 9", latitude: 22.7218, longitude: 88.4858, type: "campus", description: "Building IX (Vivekananda Bhavan) - Nursing, GNM, Nursing Library & Hostel." },
         { name: "Main Gate", latitude: 22.7203, longitude: 88.4851, type: "campus", description: "Primary entrance for students, staff, and visitors." },
         { name: "Admission Office", latitude: 22.7208, longitude: 88.4853, type: "campus", description: "Enquiries regarding admissions, registration, and forms." },
         { name: "Library", latitude: 22.7211, longitude: 88.4855, type: "campus", description: "Central university library with extensive reference and books collection." },
