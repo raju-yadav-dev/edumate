@@ -18,7 +18,7 @@ const { countTokens } = require("../ai/utils/tokenizer");
 /**
  * Builds a dense, high-impact system prompt under 250 tokens tailored to the query route.
  */
-const buildCompactSystemPrompt = ({ activeInstitution, targetLanguage, intent, isRepeat = false, activeTopic = "", route = "RAG_LLM" }) => {
+const buildCompactSystemPrompt = ({ activeInstitution, targetLanguage, intent, isRepeat = false, isContinuation = false, activeTopic = "", route = "RAG_LLM" }) => {
     if (route === "LLM_ONLY" || route === "GENERAL_KNOWLEDGE") {
         const lines = [
             "You are EduMate AI, an expert educational and academic AI assistant.",
@@ -27,10 +27,13 @@ const buildCompactSystemPrompt = ({ activeInstitution, targetLanguage, intent, i
             "1. Answer clearly, accurately, and comprehensively using your broad scientific, technical, mathematical, coding, and academic knowledge.",
             "2. For degree/academic program queries (such as BCA, MCA, B.Tech), explain the degree (e.g. Bachelor of Computer Applications, Master of Computer Applications), duration, core subjects, and career path.",
             "3. For programming/technical concepts (such as Java, Python, SQL), explain what it is, core features, and practical applications.",
-            "4. Be direct, concise, and helpful. Do not output <think> tags or reasoning."
+            "4. Direct answer only: Never restate, echo, or summarize the user's question before answering (do NOT write 'Based on your query...', 'It seems you are asking...', or outline their questions). Begin immediately with the substantive comparison, facts, or explanation.",
+            "5. Be direct and concise. Do not output <think> tags or reasoning."
         ];
-        if (isRepeat) {
-            lines.push("5. The user is asking a follow-up. Answer directly without repeating prior text.");
+        if (isContinuation) {
+            lines.push("6. The user requested you to continue your previous answer. Continue immediately from the exact sentence where the previous message ended. Do not repeat prior content.");
+        } else if (isRepeat) {
+            lines.push("6. The user is asking a follow-up. Answer directly without repeating prior text.");
         }
         return lines.join("\n");
     }
@@ -41,8 +44,12 @@ const buildCompactSystemPrompt = ({ activeInstitution, targetLanguage, intent, i
             `Language: ${targetLanguage}.`,
             "Rules:",
             "1. Respond warmly, politely, and conversationally to greetings, pleasantries, and general inquiries.",
-            "2. You can help with both general academic questions and university-specific details (admissions, fees, faculty, campus)."
+            "2. You can help with both general academic questions and university-specific details (admissions, fees, faculty, campus).",
+            "3. Answer directly without echoing or restating the user's greeting or question."
         ];
+        if (isContinuation) {
+            lines.push("4. The user requested you to continue your previous answer. Continue immediately from where the previous message ended. Do not repeat prior content.");
+        }
         return lines.join("\n");
     }
 
@@ -53,7 +60,8 @@ const buildCompactSystemPrompt = ({ activeInstitution, targetLanguage, intent, i
             "Rules:",
             "1. Analyze, summarize, compare, or generate quizzes from the provided documents accurately.",
             "2. Present structured outputs with clear headings, bullet points, or markdown comparison tables.",
-            "3. Ground all specific observations in the provided document text."
+            "3. Ground all specific observations in the provided document text.",
+            "4. Direct substantive output only: Do not echo or summarize the prompt; begin immediately with the output."
         ];
         return lines.join("\n");
     }
@@ -64,7 +72,8 @@ const buildCompactSystemPrompt = ({ activeInstitution, targetLanguage, intent, i
             `Language: ${targetLanguage}.`,
             "Rules:",
             "1. Return exact notices, circulars, syllabus details, and document references found in the official records.",
-            "2. State dates, reference numbers, and department sources clearly."
+            "2. State dates, reference numbers, and department sources clearly.",
+            "3. Direct answer only: Begin immediately with the records found without restating the query."
         ];
         return lines.join("\n");
     }
@@ -77,10 +86,13 @@ const buildCompactSystemPrompt = ({ activeInstitution, targetLanguage, intent, i
             "1. Explain general concepts using your broad academic knowledge, and use the provided [Verified Institutional Context] strictly for university-specific facts (fees, admissions, courses, faculty).",
             "2. If university-specific details are missing from context, state clearly: 'I couldn't find matching information in the university knowledge base.'",
             "3. Format comparisons, fees, and multi-attribute data using markdown tables; use clear bullet points for lists.",
-            "4. Provide the direct output answer only. Do not provide sources, citations, references, document names, or bracket markers."
+            "4. Direct answer only: Never echo, restate, or outline the user's question before answering (do NOT write 'Based on your query...'). Begin immediately with the substantive answer.",
+            "5. Provide the direct output answer only. Do not provide sources, citations, references, document names, or bracket markers."
         ];
-        if (isRepeat) {
-            lines.push("4. The user is asking a follow-up. Answer directly without repeating prior text.");
+        if (isContinuation) {
+            lines.push("6. The user requested you to continue your previous answer. Continue immediately from the exact sentence where the previous message ended. Do not repeat prior content.");
+        } else if (isRepeat) {
+            lines.push("6. The user is asking a follow-up. Answer directly without repeating prior text.");
         }
         return lines.join("\n");
     }
@@ -96,11 +108,14 @@ const buildCompactSystemPrompt = ({ activeInstitution, targetLanguage, intent, i
         "4. For comparison or synthesis questions, retrieve evidence from every relevant context block, then clearly compare or summarize based on that evidence. Label any logical inference explicitly as 'Based on the above information...' to distinguish it from sourced facts.",
         "5. Strict Entity-Fact Relationship: Keep each room number, building, floor, department, fee, and role strictly bound to its exact entity. Never combine attributes from unrelated programmes or departments.",
         "6. Quote exact numbers and details verbatim from the context. Do not output <think> tags or reasoning chains.",
-        "7. Provide the direct output answer only. Do not provide sources, citations, references, document names, or bracket markers (such as [1] or [Document])."
+        "7. Direct answer only: Never restate, echo, or summarize the user's query before answering (do NOT write 'Based on your query...'). Begin immediately with the substantive facts.",
+        "8. Provide the direct output answer only. Do not provide sources, citations, references, document names, or bracket markers (such as [1] or [Document])."
     ];
 
-    if (isRepeat) {
-        lines.push("7. The user is asking a follow-up. Answer directly without repeating prior text.");
+    if (isContinuation) {
+        lines.push("9. The user requested you to continue your previous answer. Continue immediately from where the previous message stopped. Do not repeat prior content.");
+    } else if (isRepeat) {
+        lines.push("9. The user is asking a follow-up. Answer directly without repeating prior text.");
     }
     if (activeTopic) {
         lines.push(`Active topic: ${activeTopic}.`);
@@ -173,6 +188,8 @@ const buildMessages = ({
     user,
     questionType,
     isRepeat = false,
+    isContinuation = false,
+    continuationContext = "",
     activeTopic = "",
     language = "en",
     studentProfile,
@@ -192,6 +209,7 @@ const buildMessages = ({
         targetLanguage,
         intent,
         isRepeat,
+        isContinuation,
         activeTopic,
         route: effectiveRoute
     });
@@ -236,6 +254,10 @@ const buildMessages = ({
 
     if (memoryContext) {
         userPromptParts.push(`[Conversation Memory]\n${memoryContext}`);
+    }
+
+    if (isContinuation && continuationContext) {
+        userPromptParts.push(`[Continuation Directive]\n${continuationContext}`);
     }
 
     // Single insertion of verified institutional evidence when available

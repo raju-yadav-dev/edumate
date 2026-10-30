@@ -602,7 +602,32 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
         };
     }
 
-    // 2. Query Analysis (Topic Switch, Rewrite Query, Intent, Entities, Repeat Check)
+    // 2. Query Analysis & Continuation Handling
+    const isContinuationQuery = (text) => {
+        const clean = String(text || "").trim().toLowerCase().replace(/[.,!?;:]/g, " ");
+        const words = clean.split(/\s+/).filter(Boolean);
+        if (words.length === 0 || words.length > 12) return false;
+        return /\b(?:continue|carry\s+on|go\s+on|keep\s+going|proceed|finish(?:\s+it|\s+this)?|complete(?:\s+it|\s+this)?|sesh\s+koro|sesh\s+korun|bolte\s+chaicho|aro\s+bolo|aro\s+bolun|aage\s+batao|aur\s+batao|poora\s+karo|jaari\s+rakho)\b/i.test(clean);
+    };
+
+    let isContinuation = false;
+    let continuationContext = "";
+    let previousUserQuestion = "";
+    if (isContinuationQuery(normalizedQuestion) && Array.isArray(rawHistory) && rawHistory.length > 0) {
+        const lastAssistantTurn = [...rawHistory].reverse().find(t => t.role === "assistant" && t.content && t.content.trim().length > 0);
+        const lastUserTurn = [...rawHistory].reverse().find(t => t.role === "user" && t.content && t.content.trim().length > 0);
+        if (lastAssistantTurn) {
+            isContinuation = true;
+            previousUserQuestion = lastUserTurn?.content?.trim() || "";
+            const lastSnippet = lastAssistantTurn.content.trim().slice(-160);
+            continuationContext = `The user asked to continue your previous answer. Your previous response ended with:\n"${lastSnippet}"\nPick up directly from that exact point and complete the response without repeating prior text.`;
+            console.log(`[Continuation Engine] Active continuation detected for query "${normalizedQuestion}". Continuing response for: "${previousUserQuestion}"`);
+            if (previousUserQuestion) {
+                expandedQuestion = normalizeAliases(previousUserQuestion);
+            }
+        }
+    }
+
     let followUpQuery = expandedQuestion;
     if (/\b(what\s+about|how\s+about|what\s+of)\s+(pg|ug|undergraduate|postgraduate)\b/i.test(normalizedQuestion)) {
         let previousIntent = "";
@@ -660,7 +685,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
     let recPrimaryIntent = "GENERAL_QUERY";
     let intent = "general_chat";
     let entities = {};
-    let isRepeat = false;
+    let isRepeat = isContinuation;
     let activeSubqueries = [expandedQuestion];
     let studentProfile = null;
     let resolvedActiveTopic = activeTopic || "";
@@ -927,7 +952,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
 
         const stopPromptTimer = tracker.startTimer("promptBuilder");
         const tempMessages = promptService.buildPromptMessages({
-            question: rewrittenQuery,
+            question: isContinuation ? `${expandedQuestion} (Continue previous answer)` : rewrittenQuery,
             intent: recPrimaryIntent || intent,
             retrievedChunks: combinedDocChunks,
             universitySiteResults: [],
@@ -935,7 +960,9 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
             historyText,
             user: activeUser,
             questionType: activeQuestionType,
-            isRepeat,
+            isRepeat: isRepeat || isContinuation,
+            isContinuation,
+            continuationContext,
             activeTopic: resolvedActiveTopic,
             language,
             studentProfile,
@@ -963,7 +990,10 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
         llmStart = Date.now();
 
         const dynamicBudget = calculateDynamicOutputBudget(rewrittenQuery, recPrimaryIntent || intent);
-        const resolvedMaxTokens = (routeChosen === "GENERAL_KNOWLEDGE" || routeChosen === "CONVERSATIONAL") ? Math.min(140, dynamicBudget?.maxTokens || 140) : (dynamicBudget?.maxTokens || 320);
+        const envMax = llmConfig.maxTokens || 512;
+        const resolvedMaxTokens = (routeChosen === "CONVERSATIONAL" && !isContinuation)
+            ? Math.min(160, envMax)
+            : Math.min(envMax, Math.max(350, dynamicBudget?.maxTokens || 380));
 
         // STAGE 7: llama.cpp Request Payload
         console.log(`[STAGE 7: llama.cpp Request Payload]`, {
