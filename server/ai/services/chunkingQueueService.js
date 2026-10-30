@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const EventEmitter = require("events");
+const mongoose = require("mongoose");
 const Document = require("../../models/Document");
 const loggerService = require("../../services/loggerService");
 const paths = require("../../config/paths");
@@ -115,6 +116,10 @@ const getWorkerStatus = () => {
  * Enqueue documents into background queue
  */
 const enqueueDocuments = async ({ ids = [], category = null, allPending = false, forceRechunk = false, user = null } = {}) => {
+    if (!mongoose.connection || mongoose.connection.readyState !== 1) {
+        emitLog("WARNING", "Cannot enqueue documents: MongoDB connection is offline.");
+        return { count: 0, queuedIds: [], offline: true };
+    }
     const filter = { status: "active" };
 
     if (ids && Array.isArray(ids) && ids.length > 0) {
@@ -180,6 +185,9 @@ const runWorker = async (workerNumber) => {
     const workerId = `Worker #${workerNumber}`;
 
     while (!isQueuePaused) {
+        if (!mongoose.connection || mongoose.connection.readyState !== 1) {
+            break;
+        }
         // Atomically fetch and lock next available queued document
         const document = await Document.findOneAndUpdate(
             {
@@ -421,16 +429,20 @@ const restartWorkerPool = async () => {
     setPersistedWorkerState("RUNNING");
 
     // Reset stuck processing tasks
-    await Document.updateMany(
-        { status: "active", embeddingStatus: { $in: ["processing", "Processing"] } },
-        {
-            $set: {
-                embeddingStatus: "queued",
-                workerId: "",
-                currentStage: "Recovered during worker restart"
-            }
-        }
-    );
+    if (mongoose.connection?.readyState === 1) {
+        try {
+            await Document.updateMany(
+                { status: "active", embeddingStatus: { $in: ["processing", "Processing"] } },
+                {
+                    $set: {
+                        embeddingStatus: "queued",
+                        workerId: "",
+                        currentStage: "Recovered during worker restart"
+                    }
+                }
+            );
+        } catch (_) {}
+    }
 
     activeWorkers.clear();
     triggerWorkerPool();
@@ -444,30 +456,41 @@ const reindexAll = async () => {
     emitLog("WARNING", "Re-indexing all active documents requested by administrator...");
     isQueuePaused = false;
     workerPoolState = "RUNNING";
-    const docs = await Document.find({ status: "active" }).select("_id");
-    const ids = docs.map((d) => d._id);
-    const result = await enqueueDocuments({ ids, forceRechunk: true });
+    if (mongoose.connection?.readyState === 1) {
+        const docs = await Document.find({ status: "active" }).select("_id");
+        const ids = docs.map((d) => d._id);
+        const result = await enqueueDocuments({ ids, forceRechunk: true });
+        queueEvents.emit("worker_status", { status: getWorkerStatus(), isPaused: false });
+        queueEvents.emit("queue_update", {});
+        return result;
+    }
     queueEvents.emit("worker_status", { status: getWorkerStatus(), isPaused: false });
     queueEvents.emit("queue_update", {});
-    return result;
+    return { count: 0, queuedIds: [], offline: true };
 };
 
 const clearQueue = async () => {
-    const result = await Document.updateMany(
-        { status: "active", embeddingStatus: { $in: ["queued", "Queued"] } },
-        {
-            $set: {
-                embeddingStatus: "pending",
-                queuePosition: 0,
-                workerId: "",
-                currentStage: "Queue cleared by administrator",
-                progress: 0
-            }
-        }
-    );
-    emitLog("WARNING", `Cleared ${result.modifiedCount} documents from the waiting queue.`);
-    queueEvents.emit("queue_update", { cleared: result.modifiedCount });
-    return { success: true, count: result.modifiedCount };
+    let count = 0;
+    if (mongoose.connection?.readyState === 1) {
+        try {
+            const result = await Document.updateMany(
+                { status: "active", embeddingStatus: { $in: ["queued", "Queued"] } },
+                {
+                    $set: {
+                        embeddingStatus: "pending",
+                        queuePosition: 0,
+                        workerId: "",
+                        currentStage: "Queue cleared by administrator",
+                        progress: 0
+                    }
+                }
+            );
+            count = result.modifiedCount;
+        } catch (_) {}
+    }
+    emitLog("WARNING", `Cleared ${count} documents from the waiting queue.`);
+    queueEvents.emit("queue_update", { cleared: count });
+    return { success: true, count };
 };
 
 /**
@@ -540,19 +563,26 @@ const retryJob = async (documentId) => {
 };
 
 const retryAllFailed = async () => {
-    const failedDocs = await Document.find({
-        status: "active",
-        embeddingStatus: { $in: ["failed", "Failed", "cancelled", "Cancelled"] }
-    }).select("_id");
-    const ids = failedDocs.map((d) => d._id);
-    emitLog("RETRY", `Retrying all ${ids.length} failed/cancelled ingestion jobs.`);
-    return enqueueDocuments({ ids, forceRechunk: true });
+    if (mongoose.connection?.readyState === 1) {
+        const failedDocs = await Document.find({
+            status: "active",
+            embeddingStatus: { $in: ["failed", "Failed", "cancelled", "Cancelled"] }
+        }).select("_id");
+        const ids = failedDocs.map((d) => d._id);
+        emitLog("RETRY", `Retrying all ${ids.length} failed/cancelled ingestion jobs.`);
+        return enqueueDocuments({ ids, forceRechunk: true });
+    }
+    emitLog("WARNING", "Cannot retry failed jobs: MongoDB is offline.");
+    return { count: 0, queuedIds: [], offline: true };
 };
 
 /**
  * Startup recovery: restores queue state from MongoDB on server restart
  */
 const recoverQueueOnStartup = async () => {
+    if (!mongoose.connection || mongoose.connection.readyState !== 1) {
+        return;
+    }
     try {
         // Reset stuck processing documents to queued
         const stuckDocs = await Document.updateMany(

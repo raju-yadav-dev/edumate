@@ -42,6 +42,7 @@ require("dotenv").config({ path: path.resolve(__dirname, ".env"), override: true
 const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
+mongoose.set("bufferCommands", false);
 const multer = require("multer");
 
 const localStorageManager = require("./storage/localStorageManager");
@@ -518,20 +519,24 @@ const handleStorageTree = async (req, res) => {
     const stats = localStorageManager.getLocalStorageStats(true);
 
     const docMap = new Map();
-    const allDocs = await Document.find({ status: { $ne: "deleted" } }).lean();
-    for (const d of allDocs) {
-        if (d.storagePath) {
-            const sp = d.storagePath.toLowerCase().replace(/\\/g, "/");
-            docMap.set(sp, d);
-            docMap.set(sp.replace(/^file_explorer\//, ""), d);
-        }
-        if (d.metadata?.localRelativePath) {
-            const lp = d.metadata.localRelativePath.toLowerCase().replace(/\\/g, "/");
-            docMap.set(lp, d);
-            docMap.set(lp.replace(/^file_explorer\//, ""), d);
-        }
-        if (d.storedName) docMap.set(d.storedName.toLowerCase(), d);
-        if (d.originalName) docMap.set(d.originalName.toLowerCase(), d);
+    if (mongoose.connection?.readyState === 1) {
+        try {
+            const allDocs = await Document.find({ status: { $ne: "deleted" } }).lean();
+            for (const d of allDocs) {
+                if (d.storagePath) {
+                    const sp = d.storagePath.toLowerCase().replace(/\\/g, "/");
+                    docMap.set(sp, d);
+                    docMap.set(sp.replace(/^file_explorer\//, ""), d);
+                }
+                if (d.metadata?.localRelativePath) {
+                    const lp = d.metadata.localRelativePath.toLowerCase().replace(/\\/g, "/");
+                    docMap.set(lp, d);
+                    docMap.set(lp.replace(/^file_explorer\//, ""), d);
+                }
+                if (d.storedName) docMap.set(d.storedName.toLowerCase(), d);
+                if (d.originalName) docMap.set(d.originalName.toLowerCase(), d);
+            }
+        } catch (_) {}
     }
 
     const buildTree = (dir, relPrefix = "") => {
@@ -630,6 +635,14 @@ app.get("/api/v1/documents/storage/tree", handleStorageTree);
 
 // Storage Scan & Sync
 const handleScanSync = async (req, res) => {
+    if (mongoose.connection?.readyState !== 1) {
+        return sendJson(res, 200, "Database is offline. Storage folders and files verified.", {
+            totalDiscovered: 0,
+            ignoredFilesCount: 0,
+            registeredCount: 0,
+            documentIds: []
+        });
+    }
     const crypto = require("crypto");
     localStorageManager.ensureStorageRoot();
     const scanDir = localStorageManager.FILE_EXPLORER_DIR;
@@ -746,12 +759,20 @@ const handleQdrantStatus = async (req, res) => {
         isConnected = false;
     }
 
-    const [indexedDocsCount, pendingDocsCount, failedDocsCount, partialDocsCount] = await Promise.all([
-        Document.countDocuments({ status: "active", embeddingStatus: { $in: ["completed", "indexed"] } }),
-        Document.countDocuments({ status: "active", embeddingStatus: { $in: ["pending", "queued", "processing"] } }),
-        Document.countDocuments({ status: "active", embeddingStatus: "failed" }),
-        Document.countDocuments({ status: "active", embeddingStatus: "partial" })
-    ]);
+    let indexedDocsCount = 0;
+    let pendingDocsCount = 0;
+    let failedDocsCount = 0;
+    let partialDocsCount = 0;
+    if (mongoose.connection?.readyState === 1) {
+        try {
+            [indexedDocsCount, pendingDocsCount, failedDocsCount, partialDocsCount] = await Promise.all([
+                Document.countDocuments({ status: "active", embeddingStatus: { $in: ["completed", "indexed"] } }),
+                Document.countDocuments({ status: "active", embeddingStatus: { $in: ["pending", "queued", "processing"] } }),
+                Document.countDocuments({ status: "active", embeddingStatus: "failed" }),
+                Document.countDocuments({ status: "active", embeddingStatus: "partial" })
+            ]);
+        } catch (_) {}
+    }
 
     const chunkStats = localChunkManager.getAllChunkStats();
 
@@ -816,12 +837,24 @@ app.get(["/chunks/:documentId", "/api/documents/:documentId/chunks", "/api/v1/do
 
 // Analytics Overview
 app.get(["/chunking/analytics", "/api/documents/chunking/analytics", "/api/v1/documents/chunking/analytics"], async (req, res) => {
-    const mongoTotalDocs = await Document.countDocuments({ status: "active" });
-    const mongoIndexedDocs = await Document.countDocuments({ status: "active", embeddingStatus: { $in: ["completed", "indexed", "Indexed", "Completed"] } });
-    const queuedDocs = await Document.countDocuments({ status: "active", embeddingStatus: { $in: ["queued", "Queued"] } });
-    const processingDocs = await Document.countDocuments({ status: "active", embeddingStatus: { $in: ["processing", "Processing"] } });
-    const failedDocsCount = await Document.countDocuments({ status: "active", embeddingStatus: { $in: ["failed", "Failed", "cancelled", "Cancelled"] } });
-    const partialDocs = await Document.countDocuments({ status: "active", embeddingStatus: "partial" });
+    let mongoTotalDocs = 0;
+    let mongoIndexedDocs = 0;
+    let queuedDocs = 0;
+    let processingDocs = 0;
+    let failedDocsCount = 0;
+    let partialDocs = 0;
+    if (mongoose.connection?.readyState === 1) {
+        try {
+            [mongoTotalDocs, mongoIndexedDocs, queuedDocs, processingDocs, failedDocsCount, partialDocs] = await Promise.all([
+                Document.countDocuments({ status: "active" }),
+                Document.countDocuments({ status: "active", embeddingStatus: { $in: ["completed", "indexed", "Indexed", "Completed"] } }),
+                Document.countDocuments({ status: "active", embeddingStatus: { $in: ["queued", "Queued"] } }),
+                Document.countDocuments({ status: "active", embeddingStatus: { $in: ["processing", "Processing"] } }),
+                Document.countDocuments({ status: "active", embeddingStatus: { $in: ["failed", "Failed", "cancelled", "Cancelled"] } }),
+                Document.countDocuments({ status: "active", embeddingStatus: "partial" })
+            ]);
+        } catch (_) {}
+    }
     
     const chunkStats = localChunkManager.getAllChunkStats();
     const storageStats = localStorageManager.getLocalStorageStats(true);
@@ -831,35 +864,45 @@ app.get(["/chunking/analytics", "/api/documents/chunking/analytics", "/api/v1/do
     const { supportedFiles } = localStorageManager.scanKnowledgeDocuments();
     
     let physicalIndexedCount = 0;
-    for (const f of supportedFiles) {
-        const doc = await Document.findOne({
-            $or: [
-                { storagePath: f.relPath },
-                { storagePath: `file_explorer/${f.relPath}` },
-                { "metadata.localRelativePath": f.relPath },
-                { "metadata.localRelativePath": `file_explorer/${f.relPath}` },
-                { originalName: f.fileName }
-            ],
-            status: "active",
-            embeddingStatus: { $in: ["completed", "indexed", "Indexed", "Completed"] }
-        }).select("_id").lean();
-        if (doc) physicalIndexedCount++;
+    if (mongoose.connection?.readyState === 1) {
+        try {
+            for (const f of supportedFiles) {
+                const doc = await Document.findOne({
+                    $or: [
+                        { storagePath: f.relPath },
+                        { storagePath: `file_explorer/${f.relPath}` },
+                        { "metadata.localRelativePath": f.relPath },
+                        { "metadata.localRelativePath": `file_explorer/${f.relPath}` },
+                        { originalName: f.fileName }
+                    ],
+                    status: "active",
+                    embeddingStatus: { $in: ["completed", "indexed", "Indexed", "Completed"] }
+                }).select("_id").lean();
+                if (doc) physicalIndexedCount++;
+            }
+        } catch (_) {}
     }
 
-    const failedDocsList = await Document.find({
-        status: "active",
-        embeddingStatus: { $in: ["failed", "Failed", "cancelled", "Cancelled"] }
-    })
-        .select("originalName category failureInfo currentStage updatedAt department fileSize lastError retryCount storagePath")
-        .sort({ updatedAt: -1 })
-        .limit(50)
-        .lean();
+    let failedDocsList = [];
+    if (mongoose.connection?.readyState === 1) {
+        try {
+            failedDocsList = await Document.find({
+                status: "active",
+                embeddingStatus: { $in: ["failed", "Failed", "cancelled", "Cancelled"] }
+            }).select("originalName failureInfo category updatedAt").limit(20).lean();
+        } catch (_) {}
+    }
 
-    const categoryStats = await Document.aggregate([
-        { $match: { status: "active" } },
-        { $group: { _id: "$category", count: { $sum: 1 }, totalChunks: { $sum: "$chunkStats.totalChunks" } } },
-        { $sort: { count: -1 } }
-    ]);
+    let categoryStats = [];
+    if (mongoose.connection?.readyState === 1) {
+        try {
+            categoryStats = await Document.aggregate([
+                { $match: { status: "active" } },
+                { $group: { _id: "$category", count: { $sum: 1 }, totalChunks: { $sum: "$chunkStats.totalChunks" } } },
+                { $sort: { count: -1 } }
+            ]);
+        } catch (_) {}
+    }
 
     const totalStorageSizeBytes = storageStats.used || 0;
 

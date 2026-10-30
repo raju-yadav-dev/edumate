@@ -210,6 +210,15 @@ const startServer = async () => {
                     console.error("⚠️ Failed to initialize local storage root:", storageErr.message);
                 }
 
+                // Knowledge Studio startup queue recovery
+                try {
+                    const chunkingQueueService = require("./ai/services/chunkingQueueService");
+                    await chunkingQueueService.recoverQueueOnStartup();
+                    console.log("✓ Knowledge Studio queue recovered on startup.");
+                } catch (queueErr) {
+                    console.error("⚠️ Failed to recover Knowledge Studio queue:", queueErr.message);
+                }
+
                 // Parallel checks for other services
                 const [aiCheck, mapCheck] = await Promise.all([
                     // AI services check (llama.cpp probe)

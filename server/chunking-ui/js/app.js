@@ -41,14 +41,20 @@ function getFileIcon(name) {
 // ==========================================
 // Initialization & Navigation
 // ==========================================
-document.addEventListener('DOMContentLoaded', () => {
+function bootStudioApp() {
     initNavigation();
     initUploadZone();
     initGlobalEvents();
     initSSEStreams();
     startPeriodicRefresh(15000);
     fetchInitialData();
-});
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootStudioApp);
+} else {
+    bootStudioApp();
+}
 
 function initNavigation() {
     const navItems = document.querySelectorAll('.nav-item');
@@ -143,7 +149,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 async function fetchInitialData() {
-    await Promise.all([
+    await Promise.allSettled([
         fetchHealth(),
         fetchCategories(),
         fetchQueue(),
@@ -459,11 +465,15 @@ function initSSEStreams() {
 
     try {
         const logsSource = new EventSource('/logs/stream');
-        logsSource.addEventListener('init', (e) => {
-            const data = JSON.parse(e.data);
-            state.logs = data.logs || [];
-            renderLogs();
-        });
+        const handleInitLogs = (e) => {
+            try {
+                const data = JSON.parse(e.data);
+                state.logs = data.logs || [];
+                renderLogs();
+            } catch (_) {}
+        };
+        logsSource.addEventListener('init', handleInitLogs);
+        logsSource.addEventListener('initial_logs', handleInitLogs);
         logsSource.addEventListener('log', (e) => {
             const log = JSON.parse(e.data);
             state.logs.push(log);
@@ -1541,7 +1551,9 @@ function appendLogLine(log) {
 function setLogFilter(level) {
     state.logFilter = level;
     document.querySelectorAll('.filter-chip').forEach(el => {
-        el.classList.toggle('active', el.innerText === level);
+        const text = (el.textContent || el.innerText || "").trim();
+        const matches = text === level || (level === 'WARNING' && text === 'WARN') || (level === 'WARN' && text === 'WARNING');
+        el.classList.toggle('active', matches);
     });
     renderLogs();
 }
@@ -1568,14 +1580,19 @@ function copyAllLogs() {
 }
 
 function exportLogsFile() {
-    const text = state.logs.map(l => `[${l.timestamp}] [${l.level}] ${l.message}`).join('\n');
-    const blob = new Blob([text], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `chunking_runtime_logs_${Date.now()}.log`;
-    a.click();
-    URL.revokeObjectURL(url);
+    try {
+        const text = state.logs.map(l => `[${l.timestamp}] [${l.level}] ${l.message}`).join('\n');
+        const blob = new Blob([text], { type: 'text/plain' });
+        if (typeof URL !== 'undefined' && URL.createObjectURL) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `edumate-chunking-logs-${Date.now()}.txt`;
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast('Logs exported successfully', 'success');
+        }
+    } catch (_) {}
 }
 
 // ==========================================
@@ -1641,7 +1658,7 @@ async function startWorker() {
     try {
         const res = await fetch('/worker/start', { method: 'POST' });
         const json = await res.json();
-        console.log('[WorkerPool] Started:', json);
+        showToast('Worker pool started', 'success');
     } catch (err) {
         console.error('[WorkerPool] Start error:', err);
     } finally {
@@ -1654,6 +1671,7 @@ async function startWorker() {
 async function pauseWorker() {
     try {
         await fetch('/queue/pause', { method: 'POST' });
+        showToast('Queue paused', 'warning');
     } finally {
         fetchQueue();
         fetchHealth();
@@ -1663,6 +1681,7 @@ async function pauseWorker() {
 async function resumeWorker() {
     try {
         await fetch('/queue/resume', { method: 'POST' });
+        showToast('Queue resumed', 'success');
     } finally {
         fetchQueue();
         fetchHealth();
@@ -1672,6 +1691,7 @@ async function resumeWorker() {
 async function restartWorker() {
     try {
         await fetch('/worker/restart', { method: 'POST' });
+        showToast('Worker pool restarted', 'success');
     } finally {
         fetchQueue();
         fetchAnalytics();
@@ -1682,6 +1702,7 @@ async function restartWorker() {
 async function retryFailedJobs() {
     try {
         await fetch('/queue/retry-all', { method: 'POST' });
+        showToast('Retrying all failed jobs', 'info');
     } finally {
         fetchQueue();
         fetchAnalytics();
@@ -1716,6 +1737,7 @@ async function clearQueue() {
     if (confirm('Clear all waiting documents from the processing queue?')) {
         try {
             await fetch('/queue/clear', { method: 'POST' });
+            showToast('Queue cleared', 'warning');
         } finally {
             fetchQueue();
             fetchAnalytics();
@@ -1729,6 +1751,7 @@ async function triggerStorageSync() {
     try {
         const res = await fetch('/storage/scan-sync', { method: 'POST' });
         const json = await res.json();
+        showToast('Storage synchronized', 'success');
         if (json.success) {
             fetchStorageTree();
             fetchAnalytics();
@@ -1786,15 +1809,94 @@ function escapeQuotes(str) {
 }
 
 function copyToClipboard(text) {
-    navigator.clipboard.writeText(text).then(() => {
-        alert('Copied to clipboard!');
-    }).catch(() => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => {
+            showToast('Copied to clipboard!', 'success');
+        }).catch(() => fallbackCopy(text));
+    } else {
+        fallbackCopy(text);
+    }
+}
+
+function fallbackCopy(text) {
+    try {
         const el = document.createElement('textarea');
         el.value = text;
         document.body.appendChild(el);
         el.select();
         document.execCommand('copy');
         document.body.removeChild(el);
-        alert('Copied to clipboard!');
-    });
+        showToast('Copied to clipboard!', 'success');
+    } catch (_) {}
+}
+
+
+// ==========================================
+// Toast Notifications & Window Scope Exports
+// ==========================================
+function showToast(message, type = 'info') {
+    try {
+        let container = document.getElementById('studioToastContainer');
+        if (!container) {
+            container = document.createElement('div');
+            container.id = 'studioToastContainer';
+            container.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:999999;display:flex;flex-direction:column;gap:8px;pointer-events:none;';
+            document.body.appendChild(container);
+        }
+        const toast = document.createElement('div');
+        const bg = type === 'success' ? '#10b981' : type === 'error' ? '#ef4444' : type === 'warning' ? '#f59e0b' : '#3b82f6';
+        toast.style.cssText = `background:${bg};color:#ffffff;padding:10px 16px;border-radius:8px;font-size:0.85rem;font-weight:600;box-shadow:0 4px 14px rgba(0,0,0,0.35);transition:all 0.25s ease;pointer-events:auto;max-width:340px;word-break:break-word;opacity:0;transform:translateY(12px);`;
+        toast.textContent = message;
+        container.appendChild(toast);
+        requestAnimationFrame(() => {
+            toast.style.opacity = '1';
+            toast.style.transform = 'translateY(0)';
+        });
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateY(12px)';
+            setTimeout(() => toast.remove(), 250);
+        }, 3000);
+    } catch (_) {}
+}
+
+// Bind all button and context actions explicitly to window
+if (typeof window !== 'undefined') {
+    window.switchTab = switchTab;
+    window.startWorker = startWorker;
+    window.pauseWorker = pauseWorker;
+    window.resumeWorker = resumeWorker;
+    window.restartWorker = restartWorker;
+    window.retryFailedJobs = retryFailedJobs;
+    window.retrySingleDoc = retrySingleDoc;
+    window.reindexAll = reindexAll;
+    window.clearQueue = clearQueue;
+    window.triggerStorageSync = triggerStorageSync;
+    window.enqueueSingleDoc = enqueueSingleDoc;
+    window.enqueueSelectedDocuments = enqueueSelectedDocuments;
+    window.deleteSelectedDocuments = deleteSelectedDocuments;
+    window.clearStorageSelection = clearStorageSelection;
+    window.promptNewFolder = promptNewFolder;
+    window.openUploadForFolder = openUploadForFolder;
+    window.startStagedUpload = startStagedUpload;
+    window.clearStagedFiles = clearStagedFiles;
+    window.clearUploadPipelineTracker = clearUploadPipelineTracker;
+    window.setLogFilter = setLogFilter;
+    window.filterLogSearch = filterLogSearch;
+    window.copyAllLogs = copyAllLogs;
+    window.exportLogsFile = exportLogsFile;
+    window.clearLogs = clearLogs;
+    window.fetchHealth = fetchHealth;
+    window.fetchQueue = fetchQueue;
+    window.fetchAnalytics = fetchAnalytics;
+    window.fetchStorageTree = fetchStorageTree;
+    window.fetchCategories = fetchCategories;
+    window.closeChunkDrawer = closeChunkDrawer;
+    window.closeInputModal = closeInputModal;
+    window.submitInputModal = submitInputModal;
+    window.closePreviewModal = closePreviewModal;
+    window.handleEmptyContextMenu = typeof handleEmptyContextMenu !== 'undefined' ? handleEmptyContextMenu : () => {};
+    window.filterStorageTree = typeof filterStorageTree !== 'undefined' ? filterStorageTree : () => {};
+    window.handleCategoryChange = typeof handleCategoryChange !== 'undefined' ? handleCategoryChange : () => {};
+    window.showToast = showToast;
 }

@@ -182,6 +182,7 @@ app.get(/^\/studio\/?$/, (req, res) => {
 });
 app.use("/studio", express.static(studioUiPath));
 const studioApp = require("./chunkingServer");
+app.use("/studio", studioApp);
 app.use(studioApp);
 
 // ==============================
