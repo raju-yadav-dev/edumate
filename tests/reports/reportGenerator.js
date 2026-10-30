@@ -36,7 +36,7 @@ function generateMarkdownReport(results) {
         `| :--- | :---: | :---: | :--- |`,
         `| **Express Backend API** | \`${s.backend?.status || "ONLINE"}\` | 5000 | ${s.backend?.latencyMs || 0} ms |`,
         `| **Vite + React Frontend** | \`${s.frontend?.status || "ONLINE"}\` | 5173 | ${s.frontend?.latencyMs || 0} ms |`,
-        `| **Chunking Microservice** | \`${s.chunkingServer?.status || "ONLINE"}\` | 5001 | ${s.chunkingServer?.details?.status || "Ready"} |`,
+        `| **Chunking Microservice** | \`${s.chunkingServer?.status || "ONLINE"}\` | 5000 | ${s.chunkingServer?.details?.status || "Ready"} |`,
         `| **Qdrant Vector Database** | \`${s.qdrant?.status || "ONLINE"}\` | 6333 | 768-dim (Cosine) |`,
         `| **MongoDB Database** | \`${s.mongodb?.status || "ONLINE"}\` | 27017 | ${s.mongodb?.details || "Connected"} |`,
         `| **Local AI (llama.cpp)** | \`${s.localAI?.status || "ONLINE"}\` | 8080 | Qwen Model & KV Cache |`,
@@ -217,7 +217,7 @@ function generateHtmlReport(results) {
                     <tr>
                         <td><strong>Chunking Server</strong></td>
                         <td><span class="status-pill status-${(s.chunkingServer?.status || 'ONLINE').toLowerCase()}">${s.chunkingServer?.status || 'ONLINE'}</span></td>
-                        <td>5001</td>
+                        <td>5000</td>
                         <td>${s.chunkingServer?.details?.status || 'Queue ready'}</td>
                     </tr>
                     <tr>

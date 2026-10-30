@@ -36,7 +36,9 @@ const sanitizeUser = (user) => ({
     department: user.department || "",
     avatar: user.avatar || "",
     failedLoginAttempts: user.failedLoginAttempts || 0,
-    status: user.status
+    status: user.status,
+    lastLoginAt: user.lastLoginAt || null,
+    createdAt: user.createdAt || null
 });
 
 const createSession = async (user, sessionInfo = {}) => {

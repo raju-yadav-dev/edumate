@@ -116,7 +116,7 @@ const manifest = {
     components: {
         frontend: "React 18 + Vite (Production Bundle)",
         backend: "Express 4 + Node.js (Production Microservices)",
-        chunkingEngine: "EduMate Browser Chunking Studio Engine (Port 5001)",
+        chunkingEngine: "EduMate Browser Chunking Studio Engine (Port 5000 /studio)",
         aiRuntime: "llama.cpp (Qwen 2.5 3B Instruct)",
         vectorDatabase: "Qdrant 1.18+ (Vector Engine)",
         database: "MongoDB 6+",

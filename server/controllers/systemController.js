@@ -25,14 +25,20 @@ const getSystemHealth = async (req, res) => {
                 status: report.overallStatus,
                 serviceStatus: report.serviceStatus,
                 services: {
-                    mongodb: report.services.mongodb.status,
-                    qdrant: report.services.qdrant.status,
-                    llamaCpp: report.services.llamaCpp.status === "connected" 
-                        ? `connected (${report.services.llamaCpp.provider} - ${report.services.llamaCpp.model})`
-                        : "disconnected",
-                    storage: report.services.storage.status,
-                    embedding: report.services.embedding.status,
+                    mongodb: report.services.mongodb,
+                    qdrant: report.services.qdrant,
+                    llamaCpp: report.services.llamaCpp,
+                    storage: report.services.storage,
+                    localStorage: report.services.storage,
+                    embedding: report.services.embedding,
                     details: report.services
+                },
+                workerStatus: "idle",
+                queueSummary: {
+                    concurrency: 2,
+                    activeJobs: report.queueStatus?.indexingQueue?.processing || 0,
+                    workerUtilizationPct: 0,
+                    waitingJobs: report.queueStatus?.indexingQueue?.pending || 0
                 },
                 memoryUsage: report.memoryUsage,
                 queueStatus: report.queueStatus,
@@ -62,5 +68,3 @@ const getSystemHealth = async (req, res) => {
 module.exports = {
     getSystemHealth
 };
-
-

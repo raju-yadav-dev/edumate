@@ -1,6 +1,6 @@
 import "./App.css";
 
-import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { useEffect } from "react";
 
 import Home from "./pages/Home/Home";
@@ -9,8 +9,8 @@ import Register from "./pages/Register/Register";
 import ForgotPassword from "./pages/ForgotPassword/ForgotPassword";
 import Profile from "./pages/Profile/Profile";
 import Chat from "./pages/Chat/Chat";
-import AdminLogin from "./Admin/Login/AdminLogin";
-import AdminConsole from "./Admin/Console/AdminConsole";
+import UserManagement from "./pages/UserManagement/UserManagement";
+import KnowledgeStudio from "./pages/KnowledgeStudio/KnowledgeStudio";
 import Unauthorized from "./pages/Unauthorized/Unauthorized";
 import ProtectedRoute from "./components/common/ProtectedRoute";
 
@@ -33,12 +33,12 @@ function TitleUpdater() {
             title = "Edumate | Reset Password";
         } else if (path === "/profile") {
             title = "Edumate | Profile";
+        } else if (path === "/users") {
+            title = "Edumate | User Management";
+        } else if (path === "/studio") {
+            title = "Edumate | Knowledge Studio";
         } else if (path === "/unauthorized") {
             title = "Edumate | Access Denied";
-        } else if (path.startsWith("/admin/panel")) {
-            title = "Edumate | Admin Panel";
-        } else if (path.startsWith("/admin")) {
-            title = "Edumate | Admin Login";
         }
 
         document.title = title;
@@ -59,7 +59,6 @@ function App() {
                 <Route path="/register" element={<Register />} />
                 <Route path="/forgot-password" element={<ForgotPassword />} />
                 <Route path="/unauthorized" element={<Unauthorized />} />
-                <Route path="/admin" element={<AdminLogin />} />
 
                 {/* Protected Student / General User Routes */}
                 <Route
@@ -80,15 +79,29 @@ function App() {
                     }
                 />
 
-                {/* Protected Admin Console Route (Admin & Super Admin) */}
+                {/* Protected Admin User Management */}
                 <Route
-                    path="/admin/panel"
+                    path="/users"
                     element={
                         <ProtectedRoute requiredRoles={["admin", "super_admin"]}>
-                            <AdminConsole />
+                            <UserManagement />
                         </ProtectedRoute>
                     }
                 />
+
+                {/* Protected Knowledge Studio Route */}
+                <Route
+                    path="/studio"
+                    element={
+                        <ProtectedRoute requiredRoles={["admin", "super_admin"]}>
+                            <KnowledgeStudio />
+                        </ProtectedRoute>
+                    }
+                />
+
+                {/* Fallback for obsolete admin routes */}
+                <Route path="/admin/*" element={<Navigate to="/" replace />} />
+                <Route path="/admin" element={<Navigate to="/" replace />} />
             </Routes>
         </BrowserRouter>
     );

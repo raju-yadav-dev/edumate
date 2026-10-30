@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { Link, useNavigate } from "react-router-dom";
 import ThemeToggle from "../ThemeToggle/ThemeToggle";
-import { LogOut, User } from "lucide-react";
+import { LogOut, User, Users, Database } from "lucide-react";
 
 import useAuth from "../../hooks/useAuth";
 
@@ -108,6 +108,19 @@ function Navbar() {
                     <a href="#contact">Contact</a>
                 </li>
 
+                {isAuthenticated && (user?.role === "admin" || user?.role === "super_admin") && (
+                    <>
+                        <li>
+                            <Link to="/users">Users</Link>
+                        </li>
+                        <li>
+                            <Link to="/studio" style={{ color: "var(--primary)" }}>
+                                Studio ⚡
+                            </Link>
+                        </li>
+                    </>
+                )}
+
             </ul>
 
             <div className="nav-buttons">
@@ -159,6 +172,34 @@ function Navbar() {
                                     <User size={16} />
                                     <span>Profile</span>
                                 </button>
+
+                                {(user?.role === "admin" || user?.role === "super_admin") && (
+                                    <>
+                                        <button
+                                            className="profile-dropdown-item"
+                                            type="button"
+                                            onClick={() => {
+                                                setMenuOpen(false);
+                                                navigate("/users");
+                                            }}
+                                        >
+                                            <Users size={16} />
+                                            <span>User Management</span>
+                                        </button>
+
+                                        <button
+                                            className="profile-dropdown-item"
+                                            type="button"
+                                            onClick={() => {
+                                                setMenuOpen(false);
+                                                navigate("/studio");
+                                            }}
+                                        >
+                                            <Database size={16} />
+                                            <span>Knowledge Studio</span>
+                                        </button>
+                                    </>
+                                )}
 
                                 <button className="profile-dropdown-item" type="button" onClick={handleLogout}>
                                     <LogOut size={16} />

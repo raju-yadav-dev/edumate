@@ -65,7 +65,7 @@ function describeVectorsConfig(vectorsConfig) {
     return JSON.stringify(vectorsConfig);
 }
 
-const chunkingPort = parseInt(process.env.CHUNKING_PORT || "5001", 10);
+const chunkingPort = parseInt(process.env.CHUNKING_PORT || "5000", 10);
 const chunkingApiUrl = process.env.CHUNKING_API_URL || `http://127.0.0.1:${chunkingPort}`;
 
 /**

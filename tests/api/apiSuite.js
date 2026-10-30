@@ -17,7 +17,7 @@ const ENDPOINTS_TO_TEST = [
     { path: "/api/system/health", expectedStatus: 200, name: "System Health API" },
     { path: "/api/cache/stats", expectedStatus: 200, name: "10-Layer Cache Stats API" },
     { path: "/api/v1/cache/stats", expectedStatus: 200, name: "V1 Cache Stats API" },
-    { path: "/api/documents/queue/health", port: 5001, expectedStatus: 200, name: "Chunking Queue Health API" }
+    { path: "/api/documents/queue/health", port: 5000, expectedStatus: 200, name: "Chunking Queue Health API" }
 ];
 
 async function runApiSuite() {

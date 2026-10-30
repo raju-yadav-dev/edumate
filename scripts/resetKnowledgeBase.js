@@ -37,7 +37,7 @@ const paths = require("../server/config/paths");
 const { client: qdrantClient, collectionName } = require("../server/ai/config/qdrant");
 const mongoose = require("mongoose");
 
-const chunkingPort = parseInt(process.env.CHUNKING_PORT || "5001", 10);
+const chunkingPort = parseInt(process.env.CHUNKING_PORT || "5000", 10);
 const chunkingApiUrl = process.env.CHUNKING_API_URL || `http://127.0.0.1:${chunkingPort}`;
 
 function sha256File(filePath) {

@@ -52,7 +52,7 @@ const chunkingQueueService = require("./ai/services/chunkingQueueService");
 const integrityService = require("./ai/services/integrityService");
 const { client: qdrantClient, collectionName: qdrantCollection, ensureCollection } = require("./ai/config/qdrant");
 
-const CHUNKING_PORT = parseInt(process.env.CHUNKING_PORT || "5001", 10);
+const CHUNKING_PORT = parseInt(process.env.CHUNKING_PORT || "5000", 10);
 const startTime = Date.now();
 
 const app = express();
@@ -175,7 +175,10 @@ const handleHealthCheck = async (req, res) => {
     try {
         const mStart = Date.now();
         if (mongoose.connection.readyState === 1 && mongoose.connection.db) {
-            await mongoose.connection.db.admin().ping();
+            await Promise.race([
+                mongoose.connection.db.admin().ping(),
+                new Promise((_, reject) => setTimeout(() => reject(new Error("Mongo ping timeout")), 2000))
+            ]);
             mongoLatency = Date.now() - mStart;
             mongoStatus = "connected";
         }
@@ -188,7 +191,10 @@ const handleHealthCheck = async (req, res) => {
     let qdrantStatus = "offline";
     try {
         const qStart = Date.now();
-        await qdrantClient.getCollections();
+        await Promise.race([
+            qdrantClient.getCollections(),
+            new Promise((_, reject) => setTimeout(() => reject(new Error("Qdrant ping timeout")), 2500))
+        ]);
         qdrantLatency = Date.now() - qStart;
         qdrantStatus = "connected";
     } catch (_) {
@@ -264,7 +270,8 @@ const handleHealthCheck = async (req, res) => {
                 llm: llamaHealth
             },
             embedding: embeddingHealth,
-            localStorage: { status: storageStatus, latencyMs: storageLatency, root: localStorageManager.STORAGE_ROOT }
+            localStorage: { status: storageStatus, latencyMs: storageLatency, root: localStorageManager.STORAGE_ROOT },
+            storage: { status: storageStatus, latencyMs: storageLatency, root: localStorageManager.STORAGE_ROOT }
         },
         queueSummary: {
             concurrency: queueStats.concurrency,
@@ -1387,15 +1394,14 @@ if (fs.existsSync(uiPath)) {
 // ==========================================
 // 7. Microservice Root Endpoint & Standalone Browser Chunking Studio (Mission 15.3)
 // ==========================================
-app.get(["/", "/studio", "/dashboard"], async (req, res) => {
-    // If JSON is explicitly requested, return API json metadata
-    if (req.headers.accept && !req.headers.accept.includes("text/html")) {
+app.get(["/studio", "/studio/", "/dashboard"], async (req, res) => {
+    if (req.query.format === "json") {
         return sendJson(res, 200, "EduMate Chunking Server Microservice (Terminal 2)", {
             service: "edumate-chunking-server",
             type: "dedicated-service",
             status: "online",
             port: CHUNKING_PORT,
-            ui: `http://localhost:${CHUNKING_PORT}/`,
+            ui: `http://localhost:${CHUNKING_PORT}/studio/`,
             endpoints: {
                 health: `http://localhost:${CHUNKING_PORT}/health`,
                 queue: `http://localhost:${CHUNKING_PORT}/queue`,
@@ -1595,10 +1601,12 @@ process.on("unhandledRejection", (reason) => {
     console.error("[ChunkingServer] Unhandled rejection:", reason);
 });
 
-// Launch server
-startChunkingServer().catch((err) => {
-    console.error("[ChunkingServer] Fatal error on startup:", err);
-    process.exit(1);
-});
+// Launch server only when invoked directly as standalone process
+if (require.main === module) {
+    startChunkingServer().catch((err) => {
+        console.error("[ChunkingServer] Fatal error on startup:", err);
+        process.exit(1);
+    });
+}
 
 module.exports = app;

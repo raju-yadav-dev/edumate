@@ -80,11 +80,11 @@ async function validateSystemHealth() {
         details: frontendCheck.online ? "Vite dev server responding" : frontendCheck.error
     };
 
-    // 3. Chunking Server Check
-    const chunkingCheck = await checkHttpEndpoint("http://localhost:5001/api/documents/queue/health");
+    // 3. Chunking Server Check (Port 5000 /studio integrated)
+    const chunkingCheck = await checkHttpEndpoint("http://localhost:5000/api/documents/queue/health");
     results.services.chunkingServer = {
-        name: "Dedicated Chunking Server",
-        port: 5001,
+        name: "Integrated Knowledge Studio",
+        port: 5000,
         status: chunkingCheck.online ? "ONLINE" : "STANDBY",
         latencyMs: chunkingCheck.latencyMs,
         details: chunkingCheck.data || chunkingCheck.error

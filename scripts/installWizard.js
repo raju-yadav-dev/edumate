@@ -62,7 +62,7 @@ if (!fs.existsSync(envPath)) {
     } else {
         const defaultEnv = `
 PORT=5000
-CHUNKING_PORT=5001
+CHUNKING_PORT=5000
 CLIENT_URL=http://localhost:5173
 MONGODB_URI=mongodb://localhost:27017/edumate
 JWT_SECRET=edumate_production_jwt_secret_key_2026_secure

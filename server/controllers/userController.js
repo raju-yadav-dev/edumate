@@ -72,8 +72,29 @@ const deleteUser = asyncHandler(async (req, res) => {
     return sendSuccess(res, 200, "User deleted successfully.", user);
 });
 
+const updateUser = asyncHandler(async (req, res) => {
+    const user = await userService.updateUser({
+        userId: req.params.userId,
+        data: req.body,
+        actor: req.user
+    });
+
+    return sendSuccess(res, 200, "User updated successfully.", user);
+});
+
+const createUser = asyncHandler(async (req, res) => {
+    const user = await userService.createUser({
+        data: req.body,
+        actor: req.user
+    });
+
+    return sendSuccess(res, 201, "User created successfully.", user);
+});
+
 module.exports = {
     updateProfileAvatar,
     listUsers,
-    deleteUser
+    deleteUser,
+    updateUser,
+    createUser
 };

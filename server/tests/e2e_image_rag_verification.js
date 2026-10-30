@@ -28,7 +28,7 @@ const localChunkManager = require("../storage/localChunkManager");
 const localStorageManager = require("../storage/localStorageManager");
 const smartCacheHub = require("../services/cache/SmartCacheHub");
 
-const CHUNKING_SERVER_URL = "http://localhost:5001";
+const CHUNKING_SERVER_URL = "http://localhost:5000";
 const CHAT_SERVER_URL = "http://localhost:5000";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

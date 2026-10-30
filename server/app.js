@@ -1,4 +1,5 @@
 const expressInitStart = Date.now();
+const path = require("path");
 const express = require("express");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
@@ -164,11 +165,24 @@ app.use("/api/cache", cacheRoutes);
 const { getSystemHealth } = require("./controllers/systemController");
 app.get("/api/system/health", healthRateLimiter, getSystemHealth);
 app.get("/api/health", healthRateLimiter, getSystemHealth);
-app.get("/health", healthRateLimiter, getSystemHealth);
 
 if (global.startupTimer) {
     global.startupTimer.log("Routes registered", Date.now() - routesInitStart);
 }
+
+// ==========================================
+// Knowledge Studio UI & Consolidated Runtime (Port 5000)
+// ==========================================
+const studioUiPath = path.join(__dirname, "chunking-ui");
+app.get(/^\/studio\/?$/, (req, res) => {
+    if (!req.url.endsWith("/")) {
+        return res.redirect(301, "/studio/");
+    }
+    return res.sendFile(path.join(studioUiPath, "index.html"));
+});
+app.use("/studio", express.static(studioUiPath));
+const studioApp = require("./chunkingServer");
+app.use(studioApp);
 
 // ==============================
 // Test Route

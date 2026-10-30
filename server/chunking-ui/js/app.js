@@ -288,13 +288,13 @@ function updateHealthUI() {
 
     const qdrantBadge = document.getElementById('topQdrantStatus');
     if (qdrantBadge) {
-        const qdStatus = h.services?.qdrant?.status === 'connected';
+        const qdStatus = h.services?.qdrant?.status === 'connected' || h.services?.qdrant === 'connected';
         qdrantBadge.innerHTML = `<span class="dot ${qdStatus ? '' : 'danger'}"></span> Qdrant: ${qdStatus ? 'Ready' : 'Offline'}`;
     }
 
     const mongoBadge = document.getElementById('topMongoStatus');
     if (mongoBadge) {
-        const mgStatus = h.services?.mongodb?.status === 'connected';
+        const mgStatus = h.services?.mongodb?.status === 'connected' || h.services?.mongodb === 'connected';
         mongoBadge.innerHTML = `<span class="dot ${mgStatus ? '' : 'danger'}"></span> MongoDB: ${mgStatus ? 'Online' : 'Offline'}`;
     }
 
@@ -321,15 +321,27 @@ function updateHealthUI() {
         const el = document.getElementById(id);
         if (!el) return;
         if (!s) { el.innerText = 'Offline'; el.style.color = 'var(--danger)'; return; }
-        const ok = s.status === 'connected' || s.status === 'ready' || s.status === 'online';
-        el.innerText = `${ok ? 'Online' : 'Degraded'} (${s.latencyMs || 0}ms)`;
-        el.style.color = ok ? 'var(--accent)' : 'var(--danger)';
+        const statusVal = typeof s === 'string' ? s : (s.status || 'offline');
+        const latency = typeof s === 'object' && s.latencyMs !== undefined ? s.latencyMs : (s.latency !== undefined ? s.latency : 0);
+        const isOk = statusVal === 'connected' || statusVal === 'ready' || statusVal === 'online';
+        const isStandby = statusVal.includes('fallback') || statusVal === 'standby' || statusVal === 'idle';
+
+        if (isOk) {
+            el.innerText = `Online (${latency >= 0 ? latency : 0}ms)`;
+            el.style.color = 'var(--accent)';
+        } else if (isStandby) {
+            el.innerText = `Standby (${latency >= 0 ? latency : 0}ms)`;
+            el.style.color = 'var(--warning, #eab308)';
+        } else {
+            el.innerText = `Degraded (${latency >= 0 ? latency : 0}ms)`;
+            el.style.color = 'var(--danger)';
+        }
     };
 
     setLat('latMongo', h.services?.mongodb);
     setLat('latQdrant', h.services?.qdrant);
     setLat('latLlama', h.services?.llamaCpp);
-    setLat('latStorage', h.services?.localStorage);
+    setLat('latStorage', h.services?.localStorage || h.services?.storage);
 
     // Dashboard Metrics
     const dashActive = document.getElementById('dashActiveJobs');

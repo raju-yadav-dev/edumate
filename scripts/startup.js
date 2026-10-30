@@ -194,22 +194,6 @@ const startDev = async () => {
         });
     };
 
-    const startStudio = () => {
-        if (isShuttingDown) return;
-        chunkingProcess = spawn("node", ["server/chunkingServer.js"], {
-            cwd: rootPath,
-            stdio: "pipe",
-            shell: true
-        });
-        setupLogger(chunkingProcess, "Studio", logger.yellow);
-        chunkingProcess.on("close", (code) => {
-            if (!isShuttingDown && code !== 0 && code !== null) {
-                console.log(logger.yellow(`Studio process exited (code ${code}). Auto-restarting in 2s...`));
-                setTimeout(startStudio, 2000);
-            }
-        });
-    };
-
     const startFrontend = () => {
         if (isShuttingDown) return;
         frontendProcess = spawn("npm", ["run", "dev", "--prefix", "client"], {
@@ -253,16 +237,14 @@ const startDev = async () => {
     };
 
     startBackend();
-    startStudio();
     startFrontend();
 
     // Stage 7: Health Monitoring & Browser Auto-Launch
     let browserOpened = false;
     const pollReadiness = setInterval(async () => {
         if (browserOpened || isShuttingDown) return;
-        const [backendUp, studioUp, frontendUp] = await Promise.all([
+        const [backendUp, frontendUp] = await Promise.all([
             checkHttpService("http://localhost:5000/api/health", 800),
-            checkHttpService("http://localhost:5001/health", 800),
             checkHttpService("http://localhost:5173", 800)
         ]);
 
@@ -273,7 +255,7 @@ const startDev = async () => {
             console.log(logger.green("  🎉 EDUMATE PLATFORM READY & ACTIVE"));
             console.log(logger.cyan("  ➜ Web App (Frontend):  http://localhost:5173"));
             console.log(logger.cyan("  ➜ REST API (Backend):  http://localhost:5000"));
-            console.log(logger.cyan("  ➜ Knowledge Studio:    http://localhost:5001"));
+            console.log(logger.cyan("  ➜ Knowledge Studio:    http://localhost:5000/studio"));
             console.log(logger.green("=======================================================\n"));
 
             // Open browser automatically on Windows / macOS / Linux

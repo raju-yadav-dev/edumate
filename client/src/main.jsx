@@ -8,7 +8,6 @@ import "./styles/variables.css";
 import "./index.css";
 
 import App from "./App";
-import AdminAuthProvider from "./context/AdminAuthContext";
 import AuthProvider from "./context/AuthContext";
 import ThemeProvider from "./context/ThemeContext";
 
@@ -107,9 +106,7 @@ if (rootElement) {
             <GlobalErrorBoundary>
                 <ThemeProvider>
                     <AuthProvider>
-                        <AdminAuthProvider>
-                            <App />
-                        </AdminAuthProvider>
+                        <App />
                     </AuthProvider>
                 </ThemeProvider>
             </GlobalErrorBoundary>

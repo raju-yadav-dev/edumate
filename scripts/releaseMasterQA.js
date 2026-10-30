@@ -135,7 +135,7 @@ ${results.tests.map(t => `- **${t.name}**: ${t.status === "PASSED" ? "✅" : "�
 
 ## 🚀 Certified Core Capabilities
 1. **One-Command Ecosystem Launcher** (\`npm run edumate\` / \`EduMate.bat\`)
-2. **Browser Chunking Studio & Document Ingestion Microservice** (Port 5001)
+2. **EduMate Knowledge Studio & Document Ingestion** (Port 5000 /studio)
 3. **Local Qwen AI + Qdrant Vector Semantic RAG**
 4. **10-Layer Smart Cache System** (Zero repeated computation)
 5. **Real-time Admin Security & Audit Telemetry Dashboard**

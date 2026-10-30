@@ -20,7 +20,7 @@ async function validateSSEStreaming() {
     // 1. Validate SSE Queue Endpoint
     const queueSseResult = await new Promise((resolve) => {
         const start = Date.now();
-        const req = http.get("http://localhost:5001/api/documents/queue/stream", { timeout: 3000 }, (res) => {
+        const req = http.get("http://localhost:5000/api/documents/queue/stream", { timeout: 3000 }, (res) => {
             const isSse = (res.headers["content-type"] || "").includes("text/event-stream");
             let receivedData = false;
 
