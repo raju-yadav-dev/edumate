@@ -225,7 +225,16 @@ const startServer = async () => {
                     (async () => {
                         try {
                             const { checkLlmHealth } = require("./config/llm");
-                            const isHealthy = await checkLlmHealth(3000);
+                            let isHealthy = await checkLlmHealth(1500);
+                            if (!isHealthy) {
+                                try {
+                                    const llamaProcessManager = require("./services/llamaProcessManager");
+                                    const res = await llamaProcessManager.startServer({ silent: true });
+                                    if (res && res.success) {
+                                        isHealthy = true;
+                                    }
+                                } catch (_) {}
+                            }
                             return { llmAvailable: isHealthy };
                         } catch (e) {
                             return { llmAvailable: false };
