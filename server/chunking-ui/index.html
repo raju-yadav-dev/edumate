@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>EduMate Knowledge Studio</title>
     <base href="/studio/">
-    <link rel="stylesheet" href="./css/styles.css">
+    <link rel="stylesheet" href="./css/styles.css?v=20261030_v4">
 </head>
 <body>
 
@@ -46,28 +46,28 @@
         
         <!-- Sidebar Navigation -->
         <aside class="sidebar">
-            <div class="nav-item active" data-tab="dashboard">
+            <div class="nav-item active" data-tab="dashboard" onclick="switchTab('dashboard')">
                 <span>📊</span>
                 <span class="nav-label">Dashboard</span>
             </div>
-            <div class="nav-item" data-tab="storage">
+            <div class="nav-item" data-tab="storage" onclick="switchTab('storage')">
                 <span>📂</span>
                 <span class="nav-label">Storage Explorer</span>
             </div>
-            <div class="nav-item" data-tab="upload">
+            <div class="nav-item" data-tab="upload" onclick="switchTab('upload')">
                 <span>⬆️</span>
                 <span class="nav-label">Upload Studio</span>
             </div>
-            <div class="nav-item" data-tab="queue">
+            <div class="nav-item" data-tab="queue" onclick="switchTab('queue')">
                 <span>📑</span>
                 <span class="nav-label">Queue Monitor</span>
                 <span class="nav-badge" id="navQueueBadge">0</span>
             </div>
-            <div class="nav-item" data-tab="logs">
+            <div class="nav-item" data-tab="logs" onclick="switchTab('logs')">
                 <span>📜</span>
                 <span class="nav-label">Runtime Console</span>
             </div>
-            <div class="nav-item" data-tab="analytics">
+            <div class="nav-item" data-tab="analytics" onclick="switchTab('analytics')">
                 <span>📈</span>
                 <span class="nav-label">Analytics</span>
             </div>
@@ -220,8 +220,8 @@
                     </div>
 
                     <div style="display: flex; gap: 10px;">
-                        <button class="btn btn-sm btn-primary" onclick="document.getElementById('fileInput').click()">📄 Select Files (Multiple)</button>
-                        <button class="btn btn-sm btn-accent" onclick="document.getElementById('folderInput').click()">📂 Select Entire Folder</button>
+                        <button class="btn btn-sm btn-primary" id="btnSelectFiles" onclick="document.getElementById('fileInput').click()">📄 Select Files (Multiple)</button>
+                        <button class="btn btn-sm btn-accent" id="btnSelectFolder" onclick="document.getElementById('folderInput').click()">📂 Select Entire Folder</button>
                         <span style="font-size: 0.78rem; color: var(--text-dim); margin-left: auto; align-self: center;">Supported: PDF, DOCX, TXT, MD, Images (PNG, JPG, JPEG, WEBP) (Max 100MB)</span>
                     </div>
 
@@ -242,7 +242,7 @@
                             <span id="stagedSummaryTitle">Selected: 0 files (0 B)</span>
                             <div style="display: flex; gap: 8px;">
                                 <button class="btn btn-sm btn-accent" id="btnStartUpload" onclick="startStagedUpload()">🚀 Upload Files</button>
-                                <button class="btn btn-sm btn-danger" onclick="clearStagedFiles()">🗑️ Clear Selection</button>
+                                <button class="btn btn-sm btn-danger" id="btnClearStaged" onclick="clearStagedFiles()">🗑️ Clear Selection</button>
                             </div>
                         </div>
                         <div class="staged-list" id="stagedFilesList"></div>
@@ -461,6 +461,6 @@
         </div>
     </div>
 
-    <script src="./js/app.js"></script>
+    <script src="./js/app.js?v=20261030_v4"></script>
 </body>
 </html>

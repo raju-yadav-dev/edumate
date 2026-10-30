@@ -121,6 +121,7 @@ export default function KnowledgeStudio() {
                 key={reloadKey}
                 src={studioUrl}
                 title="EduMate Knowledge Studio"
+                allow="clipboard-write; clipboard-read; modals"
                 style={{
                     flex: 1,
                     width: "100%",

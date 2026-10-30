@@ -22,7 +22,7 @@ function getPersistedWorkerState() {
             }
         }
     } catch (_) {}
-    return "STOPPED";
+    return "RUNNING";
 }
 
 function setPersistedWorkerState(state) {
@@ -39,8 +39,8 @@ function setPersistedWorkerState(state) {
 }
 
 const initialWorkerState = getPersistedWorkerState();
-let isQueuePaused = initialWorkerState === "STOPPED" || initialWorkerState === "PAUSED";
-let workerPoolState = initialWorkerState; // "RUNNING" | "PAUSED" | "STOPPED"
+let isQueuePaused = initialWorkerState === "PAUSED";
+let workerPoolState = initialWorkerState === "PAUSED" ? "PAUSED" : "RUNNING"; // "RUNNING" | "PAUSED" | "STOPPED"
 const activeWorkers = new Map(); // workerId -> { documentId, originalName, stage, progress, startTime, timer }
 const pausedDocIds = new Set();
 const cancelledDocIds = new Set();
@@ -600,12 +600,17 @@ const recoverQueueOnStartup = async () => {
             emitLog("WARNING", `Recovered ${stuckDocs.modifiedCount} interrupted jobs back to "queued" state.`);
         }
 
+        if (workerPoolState !== "PAUSED") {
+            isQueuePaused = false;
+            workerPoolState = "RUNNING";
+            setPersistedWorkerState("RUNNING");
+        }
         const queuedCount = await Document.countDocuments({ status: "active", embeddingStatus: { $in: ["queued", "Queued"] } });
-        if (queuedCount > 0 && !isQueuePaused && workerPoolState === "RUNNING") {
+        if (queuedCount > 0 && !isQueuePaused) {
             emitLog("INFO", `Found ${queuedCount} queued documents on startup. Starting worker pool...`);
             triggerWorkerPool();
-        } else if (queuedCount > 0) {
-            emitLog("INFO", `Found ${queuedCount} queued documents on startup. Workers remain ${workerPoolState}.`);
+        } else {
+            emitLog("INFO", `Worker pool online and RUNNING (${CONCURRENCY} workers ready).`);
         }
     } catch (err) {
         console.error("[ChunkingQueue] Queue recovery on startup failed:", err.message);

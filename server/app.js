@@ -82,7 +82,11 @@ app.use((req, res, next) => {
     next();
 });
 
-app.use(helmet());
+app.use(helmet({
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false,
+    frameguard: false
+}));
 app.use(compression());
 
 app.use(cors({
@@ -174,13 +178,26 @@ if (global.startupTimer) {
 // Knowledge Studio UI & Consolidated Runtime (Port 5000)
 // ==========================================
 const studioUiPath = path.join(__dirname, "chunking-ui");
+app.use(["/studio", "/chunking-ui"], (req, res, next) => {
+    res.removeHeader("X-Frame-Options");
+    res.removeHeader("Content-Security-Policy");
+    next();
+});
 app.get(/^\/studio\/?$/, (req, res) => {
     if (!req.url.endsWith("/")) {
         return res.redirect(301, "/studio/");
     }
     return res.sendFile(path.join(studioUiPath, "index.html"));
 });
-app.use("/studio", express.static(studioUiPath));
+app.use("/studio", express.static(studioUiPath, {
+    etag: false,
+    maxAge: 0,
+    setHeaders: (res) => {
+        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+        res.setHeader("Pragma", "no-cache");
+        res.setHeader("Expires", "0");
+    }
+}));
 const studioApp = require("./chunkingServer");
 app.use("/studio", studioApp);
 app.use(studioApp);

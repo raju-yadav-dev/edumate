@@ -25,6 +25,8 @@ const state = {
     inputModalCallback: null
 };
 
+var periodicRefreshTimer = null;
+
 function isImageExtension(name) {
     const ext = String(name || '').toLowerCase();
     return ext.endsWith('.png') || ext.endsWith('.jpg') || ext.endsWith('.jpeg') || ext.endsWith('.webp');
@@ -48,12 +50,6 @@ function bootStudioApp() {
     initSSEStreams();
     startPeriodicRefresh(15000);
     fetchInitialData();
-}
-
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', bootStudioApp);
-} else {
-    bootStudioApp();
 }
 
 function initNavigation() {
@@ -117,8 +113,6 @@ function initGlobalEvents() {
 // ==========================================
 // Initial & Periodic Data Fetching
 // ==========================================
-let periodicRefreshTimer = null;
-
 function startPeriodicRefresh(intervalMs = 15000) {
     stopPeriodicRefresh();
     periodicRefreshTimer = setInterval(() => {
@@ -162,7 +156,7 @@ async function fetchCategories() {
     try {
         const res = await fetch('/storage/categories');
         const json = await res.json();
-        if (json.success && Array.isArray(json.data.categories)) {
+        if (json.success && json.data && Array.isArray(json.data.categories)) {
             state.categories = json.data.categories;
             populateCategoryDropdown();
         }
@@ -247,7 +241,7 @@ async function fetchStorageTree() {
         const res = await fetch('/storage/tree');
         const json = await res.json();
         if (json.success) {
-            state.storageTree = json.data.tree || [];
+            state.storageTree = json.data?.tree || [];
             renderStorageTree();
         }
     } catch (err) {
@@ -967,31 +961,74 @@ function initUploadZone() {
     const dropZone = document.getElementById('dropZone');
     const fileInput = document.getElementById('fileInput');
     const folderInput = document.getElementById('folderInput');
+    const btnSelectFiles = document.getElementById('btnSelectFiles');
+    const btnSelectFolder = document.getElementById('btnSelectFolder');
+    const btnStartUpload = document.getElementById('btnStartUpload');
+    const btnClearStaged = document.getElementById('btnClearStaged');
 
-    if (!dropZone) return;
+    if (btnSelectFiles && fileInput) {
+        btnSelectFiles.addEventListener('click', (e) => {
+            e.preventDefault();
+            fileInput.click();
+        });
+    }
 
-    dropZone.addEventListener('click', () => {
-        if (fileInput) fileInput.click();
-    });
+    if (btnSelectFolder && folderInput) {
+        btnSelectFolder.addEventListener('click', (e) => {
+            e.preventDefault();
+            folderInput.click();
+        });
+    }
 
-    dropZone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        dropZone.classList.add('dragover');
-    });
+    if (btnStartUpload) {
+        btnStartUpload.addEventListener('click', (e) => {
+            e.preventDefault();
+            startStagedUpload();
+        });
+    }
 
-    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+    if (btnClearStaged) {
+        btnClearStaged.addEventListener('click', (e) => {
+            e.preventDefault();
+            clearStagedFiles();
+        });
+    }
 
-    dropZone.addEventListener('drop', async (e) => {
-        e.preventDefault();
-        dropZone.classList.remove('dragover');
+    if (dropZone) {
+        dropZone.addEventListener('click', (e) => {
+            e.preventDefault();
+            if (fileInput) fileInput.click();
+        });
 
-        const items = e.dataTransfer.items;
-        if (items && items.length > 0) {
-            await handleDataTransferItems(items);
-        } else if (e.dataTransfer.files.length > 0) {
-            stageFiles(Array.from(e.dataTransfer.files));
-        }
-    });
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+
+        dropZone.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+
+            try {
+                const items = e.dataTransfer.items;
+                let staged = false;
+                if (items && items.length > 0 && items[0].webkitGetAsEntry) {
+                    await handleDataTransferItems(items);
+                    staged = state.stagedFiles.length > 0;
+                }
+                if (!staged && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                    stageFiles(Array.from(e.dataTransfer.files));
+                }
+            } catch (err) {
+                console.warn('Drop error, falling back to files:', err);
+                if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                    stageFiles(Array.from(e.dataTransfer.files));
+                }
+            }
+        });
+    }
 
     if (fileInput) {
         fileInput.addEventListener('change', () => {
@@ -1028,7 +1065,7 @@ async function handleDataTransferItems(items) {
         if (entry.isFile) {
             const file = await new Promise(resolve => entry.file(resolve));
             const relPath = currentPath ? `${currentPath}/${file.name}` : file.name;
-            filesToStage.push({ file, relPath });
+            filesToStage.push({ file, relPath, name: file.name, size: file.size, type: file.type });
         } else if (entry.isDirectory) {
             const dirReader = entry.createReader();
             const readEntries = async () => {
@@ -1072,15 +1109,16 @@ function stageFiles(files) {
 }
 
 function stageFilesWithPaths(fileObjects) {
-    const valid = fileObjects.filter(item => isFileSupported(item.name || item.file.name));
+    const valid = fileObjects.filter(item => isFileSupported(item.name || item.file?.name));
     
     if (valid.length === 0) {
-        alert('None of the selected files match supported formats (PDF, DOCX, TXT, MD, PNG, JPG, JPEG, WEBP).');
+        showToast('None of the selected files match supported formats (PDF, DOCX, TXT, MD, PNG, JPG, JPEG, WEBP).', 'warning');
         return;
     }
 
     state.stagedFiles.push(...valid);
     renderStagedFiles();
+    showToast(`Staged ${valid.length} file(s). Click "Upload Files" to ingest.`, 'info');
 }
 
 function removeStagedItem(index) {
@@ -1116,6 +1154,10 @@ function renderStagedFiles() {
 
     if (btnUpload) {
         btnUpload.innerText = `🚀 Upload ${count} File${count > 1 ? 's' : ''}`;
+        btnUpload.onclick = (e) => {
+            if (e && e.preventDefault) e.preventDefault();
+            startStagedUpload();
+        };
     }
 
     list.innerHTML = state.stagedFiles.map((item, idx) => `
@@ -1210,7 +1252,10 @@ function clearUploadPipelineTracker() {
 }
 
 async function startStagedUpload() {
-    if (state.stagedFiles.length === 0) return;
+    if (state.stagedFiles.length === 0) {
+        showToast('No files selected. Please select or drop files first.', 'warning');
+        return;
+    }
 
     const categorySelect = document.getElementById('uploadCategory');
     const customCategoryInput = document.getElementById('customCategoryInput');
@@ -1224,33 +1269,57 @@ async function startStagedUpload() {
     const progressPercent = document.getElementById('uploadProgressPercent');
     const progressBar = document.getElementById('uploadProgressBar');
     const statusBox = document.getElementById('uploadStatus');
+    const btnUpload = document.getElementById('btnStartUpload');
+
+    if (btnUpload) {
+        btnUpload.disabled = true;
+        btnUpload.innerText = '⏳ Ingesting...';
+    }
 
     if (progressContainer) progressContainer.style.display = 'block';
     if (statusBox) statusBox.style.display = 'none';
 
-    const formData = new FormData();
-    formData.append('category', category);
-
-    // Build relative path map
-    const relPathsMap = {};
-    const stagedSnapshot = state.stagedFiles.slice();
-    stagedSnapshot.forEach(item => {
-        const f = item.file;
-        formData.append('files', f);
-        relPathsMap[f.name] = item.relPath || f.name;
-    });
-
-    formData.append('relPaths', JSON.stringify(relPathsMap));
-
     try {
+        const formData = new FormData();
+        formData.append('category', category);
+
+        // Build relative path map
+        const relPathsMap = {};
+        const stagedSnapshot = state.stagedFiles.slice();
+        stagedSnapshot.forEach(item => {
+            const f = (item && item.file) ? item.file : item;
+            const fName = (f && f.name) || item.name || 'document';
+            const rPath = item.relPath || fName;
+            formData.append('files', f, fName);
+            relPathsMap[fName] = rPath;
+        });
+
+        formData.append('relPaths', JSON.stringify(relPathsMap));
+
         if (progressText) progressText.innerText = `Uploading ${stagedSnapshot.length} file(s)...`;
         if (progressBar) progressBar.style.width = '40%';
         if (progressPercent) progressPercent.innerText = '40%';
 
-        const res = await fetch('/upload', {
-            method: 'POST',
-            body: formData
-        });
+        const uploadUrl = window.location.pathname.includes('/studio') ? '/studio/upload' : '/upload';
+        let res;
+        try {
+            res = await fetch(uploadUrl, {
+                method: 'POST',
+                body: formData
+            });
+        } catch (_) {
+            res = await fetch('/upload', {
+                method: 'POST',
+                body: formData
+            });
+        }
+
+        if (res.status === 404 && uploadUrl !== '/upload') {
+            res = await fetch('/upload', {
+                method: 'POST',
+                body: formData
+            });
+        }
 
         const json = await res.json();
 
@@ -1258,9 +1327,10 @@ async function startStagedUpload() {
         if (progressPercent) progressPercent.innerText = '100%';
 
         if (json.success) {
+            showToast(`Successfully uploaded ${json.data?.filesCount || stagedSnapshot.length} file(s)`, 'success');
             if (statusBox) {
                 statusBox.style.display = 'block';
-                statusBox.innerHTML = `✅ Successfully uploaded and queued <strong>${json.data.filesCount || stagedSnapshot.length}</strong> document(s) to <code>[${category}]</code>!`;
+                statusBox.innerHTML = `✅ Successfully uploaded and queued <strong>${json.data?.filesCount || stagedSnapshot.length}</strong> document(s) to <code>[${category}]</code>!`;
                 statusBox.style.color = 'var(--accent)';
             }
 
@@ -1304,6 +1374,7 @@ async function startStagedUpload() {
             fetchAnalytics();
             fetchCategories();
         } else {
+            showToast(`Upload failed: ${json.message}`, 'error');
             if (statusBox) {
                 statusBox.style.display = 'block';
                 statusBox.innerHTML = `❌ Upload failed: ${json.message}`;
@@ -1311,12 +1382,17 @@ async function startStagedUpload() {
             }
         }
     } catch (err) {
+        showToast(`Network error: ${err.message}`, 'error');
         if (statusBox) {
             statusBox.style.display = 'block';
             statusBox.innerHTML = `❌ Network error during upload: ${err.message}`;
             statusBox.style.color = 'var(--danger)';
         }
     } finally {
+        if (btnUpload) {
+            btnUpload.disabled = false;
+            btnUpload.innerText = `🚀 Upload ${state.stagedFiles.length} File${state.stagedFiles.length > 1 ? 's' : ''}`;
+        }
         setTimeout(() => {
             if (progressContainer) progressContainer.style.display = 'none';
         }, 1500);
@@ -1665,6 +1741,7 @@ async function startWorker() {
         fetchQueue();
         fetchAnalytics();
         fetchStorageTree();
+        fetchHealth(true);
     }
 }
 
@@ -1674,7 +1751,7 @@ async function pauseWorker() {
         showToast('Queue paused', 'warning');
     } finally {
         fetchQueue();
-        fetchHealth();
+        fetchHealth(true);
     }
 }
 
@@ -1684,7 +1761,7 @@ async function resumeWorker() {
         showToast('Queue resumed', 'success');
     } finally {
         fetchQueue();
-        fetchHealth();
+        fetchHealth(true);
     }
 }
 
@@ -1696,6 +1773,7 @@ async function restartWorker() {
         fetchQueue();
         fetchAnalytics();
         fetchStorageTree();
+        fetchHealth(true);
     }
 }
 
@@ -1706,6 +1784,7 @@ async function retryFailedJobs() {
     } finally {
         fetchQueue();
         fetchAnalytics();
+        fetchHealth(true);
     }
 }
 
@@ -1722,26 +1801,25 @@ async function retrySingleDoc(docId) {
 }
 
 async function reindexAll() {
-    if (confirm('Re-index and chunk all pending/active documents?')) {
-        try {
-            await fetch('/qdrant/reindex', { method: 'POST' });
-        } finally {
-            fetchQueue();
-            fetchAnalytics();
-            fetchStorageTree();
-        }
+    showToast('Re-indexing all documents initiated...', 'info');
+    try {
+        await fetch('/qdrant/reindex', { method: 'POST' });
+    } finally {
+        fetchQueue();
+        fetchAnalytics();
+        fetchStorageTree();
+        fetchHealth(true);
     }
 }
 
 async function clearQueue() {
-    if (confirm('Clear all waiting documents from the processing queue?')) {
-        try {
-            await fetch('/queue/clear', { method: 'POST' });
-            showToast('Queue cleared', 'warning');
-        } finally {
-            fetchQueue();
-            fetchAnalytics();
-        }
+    showToast('Clearing waiting queue...', 'warning');
+    try {
+        await fetch('/queue/clear', { method: 'POST' });
+    } finally {
+        fetchQueue();
+        fetchAnalytics();
+        fetchHealth(true);
     }
 }
 
@@ -1759,6 +1837,7 @@ async function triggerStorageSync() {
         }
     } finally {
         if (syncBtn) syncBtn.innerText = '🔄 Sync Storage';
+        fetchHealth(true);
     }
 }
 
@@ -1880,6 +1959,8 @@ if (typeof window !== 'undefined') {
     window.openUploadForFolder = openUploadForFolder;
     window.startStagedUpload = startStagedUpload;
     window.clearStagedFiles = clearStagedFiles;
+    window.removeStagedItem = removeStagedItem;
+    window.openUploadForDirectory = openUploadForDirectory;
     window.clearUploadPipelineTracker = clearUploadPipelineTracker;
     window.setLogFilter = setLogFilter;
     window.filterLogSearch = filterLogSearch;
@@ -1899,4 +1980,12 @@ if (typeof window !== 'undefined') {
     window.filterStorageTree = typeof filterStorageTree !== 'undefined' ? filterStorageTree : () => {};
     window.handleCategoryChange = typeof handleCategoryChange !== 'undefined' ? handleCategoryChange : () => {};
     window.showToast = showToast;
+}
+
+if (typeof document !== 'undefined') {
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', bootStudioApp);
+    } else {
+        bootStudioApp();
+    }
 }
