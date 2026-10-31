@@ -147,7 +147,8 @@ const searchLocalPdfs = async (query, user, limit, ignoreInstitution = false, fi
     
     // Filter to only include local admin-uploaded documents (uploadedFrom is not "crawler")
     const filtered = enriched.filter(chunk => chunk.metadata?.uploadedFrom !== "crawler");
-    const sliced = filtered.slice(0, Number(process.env.RAG_MAX_K) || 15);
+    const maxK = limit && limit > 15 ? limit : (Number(process.env.RAG_MAX_K) || 15);
+    const sliced = filtered.slice(0, maxK);
 
     // Adjacent-chunk expansion is disabled by default because it can multiply prompt size.
     // It can be explicitly enabled for documents where neighbouring context is essential.

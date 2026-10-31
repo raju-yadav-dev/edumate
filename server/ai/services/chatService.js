@@ -222,9 +222,8 @@ const selectDiverseChunks = (rankedChunks, maxLimit = 6) => {
         const count = docCount.get(docId) || 0;
 
         // Allow up to half the maxLimit from any single document (minimum 3).
-        // This lets multi-section documents (fees, syllabus, eligibility) contribute
-        // multiple chunks without monopolising the full slot budget.
-        const perDocCap = Math.max(3, Math.floor(maxLimit / 2));
+        // For exhaustive directory queries (maxLimit >= 20), allow all chunks from the matching document.
+        const perDocCap = maxLimit >= 20 ? maxLimit : Math.max(3, Math.floor(maxLimit / 2));
         if (count >= perDocCap && selected.length >= Math.ceil(maxLimit / 2)) {
             continue;
         }
@@ -817,9 +816,11 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
         });
 
         try {
+            const isExhaustiveFaculty = /\b(?:list\s+all|all\s+(?:the\s+)?names|all\s+faculty|all\s+professors|all\s+teachers|all\s+members|entire\s+faculty|complete\s+(?:faculty|list)|faculty\s+directory)\b/i.test(rewrittenQuery);
+            const searchLimit = isExhaustiveFaculty ? 30 : 6;
             const SearchManager = require("../../knowledge/SearchManager");
             retrievedChunksRaw = await Promise.race([
-                SearchManager.searchLocalPdfs(rewrittenQuery, activeUser, 6),
+                SearchManager.searchLocalPdfs(rewrittenQuery, activeUser, searchLimit),
                 retrievalTimeoutPromise
             ]);
         } catch (retrieveErr) {
@@ -856,7 +857,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
         // Use a wider chunk limit that reflects dynamic topK: comparisons need up to 8,
         // multi-attribute queries (fee, syllabus, eligibility, etc.) need up to 6, others 4.
         const isCourseDetail = /\b(?:fee|fees|eligibility|curriculum|subjects|duration|syllabus|career|semester|placement|scholarship)\b/i.test(rewrittenQuery);
-        const chunkLimit = isCompare ? 8 : (isCourseDetail ? 6 : 4);
+        const chunkLimit = isExhaustiveFaculty ? 30 : (isCompare ? 8 : (isCourseDetail ? 6 : 4));
 
         // If positive entity matches exist, exclude conflicting chunks with entityScore < 0 (Requirement 2 & 5)
         const positiveEntityMatches = rankedChunks.filter(c => c.rankingSignals && c.rankingSignals.entityScore > 0);
@@ -991,9 +992,10 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
 
         const dynamicBudget = calculateDynamicOutputBudget(rewrittenQuery, recPrimaryIntent || intent);
         const envMax = llmConfig.maxTokens || 512;
+        const targetOutputCeiling = isExhaustiveFaculty ? Math.max(envMax, 900) : envMax;
         const resolvedMaxTokens = (routeChosen === "CONVERSATIONAL" && !isContinuation)
             ? Math.min(160, envMax)
-            : Math.min(envMax, Math.max(350, dynamicBudget?.maxTokens || 380));
+            : Math.min(targetOutputCeiling, Math.max(350, dynamicBudget?.maxTokens || 380));
 
         // STAGE 7: llama.cpp Request Payload
         console.log(`[STAGE 7: llama.cpp Request Payload]`, {

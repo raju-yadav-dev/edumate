@@ -344,12 +344,17 @@ const resolveDynamicTopK = (question, queryPlan) => {
         queryPlan?.documentType === "Fee Structure" ||
         /\b(?:fee|fees|admission|admissions|tuition|eligibility|charges|cost|application\s+fee|semester\s+fee)\b/i.test(q)
     ) {
-        return { topK: 4, rule: "Admission/Fee (4)" };
+        return { topK: 6, rule: "Admission/Fee (6)" };
     }
 
-    // 3. Faculty list (6)
+    // 3. Faculty list & Directory
     if (
-        /\b(?:faculty\s+list|list\s+of\s+faculty|all\s+professors|all\s+teachers|faculty\s+members|department\s+faculty|professors\s+in|teachers\s+in|faculty\s+directory)\b/i.test(q) ||
+        /\b(?:list\s+all|all\s+(?:the\s+)?names|all\s+faculty|all\s+professors|all\s+teachers|all\s+members|entire\s+faculty|complete\s+(?:faculty|list)|faculty\s+directory)\b/i.test(q)
+    ) {
+        return { topK: 30, rule: "Exhaustive faculty directory (30)" };
+    }
+    if (
+        /\b(?:faculty\s+list|list\s+of\s+faculty|faculty\s+members|department\s+faculty|professors\s+in|teachers\s+in)\b/i.test(q) ||
         (queryPlan?.intent === "FACULTY_QUERY" && (queryPlan?.queryType === "List" || /\b(?:list|all|directory|members)\b/i.test(q)))
     ) {
         return { topK: 6, rule: "Faculty list (6)" };
@@ -395,12 +400,14 @@ const computeKeywordScore = (query, chunk, queryPlan) => {
         ? chunk.metadata.keywords.map(k => String(k).toLowerCase())
         : [];
 
+    const isFeeQuery = queryTerms.includes("fee") || queryTerms.includes("fees") || queryPlan?.intent === "FEE_QUERY" || queryPlan?.documentType === "Fee Structure";
     let matchedTerms = 0;
     queryTerms.forEach(term => {
         const matchesContent = content.includes(term) ||
             (term === "hod" && (content.includes("head of department") || heading.includes("head of department"))) ||
             (term === "head" && (content.includes("hod") || heading.includes("hod"))) ||
-            (term === "department" && (content.includes("hod") || heading.includes("hod") || filename.includes("department")));
+            (term === "department" && (content.includes("hod") || heading.includes("hod") || filename.includes("department"))) ||
+            (term === "structure" && isFeeQuery && (content.includes("fees (inr)") || content.includes("total course fee") || content.includes("semesters") || content.includes("tuition") || chunkKeywords.some(k => k.includes("fee"))));
         if (
             matchesContent ||
             heading.includes(term) ||
@@ -422,7 +429,6 @@ const computeKeywordScore = (query, chunk, queryPlan) => {
         }
     }
 
-    const isFeeQuery = queryTerms.includes("fee") || queryTerms.includes("fees") || queryPlan?.intent === "FEE_QUERY" || queryPlan?.documentType === "Fee Structure";
     let feeBonus = 0;
     if (isFeeQuery) {
         const hasFeeSchedule = content.includes("total course fee") || content.includes("fee card") || /\bsemester\s*1\b/i.test(content) || chunkKeywords.some(k => k.includes("fee"));
@@ -463,7 +469,8 @@ const computeMetadataScore = (queryPlan, chunk) => {
             : [String(queryPlan.category).toLowerCase()];
         const isFeeIntent = queryPlan.intent === "FEE_QUERY" || queryPlan.documentType === "Fee Structure";
         const matchesCategory = targetCats.some(tc =>
-            chunkCat === tc || chunkCat.includes(tc) || tc.includes(chunkCat) || chunkCat === "general" || (isFeeIntent && (chunkCat === "fees" || chunkCat === "fee"))
+            chunkCat === tc || chunkCat.includes(tc) || tc.includes(chunkCat) || chunkCat === "general" || (isFeeIntent && (chunkCat === "fees" || chunkCat === "fee")) ||
+            ((chunkCat === "ug" || chunkCat === "pg") && (tc.includes("academic") || tc.includes("admission")))
         );
         if (matchesCategory) {
             score += 0.25;
@@ -486,12 +493,29 @@ const computeMetadataScore = (queryPlan, chunk) => {
     if (queryPlan.program) {
         totalWeights += 0.25;
         const targetProg = queryPlan.program.toLowerCase();
-        const progMatch = chunkProg === targetProg ||
-            chunkProg.includes(targetProg) ||
-            targetProg.includes(chunkProg) ||
-            (metadata.programs && metadata.programs.map(p => String(p).toLowerCase()).includes(targetProg));
-        if (progMatch) {
-            score += 0.25;
+        const fClean = filename.replace(/[^a-z0-9]/g, "");
+        const cleanTarget = targetProg.replace(/[^a-z0-9]/g, "");
+        const isUniversalDoc = filename.includes("fee_structure") || filename.includes("fee structure") || filename.includes("brochure") || filename.includes("general");
+        const knownProgs = ["btech", "bca", "mca", "mba", "bba", "bpharm", "dpharm", "llb", "bsc", "msc", "bed"];
+        const isOtherDedicatedDoc = !isUniversalDoc && cleanTarget && !fClean.includes(cleanTarget) && knownProgs.some(p => p !== cleanTarget && fClean.includes(p));
+
+        if (isOtherDedicatedDoc) {
+            score -= 0.20;
+        } else {
+            const isPrimaryMatch = chunkProg === targetProg || chunkProg.includes(targetProg) || targetProg.includes(chunkProg) || filename.includes(targetProg);
+            const isSpecializedDoc = /\b(?:ai\s*(&|and)?\s*ml|aiml|data\s+science|robotics|cyber)\b/i.test(filename);
+            const isTargetQuerySpecialized = /\b(?:ai|ml|aiml|data\s+science|robotics|cyber)\b/i.test(queryPlan.query || "");
+
+            const progMatch = isPrimaryMatch || (metadata.programs && metadata.programs.map(p => String(p).toLowerCase()).includes(targetProg));
+            if (progMatch) {
+                let progBonus = 0.25;
+                if (!isTargetQuerySpecialized && isSpecializedDoc) {
+                    progBonus -= 0.08;
+                } else if (isPrimaryMatch && !isSpecializedDoc) {
+                    progBonus += 0.05;
+                }
+                score += progBonus;
+            }
         }
     }
 

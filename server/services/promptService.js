@@ -122,6 +122,11 @@ const buildCompactSystemPrompt = ({ activeInstitution, targetLanguage, intent, i
     }
 
     const intentsArray = Array.isArray(intent) ? intent : [intent];
+    const isFacultyIntent = intentsArray.some(i => i === "faculty" || i === "FACULTY_QUERY");
+    if (isFacultyIntent) {
+        lines.push("10. Faculty Directory Formatting: When listing faculty members or their qualifications, present them in a clean markdown table with columns: | Name | Designation | Qualification |. Include all faculty members found in the verified context without omitting anyone.");
+    }
+
     const isLocationIntent = intentsArray.some(i => i === "location" || i === "campus_navigation" || i === "Campus Navigation" || i === "CAMPUS_NAVIGATION");
     if (isLocationIntent) {
         lines.push("8. Campus Navigation and Academic Block Mapping:\n" +

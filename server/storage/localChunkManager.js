@@ -344,7 +344,10 @@ function searchLocalChunks(queryText = "", filters = {}, limit = 30) {
     const stopWords = new Set(["what", "is", "the", "for", "tell", "me", "show", "who", "where", "when", "why", "which", "are", "am", "a", "an", "of", "in", "on", "at", "to", "with", "by", "from", "and", "or", "about", "how", "much", "many", "does", "do", "can"]);
     const rawTokens = cleanQuery.split(/\s+/).filter(Boolean);
     const significantTokens = rawTokens.filter(t => !stopWords.has(t) && t.length > 1);
-    const tokens = significantTokens.length > 0 ? significantTokens : rawTokens;
+    const tokens = (significantTokens.length > 0 ? significantTokens : rawTokens).map(t => {
+        if (t.endsWith("s") && t.length > 3) return t.slice(0, -1);
+        return t;
+    });
 
     if (tokens.length === 0) return results;
     const fullPhrase = significantTokens.join(" ");
@@ -444,18 +447,61 @@ function searchLocalChunks(queryText = "", filters = {}, limit = 30) {
                             tokenMatched = true;
                         }
 
+                        // Match in department name
+                        if (chunkDept && (chunkDept === token || chunkDept.includes(token))) {
+                            score += 3.5;
+                            tokenMatched = true;
+                        }
+
+                        // Match in document title / original filename
+                        if (docOriginalName && docOriginalName.includes(token)) {
+                            score += 3.0;
+                            tokenMatched = true;
+                        }
+
+                        // Match in category
+                        if (chunkCat && (chunkCat === token || chunkCat.includes(token))) {
+                            score += 2.0;
+                            tokenMatched = true;
+                        }
+
                         if (tokenMatched) matchedTerms++;
                     }
 
                     // Metadata alignment bonus
-                    if (filters.program && (chunkProg.includes(String(filters.program).toLowerCase()) || contentLower.includes(String(filters.program).toLowerCase()))) {
+                    if (filters.department) {
+                        const targetDept = String(filters.department).toLowerCase();
+                        if (chunkDept === targetDept || (targetDept === "css" && docOriginalName.includes("computational sciences"))) {
+                            score += 10.0;
+                        }
+                    }
+
+                    // Check if chunk is from a dedicated document of an unrelated program
+                    let isDedicatedOtherDoc = false;
+                    if (filters.program) {
+                        const targetP = String(filters.program).toLowerCase();
+                        const f = docOriginalName.toLowerCase();
+                        const isUniversal = f.includes("fee_structure") || f.includes("fee structure") || f.includes("brochure") || f.includes("general") || f.includes("admission_overview");
+                        if (!isUniversal) {
+                            const cleanTarget = targetP.replace(/[^a-z0-9]/g, "");
+                            const cleanFilename = f.replace(/[^a-z0-9]/g, "");
+                            if (cleanTarget && !cleanFilename.includes(cleanTarget)) {
+                                const knownProgs = ["btech", "bca", "mca", "mba", "bba", "bpharm", "dpharm", "llb", "bsc", "msc", "bed"];
+                                isDedicatedOtherDoc = knownProgs.some(p => p !== cleanTarget && cleanFilename.includes(p));
+                            }
+                        }
+                    }
+
+                    if (isDedicatedOtherDoc) {
+                        score -= 15.0; // Heavily penalize chunks from brochures of unrelated programs
+                    } else if (filters.program && (chunkProg.includes(String(filters.program).toLowerCase()) || docOriginalName.includes(String(filters.program).toLowerCase()))) {
                         score += 3.0;
                     }
                     if (filters.category) {
                         const filterCategories = Array.isArray(filters.category)
                             ? filters.category.map(c => String(c).toLowerCase())
                             : [String(filters.category).toLowerCase()];
-                        if (filterCategories.some(fc => chunkCat === fc || chunkCat.includes(fc) || fc.includes(chunkCat))) {
+                        if (filterCategories.some(fc => chunkCat === fc || chunkCat.includes(fc) || fc.includes(chunkCat) || ((chunkCat === "ug" || chunkCat === "pg") && (fc.includes("academic") || fc.includes("admission"))))) {
                             score += 2.0;
                         }
                     }
@@ -469,11 +515,24 @@ function searchLocalChunks(queryText = "", filters = {}, limit = 30) {
                     // Special fee query alignment: prioritize actual fee cards / fee schedules over generic text
                     const isFeeQuery = tokens.includes("fee") || tokens.includes("fees") || String(filters.documentType || "").toLowerCase().includes("fee");
                     if (isFeeQuery) {
-                        const hasFeeTable = contentLower.includes("total course fee") || contentLower.includes("fee card") || (contentLower.includes("semester 1") && contentLower.includes("semester 2"));
+                        const hasFeeTable = !isDedicatedOtherDoc && (contentLower.includes("total course fee") || contentLower.includes("fee card") || (contentLower.includes("semester 1") && contentLower.includes("semester 2")) || contentLower.includes("fees (inr)"));
                         if (hasFeeTable) {
                             score += 15.0;
-                        } else if (chunkCat === "fees" || chunkKeywords.some(k => k.includes("fee"))) {
+                        } else if (!isDedicatedOtherDoc && (chunkCat === "fees" || chunkKeywords.some(k => k.includes("fee")))) {
                             score += 4.0;
+                        }
+
+                        // When querying for a base program (e.g. "bca"), prioritize standard course documents over specialized variants (e.g. "bca aiml")
+                        if (filters.program && !isDedicatedOtherDoc) {
+                            const targetP = String(filters.program).toLowerCase();
+                            const isSpecializedVariant = /\b(?:ai\s*(&|and)?\s*ml|aiml|data\s+science|robotics|cyber\s+security)\b/i.test(docOriginalName);
+                            const isBaseProgDoc = docOriginalName.includes(targetP) && !isSpecializedVariant;
+                            const isTargetQuerySpecialized = /\b(?:ai|ml|aiml|robotics|data\s+science|cyber)\b/i.test(cleanQuery);
+                            if (!isTargetQuerySpecialized && isSpecializedVariant) {
+                                score -= 4.0;
+                            } else if (isBaseProgDoc) {
+                                score += 6.0;
+                            }
                         }
                     }
 

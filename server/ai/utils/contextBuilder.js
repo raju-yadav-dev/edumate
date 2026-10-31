@@ -172,6 +172,19 @@ const determineAdaptiveBudget = (question, queryPlan) => {
         };
     }
 
+    // 1.5 Exhaustive faculty directory / roster question (1800–3200 tokens)
+    if (
+        /\b(?:list\s+all|all\s+(?:the\s+)?names|all\s+faculty|all\s+professors|all\s+teachers|all\s+members|entire\s+faculty|complete\s+(?:faculty|list)|faculty\s+directory)\b/i.test(q)
+    ) {
+        return {
+            type: "EXHAUSTIVE_DIRECTORY",
+            minTokens: 1800,
+            maxTokens: 3200,
+            targetTokens: 2800,
+            description: "Exhaustive directory (1800–3200 tokens)"
+        };
+    }
+
     // 2. Large informational question (900–1400 tokens)
     if (
         words.length >= 14 ||
@@ -336,8 +349,14 @@ const mergeConsecutiveSectionChunks = (chunks) => {
                 mergedSections.push({
                     documentTitle: docGroup.title,
                     category: meta.category || docGroup.category,
-                    department: meta.department || docGroup.department,
-                    program: meta.program || meta.course || (Array.isArray(meta.programs) ? meta.programs[0] : ""),
+                    department: ((/fee|structure|brochure|prospectus|courses?_list|all_programs|degree_programmes/i.test(docGroup.title || "") || (Array.isArray(meta.departments) && meta.departments.length > 2))
+                        ? ""
+                        : (/bca/i.test(docGroup.title || "") && /commerce/i.test(meta.department || docGroup.department || ""))
+                            ? "Computational Sciences"
+                            : (meta.department || docGroup.department || "")),
+                    program: (/fee|structure|brochure|prospectus|courses?_list|all_programs|degree_programmes/i.test(docGroup.title || "") || (Array.isArray(meta.programs) && meta.programs.length > 2))
+                        ? ""
+                        : (meta.program || meta.course || (Array.isArray(meta.programs) ? meta.programs[0] : "")),
                     parentSection: meta.parentSection || "General",
                     heading: meta.heading || meta.parentHeading || sectionKey,
                     sectionKey,
