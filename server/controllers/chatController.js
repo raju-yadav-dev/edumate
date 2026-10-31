@@ -110,7 +110,8 @@ const askQuestion = asyncHandler(async (req, res) => {
                 });
             };
 
-            const questionText = (req.body.question || req.body.message || "").trim();
+            const rawQuestion = (req.body.question || req.body.message || "").trim();
+            const questionText = rawQuestion.replace(/^\[System:.*?\]\s*/is, "").trim();
             const result = await global.chatLocalStorage.run({
                 signal: controller.signal,
                 onChunk: (chunk) => {
@@ -217,7 +218,8 @@ const askQuestion = asyncHandler(async (req, res) => {
     }
 
     try {
-        const questionText = (req.body.question || req.body.message || "").trim();
+        const rawQuestion = (req.body.question || req.body.message || "").trim();
+        const questionText = rawQuestion.replace(/^\[System:.*?\]\s*/is, "").trim();
         const result = await getChatService().askQuestion({
             user: req.user,
             question: questionText,

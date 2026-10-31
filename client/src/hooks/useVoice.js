@@ -14,6 +14,7 @@ export default function useVoice() {
     const [elapsedSeconds, setElapsedSeconds] = useState(VoiceConversationManager.elapsedSeconds);
     const [activeLang, setActiveLang] = useState(VoiceConversationManager.activeLang);
     const [isMuted, setIsMuted] = useState(VoiceConversationManager.isMuted);
+    const [isContinuousMode, setIsContinuousMode] = useState(VoiceConversationManager.isContinuousMode);
     const [autoSpeak, setAutoSpeakState] = useState(() => SpeechSynthesisService.isAutoSpeakEnabled());
     const [ttsSettings, setTtsSettingsState] = useState(() => SpeechSynthesisService.getSettings());
 
@@ -31,8 +32,9 @@ export default function useVoice() {
         // Subscribe to state modifications in Manager
         const unsubscribeState = VoiceConversationManager.subscribeState((state) => {
             setVoiceState(state);
-            // Also sync active lang when state changes (e.g. auto switch)
+            // Also sync active lang and continuous mode when state changes
             setActiveLang(VoiceConversationManager.activeLang);
+            setIsContinuousMode(VoiceConversationManager.isContinuousMode);
         });
 
         // Subscribe to transcript updates
@@ -127,7 +129,7 @@ export default function useVoice() {
         isMuted,
         autoSpeak,
         ttsSettings,
-        isContinuousMode: VoiceConversationManager.isContinuousMode,
+        isContinuousMode,
         startSingleQuery,
         startContinuousConversation,
         startListening,

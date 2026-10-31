@@ -78,9 +78,9 @@ class VoiceCommandService {
             {
                 id: "open_history",
                 patterns: [
-                    /open chat history/i, /show history/i, /chat history/i, /history/i,
-                    /इतिहास खोलो/i, /चैट इतिहास/i, /इतिहास दिखाओ/i,
-                    /ইতিহাস খোলো/i, /চ্যাট ইতিহাস/i, /ইতিহাস দেখাও/i
+                    /^(?:(?:please\s+)?(?:open|show)\s+(?:chat\s+)?history|(?:open\s+)?chat\s+history)$/i,
+                    /^(?:(?:चैट\s+)?इतिहास\s+(?:खोलो|दिखाओ)|इतिहास\s+खोलो)$/i,
+                    /^(?:(?:চ্যাট\s+)?ইতিহাস\s+(?:খুলুন|খোলো|দেখান|দেখাও)|ইতিহাস\s+খোলো)$/i
                 ],
                 action: (manager, handlers) => {
                     if (handlers && handlers.openSidebar) {
@@ -98,9 +98,9 @@ class VoiceCommandService {
             {
                 id: "open_dashboard",
                 patterns: [
-                    /open dashboard/i, /show dashboard/i, /dashboard/i, /go to dashboard/i,
-                    /डैशबोर्ड खोलो/i, /डैशबोर्ड दिखाओ/i, /डैशबोर्ड/i,
-                    /ড্যাশবোর্ড খোলো/i, /ড্যাশবোর্ড দেখাও/i, /ড্যাশবোর্ড/i
+                    /^(?:(?:please\s+)?(?:open|show|go\s+to)\s+dashboard|dashboard)$/i,
+                    /^(?:डैशबोर्ड\s+(?:खोलो|दिखाओ|जाओ)|डैशबोर्ड)$/i,
+                    /^(?:ড্যাশবোর্ড\s+(?:খুলুন|খোলো|দেখান|দেখাও|যাও)|ড্যাশবোর্ড)$/i
                 ],
                 action: (manager, handlers) => {
                     if (handlers && handlers.navigate) {
@@ -118,9 +118,9 @@ class VoiceCommandService {
             {
                 id: "open_profile",
                 patterns: [
-                    /open profile/i, /go to profile/i, /my profile/i, /profile/i,
-                    /प्रोफ़ाइल खोलो/i, /मेरी प्रोफाइल/i, /प्रोफाइल/i,
-                    /প্রোফাইল খোলো/i, /আমার প্রোফাইল/i, /প্রোফাইল/i
+                    /^(?:(?:please\s+)?(?:open|show|go\s+to)\s+(?:my\s+)?profile|my\s+profile)$/i,
+                    /^(?:(?:मेरी\s+)?प्रोफ़ाइल\s+(?:खोलो|दिखाओ)|मेरी\s+प्रोफाइल)$/i,
+                    /^(?:(?:আমার\s+)?প্রোফাইল\s+(?:খুলুন|খোলো|দেখান|দেখাও)|আমার\s+প্রোফাইল)$/i
                 ],
                 action: (manager, handlers) => {
                     if (handlers && handlers.navigate) {
@@ -138,9 +138,9 @@ class VoiceCommandService {
             {
                 id: "nav_library",
                 patterns: [
-                    /navigate to library/i, /go to library/i, /library direction/i, /library map/i, /library route/i,
-                    /लाइब्रेरी का रास्ता/i, /पुस्तकालय का रास्ता/i, /लाइब्रेरी ले चलो/i,
-                    /লাইব্রেরি দেখাও/i, /গ্রন্থাগার/i, /লাইব্রেরির পথ/i
+                    /^(?:(?:please\s+)?(?:navigate|go|take\s+me)\s+to\s+(?:the\s+)?library|library\s+(?:directions?|map|route)|where\s+is\s+the\s+library)$/i,
+                    /^(?:(?:लाइब्रेरी|पुस्तकालय)\s+(?:का\s+रास्ता|ले\s+चलो|कहाँ\s+है)|(?:लाइब्रेरी|पुस्तकालय)\s+दिखाओ)$/i,
+                    /^(?:(?:লাইব্রেরি|গ্রন্থাগার)(?:র)?\s+(?:পথ|দেখাও|কোথায়)|লাইব্রেরি\s+নিয়ে\s+চলো)$/i
                 ],
                 action: (manager, handlers) => {
                     const speechText = {
@@ -169,9 +169,9 @@ class VoiceCommandService {
             {
                 id: "nav_admission",
                 patterns: [
-                    /navigate to admission/i, /go to admission/i, /admission direction/i, /admission office/i,
-                    /प्रवेश कार्यालय/i, /एडमिशन ऑफिस का रास्ता/i, /एडमिशन ऑफिस/i,
-                    /ভর্তি অফিস/i, /ভর্তি অফিসের পথ/i
+                    /^(?:(?:please\s+)?(?:navigate|go|take\s+me)\s+to\s+(?:the\s+)?admission(?:\s+office)?|admission\s+(?:office\s+)?(?:directions?|map|route)|where\s+is\s+(?:the\s+)?admission\s+office)$/i,
+                    /^(?:प्रवेश\s+कार्यालय|एडमिशन\s+ऑफिस)\s+(?:का\s+रास्ता|ले\s+चलो|कहाँ\s+है|दिखाओ)$/i,
+                    /^(?:ভর্তি\s+অফিস(?:ের)?\s+(?:পথ|দেখাও|কোথায়|নিয়ে\s+চলো))$/i
                 ],
                 action: (manager, handlers) => {
                     const speechText = {
@@ -200,9 +200,9 @@ class VoiceCommandService {
             {
                 id: "nav_cafeteria",
                 patterns: [
-                    /find nearest cafeteria/i, /nearest cafeteria/i, /go to cafeteria/i, /canteen/i, /cafeteria direction/i,
-                    /कैफेटेरिया/i, /कैंटीन का रास्ता/i, /कैंटीन कहाँ है/i, /कैंटीन/i,
-                    /ক্যাফেটেরিয়া/i, /ক্যান্টিন কোথায়/i, /ক্যান্টিন/i
+                    /^(?:(?:please\s+)?(?:find(?:\s+nearest)?|go\s+to|navigate\s+to|take\s+me\s+to)\s+(?:the\s+)?(?:cafeteria|canteen)|(?:cafeteria|canteen)\s+(?:directions?|map|route)|where\s+is\s+(?:the\s+)?(?:canteen|cafeteria))$/i,
+                    /^(?:(?:कैफेटेरिया|कैंटीन)\s+(?:का\s+रास्ता|कहाँ\s+है|ले\s+चलो|दिखाओ))$/i,
+                    /^(?:(?:ক্যাফেটেরিয়া|ক্যান্টিন)(?:র)?\s+(?:কোথায়|পথ|দেখাও|নিয়ে\s+চলো))$/i
                 ],
                 action: (manager, handlers) => {
                     const speechText = {
@@ -231,9 +231,9 @@ class VoiceCommandService {
             {
                 id: "repeat_answer",
                 patterns: [
-                    /repeat last answer/i, /repeat answer/i, /repeat/i, /say again/i,
-                    /उत्तर दोहराएं/i, /पिछला उत्तर/i, /दोहराओ/i,
-                    /আবার বলো/i, /পুনরাবৃত্তি করুন/i
+                    /^(?:(?:please\s+)?repeat(?:\s+last)?(?:\s+answer)?|say\s+again|can\s+you\s+repeat)$/i,
+                    /^(?:उत्तर\s+दोहराएं|पिछला\s+उत्तर\s+दोहराओ|फिर\s+से\s+बोलो|दोहराओ)$/i,
+                    /^(?:আবার\s+বলো|পুনরাবৃত্তি\s+করুন)$/i
                 ],
                 action: (manager) => {
                     setTimeout(() => {
@@ -246,9 +246,9 @@ class VoiceCommandService {
             {
                 id: "speak_slower",
                 patterns: [
-                    /speak slower/i, /talk slower/i, /slower/i,
-                    /धीरे बोलो/i, /धीरे बात करो/i,
-                    /আস্তে বলো/i, /ধীর গতিতে/i
+                    /^(?:(?:please\s+)?(?:speak|talk)\s+slower|slower\s+please)$/i,
+                    /^(?:धीरे\s+बोलो|धीरे\s+बात\s+करो)$/i,
+                    /^(?:আস্তে\s+বলো|ধীর\s+গতিতে\s+বলো)$/i
                 ],
                 action: (manager) => {
                     const currentRate = SpeechSynthesisService.rate;
@@ -265,9 +265,9 @@ class VoiceCommandService {
             {
                 id: "speak_faster",
                 patterns: [
-                    /speak faster/i, /talk faster/i, /faster/i,
-                    /तेज़ बोलो/i, /जल्दी बोलो/i,
-                    /দ্রুত বলো/i, /তাড়াতাড়ি/i
+                    /^(?:(?:please\s+)?(?:speak|talk)\s+faster|faster\s+please)$/i,
+                    /^(?:तेज़\s+बोलो|जल्दी\s+बोलो)$/i,
+                    /^(?:দ্রুত\s+বলো|তাড়াতাড়ি\s+বলো)$/i
                 ],
                 action: (manager) => {
                     const currentRate = SpeechSynthesisService.rate;
@@ -284,9 +284,9 @@ class VoiceCommandService {
             {
                 id: "mute_voice",
                 patterns: [
-                    /mute voice/i, /mute speaker/i, /mute/i, /stop talking/i,
-                    /म्यूट करें/i, /आवाज़ बंद/i, /म्यूट/i,
-                    /নিঃশব্দ করুন/i, /মিউট/i
+                    /^(?:(?:please\s+)?mute(?:\s+(?:voice|speaker|audio))?|stop\s+talking|be\s+quiet)$/i,
+                    /^(?:म्यूट\s+करें|आवाज़\s+बंद(?: करो)?)$/i,
+                    /^(?:নিঃশব্দ\s+করুন|মিউট\s+করো)$/i
                 ],
                 action: (manager) => {
                     setTimeout(() => {
@@ -299,9 +299,9 @@ class VoiceCommandService {
             {
                 id: "unmute_voice",
                 patterns: [
-                    /unmute voice/i, /unmute speaker/i, /unmute/i,
-                    /अनम्यूट करें/i, /आवाज़ चालू/i, /अनम्यूट/i,
-                    /সশব্দ করুন/i, /আনমিউট/i
+                    /^(?:(?:please\s+)?unmute(?:\s+(?:voice|speaker|audio))?)$/i,
+                    /^(?:अनम्यूट\s+करें|आवाज़\s+चालू(?: करो)?)$/i,
+                    /^(?:সশব্দ\s+করুন|আনমিউট\s+করো)$/i
                 ],
                 action: (manager) => {
                     setTimeout(() => {
@@ -314,9 +314,9 @@ class VoiceCommandService {
             {
                 id: "switch_hindi",
                 patterns: [
-                    /switch to hindi/i, /speak in hindi/i, /use hindi/i,
-                    /हिंदी में बात करो/i, /हिंदी करो/i, /हिन्दी/i,
-                    /হিন্দি করো/i
+                    /^(?:(?:please\s+)?(?:switch\s+to|speak\s+in|use)\s+hindi)$/i,
+                    /^(?:हिंदी\s+में\s+बात\s+करो|हिंदी\s+करो)$/i,
+                    /^(?:হিন্দি\s+করো|হিন্দিতে\s+বলো)$/i
                 ],
                 action: (manager) => {
                     manager.activeLang = "hi";
@@ -327,9 +327,9 @@ class VoiceCommandService {
             {
                 id: "switch_english",
                 patterns: [
-                    /switch to english/i, /speak in english/i, /use english/i,
-                    /अंग्रेजी में बात करो/i, /अंग्रेजी करो/i, /इंग्लिश/i,
-                    /ইংরেজি করো/i
+                    /^(?:(?:please\s+)?(?:switch\s+to|speak\s+in|use)\s+english)$/i,
+                    /^(?:अंग्रेजी\s+में\s+बात\s+करो|अंग्रेजी\s+करो|इंग्लिश\s+करो)$/i,
+                    /^(?:ইংরেজি\s+করো|ইংরেজিতে\s+বলো)$/i
                 ],
                 action: (manager) => {
                     manager.activeLang = "en";
@@ -340,9 +340,9 @@ class VoiceCommandService {
             {
                 id: "switch_bengali",
                 patterns: [
-                    /switch to bengali/i, /speak in bengali/i, /use bengali/i, /switch to bangla/i,
-                    /बंगाली में बात करो/i, /बंगाली करो/i, /बांग्ला/i,
-                    /বাংলা করো/i
+                    /^(?:(?:please\s+)?(?:switch\s+to|speak\s+in|use)\s+(?:bengali|bangla))$/i,
+                    /^(?:बंगाली\s+में\s+बात\s+करो|बंगाली\s+करो|बांग्ला\s+करो)$/i,
+                    /^(?:বাংলা\s+করো|বাংলায়\s+বলো)$/i
                 ],
                 action: (manager) => {
                     manager.activeLang = "bn";
@@ -353,9 +353,9 @@ class VoiceCommandService {
             {
                 id: "goodbye",
                 patterns: [
-                    /stop listening/i, /goodbye/i, /exit/i, /cancel/i,
-                    /सुनना बंद करो/i, /बाय/i, /अलविदा/i,
-                    /শোনা বন্ধ করো/i, /বিদায়/i
+                    /^(?:stop\s+listening|goodbye|exit|cancel|bye\s+bye|bye)$/i,
+                    /^(?:सुनना\s+बंद\s+करो|बाय|अलविदा)$/i,
+                    /^(?:শোনা\s+বন্ধ\s+করো|বিদায়)$/i
                 ],
                 action: (manager) => {
                     const farewell = {

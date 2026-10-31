@@ -289,11 +289,7 @@ class VoiceConversationManager {
                 const recLatency = Date.now() - recognitionStartTime;
                 this.currentTranscript = text || this.currentTranscript;
                 this.setState(VOICE_STATES.PROCESSING_SPEECH);
-                setTimeout(() => {
-                    if (this.state === VOICE_STATES.PROCESSING_SPEECH || this.state === "waiting_for_silence") {
-                        this.handleFinalInput(recLatency);
-                    }
-                }, 150);
+                this.handleFinalInput(recLatency);
             },
             onError: (err) => {
                 console.error("Recognition error in single query:", err);
@@ -304,7 +300,7 @@ class VoiceConversationManager {
                 this.setState(VOICE_STATES.IDLE);
             },
             onEnd: () => {
-                if (this.state === VOICE_STATES.LISTENING || this.state === "user_speaking" || this.state === VOICE_STATES.PROCESSING_SPEECH) {
+                if (this.state === VOICE_STATES.LISTENING || this.state === "user_speaking") {
                     this.setState(VOICE_STATES.IDLE);
                 }
             }
@@ -452,11 +448,7 @@ class VoiceConversationManager {
                 const recLatency = Date.now() - recStartTime;
                 this.currentTranscript = text || this.currentTranscript;
                 this.setState(VOICE_STATES.PROCESSING_SPEECH);
-                setTimeout(() => {
-                    if (this.state === VOICE_STATES.PROCESSING_SPEECH || this.state === "waiting_for_silence") {
-                        this.handleFinalInput(recLatency);
-                    }
-                }, 150);
+                this.handleFinalInput(recLatency);
             },
             onError: (err) => {
                 console.error("Recognition error in continuous cycle:", err);
@@ -475,7 +467,7 @@ class VoiceConversationManager {
                 }
             },
             onEnd: () => {
-                if (this.isContinuousMode && (this.state === VOICE_STATES.LISTENING || this.state === "user_speaking" || this.state === VOICE_STATES.PROCESSING_SPEECH)) {
+                if (this.isContinuousMode && (this.state === VOICE_STATES.LISTENING || this.state === "user_speaking")) {
                     setTimeout(() => {
                         this.startListeningCycle();
                     }, 200);
@@ -552,11 +544,8 @@ class VoiceConversationManager {
         this.activeAbortController = new AbortController();
 
         try {
-            const systemPrefix = LanguageDetectionService.getSystemPrompt(this.activeLang);
-            const questionPayload = systemPrefix ? `${systemPrefix}\n\n${question}` : question;
-
             // Execute streaming RAG pipeline
-            const responseText = await this.sendMessageCallback(questionPayload, null, null, null, null, question);
+            const responseText = await this.sendMessageCallback(question, null, null, null, null, question);
             
             if (this.activeAbortController?.signal?.aborted || this.state === VOICE_STATES.INTERRUPTED || this.state === VOICE_STATES.IDLE || this.state === VOICE_STATES.LISTENING) {
                 console.log("[VoiceManager] Response ignored because conversation was interrupted or cancelled.");

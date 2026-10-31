@@ -412,6 +412,7 @@ function searchLocalChunks(queryText = "", filters = {}, limit = 30) {
 
                     let score = 0;
                     let matchedTerms = 0;
+                    let docTitleMatches = 0;
 
                     // Exact phrase match
                     if (fullPhrase.length > 4 && (contentLower.includes(fullPhrase) || chunkHeading.includes(fullPhrase))) {
@@ -454,9 +455,10 @@ function searchLocalChunks(queryText = "", filters = {}, limit = 30) {
                             tokenMatched = true;
                         }
 
-                        // Match in document title / original filename
-                        if (docOriginalName && docOriginalName.includes(token)) {
+                        // Match in document title / original filename (capped to prevent long filenames from dominating unrelated chunks)
+                        if (docOriginalName && docOriginalName.includes(token) && docTitleMatches < 2) {
                             score += 3.0;
+                            docTitleMatches++;
                             tokenMatched = true;
                         }
 
@@ -519,7 +521,7 @@ function searchLocalChunks(queryText = "", filters = {}, limit = 30) {
                     if (isFeeQuery) {
                         const hasFeeTable = !isDedicatedOtherDoc && (contentLower.includes("total course fee") || contentLower.includes("fee card") || (contentLower.includes("semester 1") && contentLower.includes("semester 2")) || contentLower.includes("fees (inr)"));
                         if (hasFeeTable) {
-                            score += 15.0;
+                            score += 30.0;
                         } else if (!isDedicatedOtherDoc && (chunkCat === "fees" || chunkKeywords.some(k => k.includes("fee")))) {
                             score += 4.0;
                         }

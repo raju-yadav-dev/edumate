@@ -10,7 +10,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@ricky0123/vad-web": "^0.0.30",
     "highlight.js": "^11.11.1",
     "katex": "^0.17.0",
     "leaflet": "^1.9.4",
