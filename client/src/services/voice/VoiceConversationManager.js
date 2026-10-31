@@ -31,6 +31,7 @@ export const VOICE_STATES = {
     ERROR: "error",
     PAUSED: "paused",
     PERMISSION_DENIED: "permission_denied",
+    NOT_SUPPORTED: "not_supported",
     INTERRUPTED: "interrupted"
 };
 
@@ -261,6 +262,12 @@ class VoiceConversationManager {
             return;
         }
 
+        if (!SpeechRecognitionService.isSupported()) {
+            console.warn("[VoiceManager] Speech recognition is not supported in this browser.");
+            this.setState(VOICE_STATES.NOT_SUPPORTED);
+            return;
+        }
+
         this.sendMessageCallback = sendMessageFn;
         this.isContinuousMode = false;
         this.elapsedSeconds = 0;
@@ -287,9 +294,10 @@ class VoiceConversationManager {
             },
             onSilence: (text) => {
                 const recLatency = Date.now() - recognitionStartTime;
-                this.currentTranscript = text || this.currentTranscript;
+                const finalSpeech = text || this.currentTranscript;
+                this.currentTranscript = "";
                 this.setState(VOICE_STATES.PROCESSING_SPEECH);
-                this.handleFinalInput(recLatency);
+                this.handleFinalInput(finalSpeech, recLatency);
             },
             onError: (err) => {
                 console.error("Recognition error in single query:", err);
@@ -334,6 +342,12 @@ class VoiceConversationManager {
     async startContinuousConversation(sendMessageFn) {
         if (!sendMessageFn) {
             console.error("No sendMessage function provided to VoiceConversationManager.");
+            return;
+        }
+
+        if (!SpeechRecognitionService.isSupported()) {
+            console.warn("[VoiceManager] Speech recognition is not supported in this browser.");
+            this.setState(VOICE_STATES.NOT_SUPPORTED);
             return;
         }
 
@@ -418,6 +432,11 @@ class VoiceConversationManager {
 
     startListeningCycle() {
         if (!this.isContinuousMode) return;
+        if (!SpeechRecognitionService.isSupported()) {
+            this.isContinuousMode = false;
+            this.setState(VOICE_STATES.NOT_SUPPORTED);
+            return;
+        }
         const busyStates = [
             VOICE_STATES.PROCESSING_SPEECH,
             VOICE_STATES.SEARCHING_KNOWLEDGE_BASE,
@@ -426,10 +445,6 @@ class VoiceConversationManager {
             VOICE_STATES.SPEAKING
         ];
         if (busyStates.includes(this.state)) return;
-
-        if (SpeechRecognitionService.isListening) {
-            return;
-        }
 
         this.setState(VOICE_STATES.LISTENING);
         const recLang = LanguageDetectionService.getSpeechRecognitionLang(this.activeLang);
@@ -446,22 +461,36 @@ class VoiceConversationManager {
             },
             onSilence: (text) => {
                 const recLatency = Date.now() - recStartTime;
-                this.currentTranscript = text || this.currentTranscript;
+                const finalSpeech = text || this.currentTranscript;
+                this.currentTranscript = "";
                 this.setState(VOICE_STATES.PROCESSING_SPEECH);
-                this.handleFinalInput(recLatency);
+                this.handleFinalInput(finalSpeech, recLatency);
             },
             onError: (err) => {
                 console.error("Recognition error in continuous cycle:", err);
+                if (err === "not_supported") {
+                    this.isContinuousMode = false;
+                    this.setState(VOICE_STATES.NOT_SUPPORTED);
+                    return;
+                }
                 if (err === "not-allowed" || err === "service-not-allowed" || err === "permission-denied") {
                     this.notifyPermissionError();
                     return;
                 }
                 if (err === "no-speech") {
-                    if (this.isContinuousMode) {
-                        setTimeout(() => this.startListeningCycle(), 200);
+                    if (this.isContinuousMode && this.state === VOICE_STATES.LISTENING) {
+                        setTimeout(() => {
+                            if (this.isContinuousMode && this.state === VOICE_STATES.LISTENING) {
+                                this.startListeningCycle();
+                            }
+                        }, 300);
                     }
-                } else if (this.isContinuousMode) {
-                    setTimeout(() => this.startListeningCycle(), 800);
+                } else if (this.isContinuousMode && (this.state === VOICE_STATES.LISTENING || this.state === "user_speaking")) {
+                    setTimeout(() => {
+                        if (this.isContinuousMode && (this.state === VOICE_STATES.LISTENING || this.state === "user_speaking")) {
+                            this.startListeningCycle();
+                        }
+                    }, 800);
                 } else {
                     this.setState(VOICE_STATES.IDLE);
                 }
@@ -469,15 +498,18 @@ class VoiceConversationManager {
             onEnd: () => {
                 if (this.isContinuousMode && (this.state === VOICE_STATES.LISTENING || this.state === "user_speaking")) {
                     setTimeout(() => {
-                        this.startListeningCycle();
-                    }, 200);
+                        if (this.isContinuousMode && (this.state === VOICE_STATES.LISTENING || this.state === "user_speaking")) {
+                            this.startListeningCycle();
+                        }
+                    }, 300);
                 }
             }
         });
     }
 
-    handleFinalInput(recLatency = null) {
-        const transcript = this.currentTranscript || "";
+    handleFinalInput(text = null, recLatency = null) {
+        SpeechRecognitionService.stop();
+        const transcript = text || this.currentTranscript || "";
         this.currentTranscript = "";
         this.submitUserInput(transcript, recLatency);
     }

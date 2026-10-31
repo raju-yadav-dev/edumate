@@ -240,6 +240,7 @@ export default function VoiceUIComponent({
         error: "Error",
         paused: "Paused",
         permission_denied: "Mic Permission Required",
+        not_supported: "Browser Not Supported",
         interrupted: "Interrupted",
         ended: "Goodbye!"
     };
@@ -259,6 +260,7 @@ export default function VoiceUIComponent({
         error: "state-permission_denied",
         paused: "state-paused",
         permission_denied: "state-permission_denied",
+        not_supported: "state-permission_denied",
         interrupted: "state-ended",
         ended: "state-ended"
     };
@@ -423,6 +425,13 @@ export default function VoiceUIComponent({
                                     Try Again
                                 </button>
                             )}
+                        </div>
+                    )}
+
+                    {voiceState === "not_supported" && (
+                        <div className="voice-permission-banner">
+                            <FiAlertCircle className="icon text-amber-400 text-xl" />
+                            <p>Speech recognition is not supported in this browser (Zen / Firefox). Please open EduMate in <strong>Google Chrome</strong>, <strong>Microsoft Edge</strong>, or <strong>Brave</strong> to talk with EduMate.</p>
                         </div>
                     )}
 

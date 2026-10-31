@@ -19,7 +19,7 @@ class SpeechRecognitionService {
         this.recognition = null;
         this.isListening = false;
         this.silenceTimer = null;
-        this.silenceTimeoutMs = 1800; // Target < 2s for fast voice response
+        this.silenceTimeoutMs = 1400; // Fast conversational turn-taking
         this.onResultCallback = null;
         this.onSilenceCallback = null;
         this.onErrorCallback = null;
@@ -28,6 +28,7 @@ class SpeechRecognitionService {
         this.hasSpeechDetected = false;
         this.hasFinalResult = false;
         this.sessionTranscript = "";
+        this.latestTranscript = "";
         this.mode = "normal";
         this.interruptionRestartTimer = null;
         this.onInterruptionCandidateCallback = null;
@@ -99,6 +100,7 @@ class SpeechRecognitionService {
             this.hasSpeechDetected = false;
             this.hasFinalResult = false;
             this.sessionTranscript = "";
+            this.latestTranscript = "";
         };
 
         recognition.onresult = (event) => {
@@ -124,6 +126,7 @@ class SpeechRecognitionService {
 
             // Preserve technical terms (e.g. CSS dept, BCA fees)
             currentTranscript = LanguageDetectionService.preserveTechnicalEntities(currentTranscript);
+            this.latestTranscript = currentTranscript;
 
             if (this.mode === "interruption") {
                 this.clearSilenceTimer();
@@ -157,14 +160,19 @@ class SpeechRecognitionService {
             this.isListening = false;
             this.clearSilenceTimer();
 
-            const transcript = String(this.sessionTranscript || "").trim();
-            if (this.hasSpeechDetected && transcript.length >= 1 && this.onSilenceCallback) {
-                const preserved = LanguageDetectionService.preserveTechnicalEntities(transcript);
-                this.onSilenceCallback(preserved);
-            }
+            const rawText = this.sessionTranscript || this.latestTranscript || "";
+            const transcript = String(rawText).trim();
+            const callback = this.onSilenceCallback;
             this.hasSpeechDetected = false;
             this.hasFinalResult = false;
             this.sessionTranscript = "";
+            this.latestTranscript = "";
+            this.onSilenceCallback = null;
+
+            if (transcript.length >= 1 && callback) {
+                const preserved = LanguageDetectionService.preserveTechnicalEntities(transcript);
+                callback(preserved);
+            }
 
             if (this.onEndCallback) {
                 this.onEndCallback();
@@ -338,9 +346,20 @@ class SpeechRecognitionService {
     resetSilenceTimer() {
         this.clearSilenceTimer();
         this.silenceTimer = setTimeout(() => {
-            if (this.isListening && this.hasSpeechDetected) {
+            if (this.hasSpeechDetected) {
                 console.log("[SpeechRecognitionService] Silence detected, submitting speech.");
+                const rawText = this.sessionTranscript || this.latestTranscript || "";
+                const transcript = String(rawText).trim();
+                const callback = this.onSilenceCallback;
+                this.hasSpeechDetected = false;
+                this.sessionTranscript = "";
+                this.latestTranscript = "";
+                this.onSilenceCallback = null;
                 this.stop();
+                if (transcript.length >= 1 && callback) {
+                    const preserved = LanguageDetectionService.preserveTechnicalEntities(transcript);
+                    callback(preserved);
+                }
             }
         }, this.silenceTimeoutMs);
     }
