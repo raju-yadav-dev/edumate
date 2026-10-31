@@ -186,7 +186,16 @@ const rerank = async (query, chunks, queryPlan = null) => {
         const querySpecs = SPECIALIZATIONS.filter(s => s.pattern.test(lowerQuery)).map(s => s.id);
         const chunkSpecs = SPECIALIZATIONS.filter(s => s.pattern.test(fullChunkLower)).map(s => s.id);
 
-        if (chunkSpecs.length > 0) {
+        const isMasterCourseDoc = /courses?_list|all_programs|degree_programmes|prospectus/i.test(filename) ||
+            /all\s+courses|all\s+programmes|undergraduate\s+\(ug\)\s+programmes/i.test(content.slice(0, 300));
+        const isCatalogQuery = /\b(?:what\s+courses?|list\s+of\s+courses?|all\s+courses?|courses?\s+(?:offered|available|list)|what\s+programs?|list\s+of\s+programs?|all\s+programs?|programs?\s+(?:offered|available|list)|what\s+degrees?|degrees?\s+offered|what\s+can\s+i\s+study)\b/i.test(lowerQuery);
+
+        if (isCatalogQuery || isMasterCourseDoc) {
+            // Master course catalog or general course inquiry: do not penalize specializations
+            if (isCatalogQuery && isMasterCourseDoc) {
+                entityScore += 0.35;
+            }
+        } else if (chunkSpecs.length > 0) {
             if (querySpecs.length === 0) {
                 // User asked for base/general programme without specialization: strictly penalize unrequested specializations
                 entityScore -= 0.45;

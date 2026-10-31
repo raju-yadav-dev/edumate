@@ -687,6 +687,19 @@ const formatAnswer = ({
         .replace(/\n{3,}/g, "\n\n")
         .trim();
 
+    // 8. Strip conversational intro filler (e.g. "Here is a detailed explanation of...:")
+    structuredAnswer = structuredAnswer
+        .replace(/^(?:Here\s+(?:is|are)\s+(?:a\s+detailed\s+explanation|the\s+complete|the\s+step-by-step|the\s+admission|an\s+overview|the\s+details|the\s+information|a\s+summary|the\s+steps)[^:\n]*:\s*\n*)/i, "")
+        .trim();
+
+    // 9. Clean dangling truncated fragment at the very end if response cut off mid-bullet
+    const answerLines = structuredAnswer.split("\n");
+    const lastLine = answerLines[answerLines.length - 1]?.trim() || "";
+    if (/^[-*•]\s+/i.test(lastLine) && (/[-–—]$/.test(lastLine) || (!/[.!?:]$/.test(lastLine) && lastLine.length < 25))) {
+        answerLines.pop();
+        structuredAnswer = answerLines.join("\n").trim();
+    }
+
     return {
         answer: structuredAnswer,
         confidence,

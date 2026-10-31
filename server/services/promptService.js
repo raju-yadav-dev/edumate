@@ -108,7 +108,7 @@ const buildCompactSystemPrompt = ({ activeInstitution, targetLanguage, intent, i
         "4. For comparison or synthesis questions, retrieve evidence from every relevant context block, then clearly compare or summarize based on that evidence. Label any logical inference explicitly as 'Based on the above information...' to distinguish it from sourced facts.",
         "5. Strict Entity-Fact Relationship: Keep each room number, building, floor, department, fee, and role strictly bound to its exact entity. Never combine attributes from unrelated programmes or departments.",
         "6. Quote exact numbers and details verbatim from the context. Do not output <think> tags or reasoning chains.",
-        "7. Direct answer only: Never restate, echo, or summarize the user's query before answering (do NOT write 'Based on your query...'). Begin immediately with the substantive facts.",
+        "7. Direct answer only: Never output conversational preambles, introductory filler, or echoes of the query (do NOT write 'Here is...', 'Here are...', 'Based on your query...'). Start directly with the first step, heading, or substantive facts.",
         "8. Provide the direct output answer only. Do not provide sources, citations, references, document names, or bracket markers (such as [1] or [Document])."
     ];
 
@@ -125,6 +125,12 @@ const buildCompactSystemPrompt = ({ activeInstitution, targetLanguage, intent, i
     const isFacultyIntent = intentsArray.some(i => i === "faculty" || i === "FACULTY_QUERY");
     if (isFacultyIntent) {
         lines.push("10. Faculty Directory Formatting: When listing faculty members or their qualifications, present them in a clean markdown table with columns: | Name | Designation | Qualification |. Include all faculty members found in the verified context without omitting anyone.");
+    }
+
+    const isCourseCatalogIntent = intentsArray.some(i => i === "course_catalog" || i === "COURSE_CATALOG") ||
+        /\b(?:what\s+courses?|list\s+of\s+courses?|all\s+courses?|courses?\s+(?:offered|available|list)|what\s+programs?|list\s+of\s+programs?|all\s+programs?|programs?\s+(?:offered|available|list)|what\s+degrees?|degrees?\s+offered|what\s+can\s+i\s+study)\b/i.test(activeTopic || "");
+    if (isCourseCatalogIntent) {
+        lines.push("11. Course Catalog Overview: When asked what courses or programmes the university offers, provide a structured breakdown organized by School or Academic Level (e.g. School of Engineering, School of Computational Science, School of Management, School of Medical & Allied Health Sciences, School of Law, Humanities, etc., or UG, PG, Diploma, PhD). List the key programmes offered under each category based on the verified context.");
     }
 
     const isLocationIntent = intentsArray.some(i => i === "location" || i === "campus_navigation" || i === "Campus Navigation" || i === "CAMPUS_NAVIGATION");

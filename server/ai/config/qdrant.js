@@ -37,8 +37,10 @@ const qdrantVectorName = process.env.QDRANT_VECTOR_NAME || "default";
 // Circuit Breaker State
 let qdrantOfflineUntil = 0;
 const OFFLINE_COOLDOWN_MS = 8000;
+const isRemoteUrl = !qdrantUrl.includes("127.0.0.1") && !qdrantUrl.includes("localhost");
+const DEFAULT_PROBE_TIMEOUT = Number(process.env.QDRANT_PROBE_TIMEOUT_MS) || (isRemoteUrl ? 2000 : 600);
 
-const isQdrantAvailable = async (probeTimeoutMs = 600) => {
+const isQdrantAvailable = async (probeTimeoutMs = DEFAULT_PROBE_TIMEOUT) => {
     const now = Date.now();
     if (now < qdrantOfflineUntil) {
         return false;

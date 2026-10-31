@@ -61,7 +61,7 @@ const normalizeAliases = (text) => {
 
 const isCampusNavigationQuery = (question) => {
     const q = String(question || "").toLowerCase();
-    
+
     const locationKeywords = [
         "where is", "where is the", "where can i find", "where to find", "how to find",
         "location of", "which building", "which floor", "room number", "room no", "room",
@@ -71,7 +71,7 @@ const isCampusNavigationQuery = (question) => {
         "directions", "direction", "navigation", "campus navigation", "way to", "path to",
         "way between", "path between"
     ];
-    
+
     const campusTargets = [
         "hod", "head of department", "head of the department", "dean", "principal", "registrar",
         "counselor", "professor", "teacher", "staff", "faculty", "office", "cell", "lab", "canteen",
@@ -111,7 +111,7 @@ const isCampusNavigationQuery = (question) => {
 
 const normalizeLocationQuery = (query) => {
     let q = String(query || "").toLowerCase();
-    
+
     // Normalize Academic Block / Blocks to Building / Bhavan names
     if (/\bacademic\s+blocks?\b/i.test(q) || /\broutes?\s+between\b/i.test(q) || /\broute\s+to\b/i.test(q)) {
         q = q.replace(/\bacademic\s+block\s*([0-9]+)\b/gi, (match, n) => {
@@ -122,24 +122,24 @@ const normalizeLocationQuery = (query) => {
             q += " Building I Satyajit Building II Vidyasagar Building III Prafulla Building IV Jagdish Building V Ravindra Building VI Rammohan Building VII Aurobindo Building VIII Satyendra Building IX Vivekananda campus navigation";
         }
     }
-    
+
     // Normalize B.Tech / BTECT / BTech
     if (/\b(?:b\.?tech|b\.?tect|b\s*tech|b\s*tect)\b/i.test(q)) {
         q += " btech b.tech btect b.tect b tech b tect";
     }
-    
+
     // Normalize Maths / Mathematics
     if (/\bmaths?\b/i.test(q)) {
         q = q.replace(/\bmaths?\b/gi, "mathematics");
         q += " mathematics maths math";
     }
-    
+
     // Normalize CS / Computer Science / CSE
     if (/\bcs\b/i.test(q)) {
         q = q.replace(/\bcs\b/gi, "computer science");
         q += " cs computer science cse c.s";
     }
-    
+
     // Normalize BCA
     if (/\bbca\b/i.test(q)) {
         q += " bca b.c.a";
@@ -193,7 +193,7 @@ const buildRecommendationSearchQuery = (profile, institution = "Brainware Univer
     } else if (profile.subject) {
         parts.push(`and ${profile.subject}`);
     }
-    
+
     if (parts.length > 0) {
         query += ` suitable for a ${parts.join(" ")}`;
     }
@@ -222,8 +222,8 @@ const selectDiverseChunks = (rankedChunks, maxLimit = 6) => {
         const count = docCount.get(docId) || 0;
 
         // Allow up to half the maxLimit from any single document (minimum 3).
-        // For exhaustive directory queries (maxLimit >= 20), allow all chunks from the matching document.
-        const perDocCap = maxLimit >= 20 ? maxLimit : Math.max(3, Math.floor(maxLimit / 2));
+        // For exhaustive directory or course catalog queries (maxLimit >= 15), allow all chunks from the matching document.
+        const perDocCap = maxLimit >= 15 ? maxLimit : Math.max(3, Math.floor(maxLimit / 2));
         if (count >= perDocCap && selected.length >= Math.ceil(maxLimit / 2)) {
             continue;
         }
@@ -371,7 +371,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
             const cachedTarget = String(cachedResponse.metadata?.targetEntity || "").toLowerCase();
 
             // Check if any query token matches the cached answer or metadata
-            const tokenMatch = queryTarget.entityTokens.some(t => 
+            const tokenMatch = queryTarget.entityTokens.some(t =>
                 cachedAnswerLower.includes(t) || (cachedTarget && cachedTarget.includes(t))
             );
 
@@ -564,7 +564,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
     if (ambiguousLocationPatterns[cleanQ] !== undefined) {
         const answer = ambiguousLocationPatterns[cleanQ];
         console.log(`\n[INTENT]\nambiguous_location\n`);
-        
+
         const responseTimeMs = Date.now() - startedAt;
         const chat = await conversationService.saveMessageTurn({
             user: activeUser,
@@ -648,7 +648,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
                 }
             }
         }
-        
+
         const level = normalizedQuestion.includes("pg") || normalizedQuestion.includes("postgraduate") ? "postgraduate" : "undergraduate";
         if (previousIntent === "Admissions") {
             followUpQuery = `${level} admission documents required eligibility criteria`;
@@ -715,7 +715,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
 
         const { INTENTS } = require("../../constants/intents");
         recPrimaryIntent = Array.isArray(intent) ? intent[0] : intent;
-        
+
         if (recPrimaryIntent === INTENTS.COURSE_RECOMMENDATION) {
             studentProfile = await entityExtractionService.extractStudentProfile(normalizedQuestion, historyText);
             const recQuery = buildRecommendationSearchQuery(studentProfile, activeUser.institution || process.env.PRIMARY_UNIVERSITY_NAME || "Brainware University");
@@ -742,6 +742,8 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
     const modeChosen = chatQueryPlan.mode || (chatQueryPlan.skipRag ? "LLM_ONLY" : "RAG_LLM");
     const routeChosen = chatQueryPlan.route || (modeChosen === "LLM_ONLY" ? "GENERAL_KNOWLEDGE" : (chatQueryPlan.isMixed ? "MIXED" : "UNIVERSITY_SPECIFIC"));
     const skipRag = Boolean(chatQueryPlan.skipRag);
+    const isExhaustiveFaculty = /\b(?:list\s+all|all\s+(?:the\s+)?names|all\s+faculty|all\s+professors|all\s+teachers|all\s+members|entire\s+faculty|complete\s+(?:faculty|list)|faculty\s+directory)\b/i.test(rewrittenQuery);
+    const isCourseCatalog = /\b(?:what\s+courses?|list\s+of\s+courses?|all\s+courses?|courses?\s+(?:offered|available|list)|what\s+programs?|list\s+of\s+programs?|all\s+programs?|programs?\s+(?:offered|available|list)|what\s+degrees?|degrees?\s+offered|what\s+can\s+i\s+study)\b/i.test(rewrittenQuery);
 
     console.log(`[STAGE 2: Query Classification]`, {
         mode: modeChosen,
@@ -776,10 +778,10 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
     let universitySiteResults = [];
     let webResults = [];
     let activeQuestionType = (modeChosen === "LLM_ONLY" || routeChosen === "GENERAL_KNOWLEDGE")
-        ? QUESTION_TYPES.GENERAL_KNOWLEDGE 
+        ? QUESTION_TYPES.GENERAL_KNOWLEDGE
         : (routeChosen === "CONVERSATIONAL" ? "conversational" : (chatQueryPlan.isMixed ? "mixed" : QUESTION_TYPES.UNIVERSITY_SPECIFIC));
     let sourceLabel = (modeChosen === "LLM_ONLY" || routeChosen === "GENERAL_KNOWLEDGE")
-        ? "🤖 EduMate AI (General Knowledge)" 
+        ? "🤖 EduMate AI (General Knowledge)"
         : (routeChosen === "CONVERSATIONAL" ? "💬 EduMate Assistant" : (chatQueryPlan.isMixed ? "📚 University Knowledge + General AI" : SOURCE_LABELS.UNIVERSITY));
     let formatted;
     let provider = "llama.cpp";
@@ -816,8 +818,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
         });
 
         try {
-            const isExhaustiveFaculty = /\b(?:list\s+all|all\s+(?:the\s+)?names|all\s+faculty|all\s+professors|all\s+teachers|all\s+members|entire\s+faculty|complete\s+(?:faculty|list)|faculty\s+directory)\b/i.test(rewrittenQuery);
-            const searchLimit = isExhaustiveFaculty ? 30 : 6;
+            const searchLimit = (isExhaustiveFaculty || isCourseCatalog) ? 30 : 6;
             const SearchManager = require("../../knowledge/SearchManager");
             retrievedChunksRaw = await Promise.race([
                 SearchManager.searchLocalPdfs(rewrittenQuery, activeUser, searchLimit),
@@ -857,7 +858,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
         // Use a wider chunk limit that reflects dynamic topK: comparisons need up to 8,
         // multi-attribute queries (fee, syllabus, eligibility, etc.) need up to 6, others 4.
         const isCourseDetail = /\b(?:fee|fees|eligibility|curriculum|subjects|duration|syllabus|career|semester|placement|scholarship)\b/i.test(rewrittenQuery);
-        const chunkLimit = isExhaustiveFaculty ? 30 : (isCompare ? 8 : (isCourseDetail ? 6 : 4));
+        const chunkLimit = (isExhaustiveFaculty || isCourseCatalog) ? 20 : (isCompare ? 8 : (isCourseDetail ? 6 : 4));
 
         // If positive entity matches exist, exclude conflicting chunks with entityScore < 0 (Requirement 2 & 5)
         const positiveEntityMatches = rankedChunks.filter(c => c.rankingSignals && c.rankingSignals.entityScore > 0);
@@ -872,9 +873,9 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
         tracker.recordTimer("retrieval", retrievalTime + rerankTime);
 
         if (onStatus) {
-            onStatus(`Found ${combinedDocChunks.length} relevant document${combinedDocChunks.length === 1 ? "" : "s"}.`, "retrieval_completed", { 
-                progress: 50, 
-                count: combinedDocChunks.length 
+            onStatus(`Found ${combinedDocChunks.length} relevant document${combinedDocChunks.length === 1 ? "" : "s"}.`, "retrieval_completed", {
+                progress: 50,
+                count: combinedDocChunks.length
             });
         }
     } else {
@@ -916,7 +917,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
                 const pLower = String(chunk.metadata?.program || "").toLowerCase();
                 const catLower = String(chunk.metadata?.category || "").toLowerCase();
                 return cLower.includes(token) || hLower.includes(token) || fLower.includes(token) ||
-                       dLower.includes(token) || pLower.includes(token) || catLower.includes(token);
+                    dLower.includes(token) || pLower.includes(token) || catLower.includes(token);
             })
         );
     }
@@ -936,11 +937,11 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
     let ttftMsRecorded = 0;
     const shouldGenerateLlmResponse = (
         modeChosen === "LLM_ONLY" ||
-        routeChosen === "GENERAL_KNOWLEDGE" || 
-        routeChosen === "CONVERSATIONAL" || 
+        routeChosen === "GENERAL_KNOWLEDGE" ||
+        routeChosen === "CONVERSATIONAL" ||
         modeChosen === "LLM_TOOLS" ||
         routeChosen === "LLM_TOOLS" ||
-        routeChosen === "MIXED" || 
+        routeChosen === "MIXED" ||
         (modeChosen === "RAG_LLM") ||
         (routeChosen === "UNIVERSITY_SPECIFIC") ||
         (modeChosen === "RAG_ONLY")
@@ -992,10 +993,11 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
 
         const dynamicBudget = calculateDynamicOutputBudget(rewrittenQuery, recPrimaryIntent || intent);
         const envMax = llmConfig.maxTokens || 512;
-        const targetOutputCeiling = isExhaustiveFaculty ? Math.max(envMax, 900) : envMax;
+        const isMultiStepProcedural = dynamicBudget?.tier === "PROCEDURAL" || /\b(?:step\s*by\s*step|step-by-step|all\s+steps|how\s+to\s+apply|procedure|process|workflow|complete\s+(?:procedure|process|workflow|guide|admission|steps)|detailed\s+(?:procedure|process|steps|admission)|documents?\s+required)\b/i.test(rewrittenQuery);
+        const targetOutputCeiling = isExhaustiveFaculty ? Math.max(envMax, 900) : (isCourseCatalog ? Math.max(envMax, 850) : (isMultiStepProcedural ? Math.max(envMax, 750) : Math.max(envMax, 600)));
         const resolvedMaxTokens = (routeChosen === "CONVERSATIONAL" && !isContinuation)
             ? Math.min(160, envMax)
-            : Math.min(targetOutputCeiling, Math.max(350, dynamicBudget?.maxTokens || 380));
+            : Math.min(targetOutputCeiling, Math.max(400, dynamicBudget?.maxTokens || 400));
 
         // STAGE 7: llama.cpp Request Payload
         console.log(`[STAGE 7: llama.cpp Request Payload]`, {
@@ -1195,12 +1197,12 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
             if (BUCKET && supabase?.storage) {
                 const docs = await Document.find({ _id: { $in: docIds } }).lean();
                 const paths = docs.map(d => d.storagePath).filter(Boolean);
-                
+
                 if (paths.length > 0) {
                     const { data, error } = await supabase.storage
                         .from(BUCKET)
                         .createSignedUrls(paths, Number(process.env.SUPABASE_SIGNED_URL_TTL_SECONDS) || 315360000);
-                    
+
                     if (!error && data) {
                         const pathSignedUrlMap = {};
                         data.forEach(item => {
@@ -1302,7 +1304,7 @@ const askQuestion = async ({ user, question, conversationId, onChunk, onStatus, 
                 const routingMode = queryMode || "targeted";
                 const cacheDocType = detectedType || "all";
                 const cacheDept = detectedDept || "all";
-                
+
                 // For follow-ups, include conversation context or resolved entity to prevent cross-chat poisoning
                 const storeContextHash = hasOwnEntity ? "standalone" : `ctx_${String(activeConversationId || conversationId || "conv").slice(-8)}`;
 
@@ -1649,8 +1651,8 @@ const searchChats = async ({ user, query }) => {
             { "messages.content": regex }
         ]
     })
-    .select("title summary status pinned createdAt updatedAt")
-    .sort({ pinned: -1, updatedAt: -1 });
+        .select("title summary status pinned createdAt updatedAt")
+        .sort({ pinned: -1, updatedAt: -1 });
 };
 
 const extractGroundedEntityFacts = (chunk) => {

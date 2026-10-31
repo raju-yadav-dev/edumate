@@ -353,6 +353,13 @@ const resolveDynamicTopK = (question, queryPlan) => {
     ) {
         return { topK: 30, rule: "Exhaustive faculty directory (30)" };
     }
+    // Course catalog / all courses overview
+    if (
+        /\b(?:what\s+courses?|list\s+of\s+courses?|all\s+courses?|courses?\s+(?:offered|available|list)|what\s+programs?|list\s+of\s+programs?|all\s+programs?|programs?\s+(?:offered|available|list)|what\s+degrees?|degrees?\s+offered|what\s+can\s+i\s+study)\b/i.test(q) ||
+        (queryPlan?.intent === "COURSE_CATALOG" || (queryPlan?.intent === "SYLLABUS_QUERY" && /\b(?:all|what)\b/i.test(q)))
+    ) {
+        return { topK: 15, rule: "Course catalog / all courses (15)" };
+    }
     if (
         /\b(?:faculty\s+list|list\s+of\s+faculty|faculty\s+members|department\s+faculty|professors\s+in|teachers\s+in)\b/i.test(q) ||
         (queryPlan?.intent === "FACULTY_QUERY" && (queryPlan?.queryType === "List" || /\b(?:list|all|directory|members)\b/i.test(q)))
@@ -661,7 +668,7 @@ const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL
 
     // 2. Metadata-First Qdrant Vector Search (Guarded by fast availability check)
     const { isQdrantAvailable } = require("../config/qdrant");
-    const qdrantIsUp = await isQdrantAvailable(400);
+    const qdrantIsUp = await isQdrantAvailable();
 
     if (qdrantIsUp) {
         try {
@@ -805,6 +812,18 @@ const retrieve = async ({ question, user, limit = AI_CONSTANTS.DEFAULT_RETRIEVAL
             const hasFeeSchedule = contentLower.includes("total course fee") || contentLower.includes("fee card") || /\bsemester\s*1\b/i.test(contentLower) || chunkCat === "fees";
             if (hasFeeSchedule) {
                 baseScore += 0.15;
+            }
+        }
+
+        // Course catalog bonus: prioritize master catalog documents for catalog queries
+        const isCatalogQuery = /\b(?:what\s+courses?|list\s+of\s+courses?|all\s+courses?|courses?\s+(?:offered|available|list)|what\s+programs?|list\s+of\s+programs?|all\s+programs?|programs?\s+(?:offered|available|list)|what\s+degrees?|degrees?\s+offered|what\s+can\s+i\s+study)\b/i.test(question);
+        if (isCatalogQuery) {
+            const filename = String(chunk.metadata?.originalName || chunk.metadata?.filename || "").toLowerCase();
+            const contentLower = String(chunk.content || "").toLowerCase();
+            const isCatalogDoc = /courses?_list|all_programs|degree_programmes|prospectus/i.test(filename) ||
+                contentLower.includes("all courses / programmes") || contentLower.includes("undergraduate (ug) programmes");
+            if (isCatalogDoc) {
+                baseScore += 0.20;
             }
         }
 

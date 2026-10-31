@@ -193,29 +193,54 @@ const calculateDynamicOutputBudget = (question = "", intent = "") => {
         };
     }
 
-    // Large questions / comparisons
+    // Multi-step procedural, workflow, or detailed process questions (e.g. "complete admission procedure step by step", "how to apply", "all steps")
+    const isMultiStepProcedural = (
+        /\b(?:step\s*by\s*step|step-by-step|all\s+steps|how\s+to\s+apply|procedure|process|workflow|steps\s+for|complete\s+(?:procedure|process|workflow|guide|admission|steps)|detailed\s+(?:procedure|process|steps|admission)|documents?\s+required)\b/i.test(q)
+    );
+    if (isMultiStepProcedural) {
+        return {
+            maxTokens: Math.min(750, Math.max(650, numberFromEnv("LLM_MAX_TOKENS", 650))),
+            tier: "PROCEDURAL",
+            targetLatencySec: "5-7s"
+        };
+    }
+
+    // Course catalog / all university courses & programmes overview
+    const isCourseCatalog = (
+        /\b(?:what\s+courses?|list\s+of\s+courses?|all\s+courses?|courses?\s+(?:offered|available|list)|what\s+programs?|list\s+of\s+programs?|all\s+programs?|programs?\s+(?:offered|available|list)|what\s+degrees?|degrees?\s+offered|what\s+can\s+i\s+study)\b/i.test(q) ||
+        intent === "COURSE_CATALOG"
+    );
+    if (isCourseCatalog) {
+        return {
+            maxTokens: Math.min(850, Math.max(700, numberFromEnv("LLM_MAX_TOKENS", 700))),
+            tier: "COURSE_CATALOG",
+            targetLatencySec: "6-8s"
+        };
+    }
+
+    // Large questions / comparisons / comprehensive overviews
     if (
         words.length >= 14 ||
-        /\b(?:compare|difference|complete\s+guide|full\s+overview|everything\s+about|all\s+details|comprehensive|all\s+faculty|entire\s+syllabus)\b/i.test(q) ||
+        /\b(?:compare|difference|complete\s+guide|full\s+overview|everything\s+about|all\s+details|comprehensive|all\s+faculty|entire\s+syllabus|career\s+options|what\s+should\s+i\s+choose)\b/i.test(q) ||
         intent === "COMPARISON"
     ) {
         return {
-            maxTokens: Math.min(500, numberFromEnv("LLM_MAX_TOKENS", 500)),
+            maxTokens: Math.min(650, Math.max(550, numberFromEnv("LLM_MAX_TOKENS", 550))),
             tier: "LARGE",
             targetLatencySec: "5-8s"
         };
     }
 
-    // Medium questions (fees, admission, eligibility, etc.)
+    // Medium questions (fees, single-attribute admission, eligibility, faculty profile, etc.)
     if (
         words.length >= 7 ||
-        /\b(?:fees?|admission|eligibility|faculty|hostel|placement|scholarship|procedure|requirements?)\b/i.test(q) ||
+        /\b(?:fees?|admission|eligibility|faculty|hostel|placement|scholarship|requirements?)\b/i.test(q) ||
         intent === "FEE_QUERY" || intent === "ADMISSION_QUERY"
     ) {
         return {
-            maxTokens: Math.min(280, numberFromEnv("LLM_MAX_TOKENS", 280)),
+            maxTokens: Math.min(380, Math.max(320, numberFromEnv("LLM_MAX_TOKENS", 320))),
             tier: "MEDIUM",
-            targetLatencySec: "3-5s"
+            targetLatencySec: "3-4s"
         };
     }
 

@@ -185,6 +185,19 @@ const determineAdaptiveBudget = (question, queryPlan) => {
         };
     }
 
+    // 1.6 Course catalog / all university courses & programmes (1800–3200 tokens)
+    if (
+        /\b(?:what\s+courses?|list\s+of\s+courses?|all\s+courses?|courses?\s+(?:offered|available|list)|what\s+programs?|list\s+of\s+programs?|all\s+programs?|programs?\s+(?:offered|available|list)|what\s+degrees?|degrees?\s+offered|what\s+can\s+i\s+study)\b/i.test(q)
+    ) {
+        return {
+            type: "COURSE_CATALOG",
+            minTokens: 1800,
+            maxTokens: 3200,
+            targetTokens: 2800,
+            description: "Course catalog / all courses (1800–3200 tokens)"
+        };
+    }
+
     // 2. Large informational question (900–1400 tokens)
     if (
         words.length >= 14 ||
@@ -201,7 +214,7 @@ const determineAdaptiveBudget = (question, queryPlan) => {
         };
     }
 
-    // 3. Medium question (400–650 tokens)
+    // 3. Medium / Fee / Admission question (350–950 tokens)
     if (
         words.length >= 7 ||
         queryPlan?.intent === "FEE_QUERY" ||
@@ -215,9 +228,9 @@ const determineAdaptiveBudget = (question, queryPlan) => {
         return {
             type: "MEDIUM",
             minTokens: 350,
-            maxTokens: 650,
-            targetTokens: 500,
-            description: "Medium question (350–650 tokens)"
+            maxTokens: 950,
+            targetTokens: 650,
+            description: "Medium question (350–950 tokens)"
         };
     }
 
@@ -439,6 +452,10 @@ const buildSmartContext = (retrievedChunks, { question = "", queryPlan = null, m
         const blockTokens = block.tokens || countTokens(block.text);
 
         if (accumulatedTokens + blockTokens > tokenCeiling) {
+            if (selectedBlocks.length === 0) {
+                selectedBlocks.push(block.text);
+                accumulatedTokens += blockTokens;
+            }
             // Hard budget ceiling — stop collecting
             break;
         }

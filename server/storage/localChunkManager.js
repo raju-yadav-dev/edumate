@@ -341,7 +341,7 @@ function searchLocalChunks(queryText = "", filters = {}, limit = 30) {
     if (!queryText || typeof queryText !== "string") return results;
 
     const cleanQuery = queryText.toLowerCase().replace(/[^a-z0-9\s]/g, " ").trim();
-    const stopWords = new Set(["what", "is", "the", "for", "tell", "me", "show", "who", "where", "when", "why", "which", "are", "am", "a", "an", "of", "in", "on", "at", "to", "with", "by", "from", "and", "or", "about", "how", "much", "many", "does", "do", "can"]);
+    const stopWords = new Set(["what", "is", "the", "for", "tell", "me", "show", "who", "where", "when", "why", "which", "are", "am", "a", "an", "of", "in", "on", "at", "to", "with", "by", "from", "and", "or", "about", "how", "much", "many", "does", "do", "can", "this", "these", "those", "here", "there"]);
     const rawTokens = cleanQuery.split(/\s+/).filter(Boolean);
     const significantTokens = rawTokens.filter(t => !stopWords.has(t) && t.length > 1);
     const tokens = (significantTokens.length > 0 ? significantTokens : rawTokens).map(t => {
@@ -351,6 +351,7 @@ function searchLocalChunks(queryText = "", filters = {}, limit = 30) {
 
     if (tokens.length === 0) return results;
     const fullPhrase = significantTokens.join(" ");
+    const isCourseCatalogQuery = /\b(?:what\s+courses?|list\s+of\s+courses?|all\s+courses?|courses?\s+(?:offered|available|list)|what\s+programs?|list\s+of\s+programs?|all\s+programs?|programs?\s+(?:offered|available|list)|what\s+degrees?|degrees?\s+offered|what\s+can\s+i\s+study)\b/i.test(cleanQuery);
 
     try {
         const files = fs.readdirSync(CHUNK_STORAGE_DIR);
@@ -481,13 +482,14 @@ function searchLocalChunks(queryText = "", filters = {}, limit = 30) {
                     if (filters.program) {
                         const targetP = String(filters.program).toLowerCase();
                         const f = docOriginalName.toLowerCase();
-                        const isUniversal = f.includes("fee_structure") || f.includes("fee structure") || f.includes("brochure") || f.includes("general") || f.includes("admission_overview");
+                        const isUniversal = f.includes("fee_structure") || f.includes("fee structure") || f.includes("brochure") || f.includes("general") || f.includes("admission_overview") || f.includes("courses_list");
                         if (!isUniversal) {
                             const cleanTarget = targetP.replace(/[^a-z0-9]/g, "");
                             const cleanFilename = f.replace(/[^a-z0-9]/g, "");
-                            if (cleanTarget && !cleanFilename.includes(cleanTarget)) {
-                                const knownProgs = ["btech", "bca", "mca", "mba", "bba", "bpharm", "dpharm", "llb", "bsc", "msc", "bed"];
-                                isDedicatedOtherDoc = knownProgs.some(p => p !== cleanTarget && cleanFilename.includes(p));
+                            const cleanChunkProg = chunkProg.replace(/[^a-z0-9]/g, "");
+                            if (cleanTarget) {
+                                const knownProgs = ["btech", "bca", "mca", "mba", "bba", "bpharm", "dpharm", "llb", "bsc", "msc", "bed", "nursing"];
+                                isDedicatedOtherDoc = knownProgs.some(p => p !== cleanTarget && (cleanFilename.includes(p) || (cleanChunkProg === p && !contentLower.includes(cleanTarget))));
                             }
                         }
                     }
@@ -542,6 +544,15 @@ function searchLocalChunks(queryText = "", filters = {}, limit = 30) {
                     if (isCampusQuery && isCampusDoc) {
                         score += 8.0;
                     }
+
+                    // Course catalog & university programmes alignment bonus
+                    const isCatalogDoc = /courses?_list|all_programs|degree_programmes|prospectus/i.test(docOriginalName) ||
+                        contentLower.includes("all courses / programmes") || contentLower.includes("undergraduate (ug) programmes");
+                    if (isCourseCatalogQuery && isCatalogDoc) {
+                        score += 18.0;
+                        matchedTerms += 2;
+                    }
+
                     if (docOriginalName && tokens.some(t => docOriginalName.includes(t))) {
                         score += 4.0;
                     }
